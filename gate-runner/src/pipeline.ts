@@ -7,7 +7,7 @@
 // RAN failed (or the sandbox is not green), so short-circuited gates still fail closed.
 import type { GateContext } from "./gates/gate.ts";
 import type { GateResult, SandboxAttestation, GateReport } from "../../shared/gates.ts";
-import type { ConsumerManifest } from "../../shared/consumer.ts";
+import { consumerHostLabel, type ConsumerManifest } from "../../shared/consumer.ts";
 import type { Stage } from "../../shared/enums.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
 import { checkStructure } from "./gates/structure.gate.ts";
@@ -100,6 +100,7 @@ export async function runGates(
         chartPath: meta.chartPath,
         targetName: meta.targetName,
         envs: manifest.envs,
+        hostLabel: consumerHostLabel(manifest),
         clusterValueFiles: meta.clusterValueFiles,
         files,
         kubeVersion: cfg.kubeVersion,

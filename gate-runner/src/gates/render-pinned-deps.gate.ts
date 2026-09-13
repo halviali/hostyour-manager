@@ -7,9 +7,11 @@
 // RFC1918 dep fails the build), then kubeconform against the target k8s minor. The lock check is pure
 // (unit-tested); the helm/kubeconform calls need the tools and are integration-tested on the live clusters.
 import { writeFile } from "node:fs/promises";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import type { GateResult, ResolvedDependency } from "../../../shared/gates.ts";
-import { splitAtChartValues, type ClusterValueFile } from "../../../shared/cluster-values.ts";
+import type { Stage } from "../../../shared/enums.ts";
+import { CLUSTER_MAP_DIR, splitAtChartValues, type ClusterValueFile } from "../../../shared/cluster-values.ts";
+import { consumerUnitHost, stageApex } from "../../../shared/unit-host.ts";
 import type { RenderedDoc } from "./gate.ts";
 import { fail, pass } from "./result.ts";
 import { run, ExecError } from "../exec.ts";
@@ -103,7 +105,10 @@ export interface RenderInput {
   workspace: string;
   chartPath: string;
   targetName: string;
-  envs: readonly string[]; // manifest.envs — render every declared env
+  envs: readonly Stage[]; // manifest.envs — render every declared env
+  /** The unit's public host label (shared/consumer.ts consumerHostLabel) — the one input, beside the
+   *  env and the map's unitApex, of the host the ApplicationSet delivers as `unitHost`. */
+  hostLabel: string;
   /** The target cluster's values chain, VERBATIM and in layering order (shared/cluster-values.ts). */
   clusterValueFiles: readonly ClusterValueFile[];
   files: ReadonlyMap<string, string>;
@@ -125,9 +130,47 @@ export function stagedClusterValuePath(workspace: string, index: number, chainPa
   return `${workspace}/.gate-cluster-values-${index}-${chainPath.replaceAll("/", "-")}`;
 }
 
+/** Where the values the ApplicationSet delivers for one env are staged. */
+export function stagedDeliveredValuePath(workspace: string, env: Stage): string {
+  return `${workspace}/.gate-delivered-values-${env}.yaml`;
+}
+
+/** `global.unitApex` out of the cluster's own map in the chain, or null when no map in the chain
+ *  carries it. The map is the only chain file under clusters/active/, and the platform requires the
+ *  key of every map (clusters/argocd/templates/apps.yaml), so null is a broken chain, not a choice. */
+export function unitApexOf(chain: readonly ClusterValueFile[]): string | null {
+  for (const file of chain) {
+    if (!file.path.startsWith(`${CLUSTER_MAP_DIR}/`)) continue;
+    let parsed: unknown;
+    try {
+      parsed = parse(file.content);
+    } catch {
+      return null;
+    }
+    const apex = asObject(asObject(parsed).global).unitApex;
+    if (typeof apex === "string" && apex !== "") return apex;
+  }
+  return null;
+}
+
+/** THE VALUES THE APPLICATIONSET DELIVERS, as the file they ride the render in. The consumers
+ *  ApplicationSet (hostyour-cloud clusters/argocd/files/consumers-appset.yaml) hands every unit two
+ *  values no file carries: `unitHost`, the unit's public host, and `global.stageApex`, the zone it
+ *  stands under — both composed from the registration's host label, the unit's stage and the
+ *  installation's unitApex. Every chart requires them since simetrixch/hostyour-cloud#208, so a
+ *  render without them fails on the first Ingress, and a render with them composed HERE by any
+ *  other rule than the platform's would approve a host the deploy never serves. The composition is
+ *  therefore the one in shared/unit-host.ts, the same the DNS step and the activation use, and it
+ *  reaches helm as a FILE layered last, where the ApplicationSet's valuesObject sits. */
+export function deliveredValues(hostLabel: string, env: Stage, unitApex: string): string {
+  return stringify({ unitHost: consumerUnitHost(hostLabel, env, unitApex), global: { stageApex: stageApex(unitApex, env) } });
+}
+
 /** The `helm template` argv for one env. Values come from FILES only, never `--set`, and they layer
  *  in the order the ApplicationSet lists them: the platform's files, then the chart's own two, then
- *  the cluster's own map, which wins over everything. Nothing the Manager computed enters the render.
+ *  the cluster's own map, then the values the ApplicationSet itself delivers (deliveredValues), which
+ *  win over everything. Nothing the Manager computed enters the render: the last file is composed
+ *  here, from the manifest's label and the map's unitApex, by the platform's own host law.
  *
  *  THE CHART'S FILES SIT IN THE MIDDLE and that position is the whole point. Layering the chain
  *  entirely after them would let the platform's defaults beat a chart value the deploy lets the
@@ -137,8 +180,9 @@ export function stagedClusterValuePath(workspace: string, index: number, chainPa
 export function renderArgs(
   targetName: string,
   chartDir: string,
-  env: string,
+  env: Stage,
   staged: { beforeChart: readonly string[]; afterChart: readonly string[] },
+  delivered: string,
 ): string[] {
   return [
     "template",
@@ -152,6 +196,8 @@ export function renderArgs(
     "-f",
     `${chartDir}/values-${env}.yaml`,
     ...staged.afterChart.flatMap((path) => ["-f", path]),
+    "-f",
+    delivered,
   ];
 }
 
@@ -213,6 +259,18 @@ export async function runRender(input: RenderInput): Promise<RenderOutcome> {
   const split = splitAtChartValues(stagedChain);
   const stagedSplit = { beforeChart: split.beforeChart.map((e) => e.staged), afterChart: split.afterChart.map((e) => e.staged) };
 
+  const unitApex = unitApexOf(input.clusterValueFiles);
+  if (unitApex === null) {
+    return {
+      result: g3Fail(
+        `no cluster map in the values chain (${input.clusterValueFiles.map((f) => f.path).join(", ") || "none supplied"}) carries global.unitApex — the platform requires it of every map, and without it the unit host the ApplicationSet delivers cannot be composed`,
+        "no global.unitApex in the chain",
+      ),
+      rendered: [],
+      dependencies: lock.dependencies,
+    };
+  }
+
   if (lock.dependencies.length > 0) {
     try {
       await run("helm", ["dependency", "build", chartDir], { cwd: input.workspace, timeoutMs: input.depBuildMs, maxBytes: budgetBytes, signal: input.signal });
@@ -224,7 +282,13 @@ export async function runRender(input: RenderInput): Promise<RenderOutcome> {
 
   const rendered: RenderedDoc[] = [];
   for (const env of input.envs) {
-    const args = renderArgs(input.targetName, chartDir, env, stagedSplit);
+    const delivered = stagedDeliveredValuePath(input.workspace, env);
+    try {
+      await writeFile(delivered, deliveredValues(input.hostLabel, env, unitApex), "utf8");
+    } catch (e) {
+      return { result: g3Fail(`could not stage the delivered values for env "${env}": ${String(e)}`, `staging delivered values failed for env ${env}`), rendered: [], dependencies: lock.dependencies };
+    }
+    const args = renderArgs(input.targetName, chartDir, env, stagedSplit, delivered);
     let stream: string;
     try {
       stream = (await run("helm", args, { cwd: input.workspace, timeoutMs: input.renderMs, maxBytes: budgetBytes, signal: input.signal })).stdout;
@@ -272,7 +336,7 @@ export async function runRender(input: RenderInput): Promise<RenderOutcome> {
       expected: EXPECTED,
       found:
         `rendered ${rendered.length} document(s) across ${input.envs.length} env(s) with ${lock.dependencies.length} pinned dependency(ies) ` +
-        `over the cluster values chain ${input.clusterValueFiles.map((f) => f.path).join(" -> ")}; no <no value>; kubeconform clean.`,
+        `over the cluster values chain ${input.clusterValueFiles.map((f) => f.path).join(" -> ")} and the delivered unitHost ${input.hostLabel}.<stage apex of ${unitApex}>; no <no value>; kubeconform clean.`,
     }),
     rendered,
     dependencies: lock.dependencies,
