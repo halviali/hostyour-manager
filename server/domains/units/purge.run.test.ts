@@ -107,7 +107,7 @@ async function runAll(prt: PurgePorts, logs: string[], creds?: CredentialStore):
   for (const step of makePurgeDef(prt).steps(PARAMS)) await step.run(ctx(step.name, logs, creds));
 }
 
-const STEP_ORDER = ["attest-target", "remove-registration", "watch-removal", "delete-repo-credential", "delete-smtp-ops-grant", "delete-namespace", "remove-webhook", "remove-dns", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-purge"];
+const STEP_ORDER = ["attest-target", "mark-removing", "watch-removal", "remove-registration", "delete-repo-credential", "delete-smtp-ops-grant", "delete-namespace", "remove-webhook", "remove-dns", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-purge"];
 
 describe("purge run definition", () => {
   it("plans with cluster targetKind, the ordered steps, and git-branch + master-kube locks — with NO app row", async () => {

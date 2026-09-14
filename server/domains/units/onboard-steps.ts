@@ -29,8 +29,65 @@ import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onb
 // failed compensation and an absent object the same "ok": the abort reported "cleanup complete" while
 // the registration, the AppProject and the grants all still stood.
 
-/** The offboard inverse of write-registration, run only on an explicit abort-with-cleanup. Read-first:
- *  an absent registration is the normal case for a run that died before its commit, or a re-abort. */
+/** The first of the three registration cleanups, run only on an explicit abort-with-cleanup: mark the
+ *  registration `removing`, which is what makes the consumers ApplicationSet drop the generated
+ *  Application — while the AppProject and the admission policy, generated off the same file, still
+ *  stand for its deletion to run against (hostyour-cloud#213). Read-first: an absent registration is
+ *  the normal case for a run that died before its commit, or a re-abort past the removal; a
+ *  registration already marked is a re-abort that died between this commit and its `ok`. */
+export function markRemovingCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
+  return {
+    name: "mark-removing",
+    title: "Take the generated Application down",
+    run: async (ctx) => {
+      const current = await ports.registrations.readRegistration(p.stage, p.consumerName);
+      if (current === null) {
+        ctx.log("meta", `no registration for ${p.consumerName} at ${p.stage} — already absent, nothing to take down`);
+        return;
+      }
+      if (current.entry.removing) {
+        ctx.log("meta", `registration for ${p.consumerName} at ${p.stage} already marked removing — skipping (re-abort)`);
+        return;
+      }
+      const { commit } = await ports.registrations.setRemoving(p.stage, p.consumerName, ctx.runId);
+      ctx.log("meta", `registration for ${p.consumerName} (${p.stage}) marked removing (${commit}) — the ArgoCD on ${p.domain} will now prune the generated Application; its AppProject and admission policy stay until it is gone`);
+    },
+  };
+}
+
+/** The compensation between the mark above and the registration removal below: wait for the master
+ *  ArgoCD to actually prune the generated Application, while its AppProject still stands. Removing the
+ *  file over a standing Application prunes the project it needs for its own deletion, and ArgoCD then
+ *  refuses every operation on it — the Application keeps its deletionTimestamp for good. FAIL-LOUD,
+ *  like the tenant abort and for its reason: an abort deletes no namespace, so there is no
+ *  cluster-side backstop — a fan-in that will not prune must stop the abort visibly (the run stays
+ *  failed, re-abortable; purge is the run kind that force-reaps). Unbounded, like the deployment wait
+ *  (#140): a prune takes what it takes, and what ends it is Missing, ArgoCD's own DeletionError, or
+ *  the operator's cancel. An Application that never existed (the run died before its first sync)
+ *  reads Missing immediately, so this passes at once on a run with nothing deployed. */
+export function watchConsumerPruneCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
+  return {
+    name: "watch-consumer-prune",
+    title: "Wait for ArgoCD to prune the generated Application",
+    run: async (ctx) => {
+      const appName = p.argoAppName;
+      const gone = (s: { health: string }): boolean => s.health === "Missing";
+      const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
+      const status = await argoReader.watchApplication(argoNamespace, appName, gone, { signal: ctx.signal, failFast: (s) => s.deletionError !== undefined });
+      if (!gone(status)) {
+        throw errValidation(
+          `Application ${appName} was not pruned — ${status.deletionError ? `ArgoCD reports: ${status.deletionError}` : `last seen health=${status.health}${status.message ? ` (${status.message})` : ""}`}; ` +
+            `the registration is marked removing but the workloads linger — re-abort once the master ArgoCD has pruned it, or purge`,
+        );
+      }
+      ctx.log("meta", `Application ${appName} pruned — nothing of the consumer is deployed any more`);
+    },
+  };
+}
+
+/** The offboard inverse of write-registration, run once the prune was seen: the file goes, and with it
+ *  the AppProject and the admission policy the units ApplicationSet generated from it. Read-first: an
+ *  absent registration is a re-abort past this commit, or a run that died before its own. */
 export function removeRegistrationCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
   return {
     name: "remove-consumer-registration",
@@ -41,35 +98,7 @@ export function removeRegistrationCleanup(ports: OnboardPorts, p: DeployableOnbo
         return;
       }
       const { commit } = await ports.registrations.removeRegistration(p.stage, p.consumerName, ctx.runId);
-      ctx.log("meta", `registration for ${p.consumerName} (${p.stage}) removed (${commit}) — the ArgoCD on ${p.domain} will now prune the generated Application`);
-    },
-  };
-}
-
-/** The compensation between the registration removal above and the object deletes below: wait for the
- *  master ArgoCD to actually prune the generated Application. Without it the AppProject is deleted
- *  while the Application still references it (ArgoCD then refuses every operation on it) and the
- *  admission boundary comes down while the workloads still serve. FAIL-LOUD, like the tenant abort and
- *  for its reason: an abort deletes no namespace, so there is no cluster-side backstop — a fan-in that
- *  will not prune must stop the abort visibly (the run stays failed, re-abortable; purge is the run kind
- *  that force-reaps). An Application that never existed (the run died before its first sync) reads
- *  Missing immediately, so this passes at once on a run with nothing deployed. */
-export function watchConsumerPruneCleanup(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
-  return {
-    name: "watch-consumer-prune",
-    title: "Wait for ArgoCD to prune the generated Application",
-    run: async (ctx) => {
-      const appName = p.argoAppName;
-      const gone = (s: { health: string }): boolean => s.health === "Missing";
-      const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
-      const status = await argoReader.watchApplication(argoNamespace, appName, gone, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal });
-      if (!gone(status)) {
-        throw errValidation(
-          `Application ${appName} was not pruned — last seen health=${status.health}${status.message ? ` (${status.message})` : ""}; ` +
-            `the registration is removed but the workloads linger, and deleting the AppProject or the admission policy over a standing Application would strand it — re-abort once the master ArgoCD has pruned it, or purge`,
-        );
-      }
-      ctx.log("meta", `Application ${appName} pruned — nothing of the consumer is deployed any more`);
+      ctx.log("meta", `registration for ${p.consumerName} (${p.stage}) removed (${commit}) — the AppProject and the admission policy of the stage go with it`);
     },
   };
 }

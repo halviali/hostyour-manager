@@ -363,7 +363,7 @@ export class Registrations {
   async commitRegistration(input: RegistrationCommit & { runId: string }): Promise<{ commit: string }> {
     const { unit, builds, deploy, runId } = input;
     const write: { path: string; content: string }[] = [
-      { path: guard(buildPath(unit.name)), content: serializePointer(ConsumerRegistrationSchema, { ...unit, builds }) },
+      { path: guard(buildPath(unit.name)), content: serializePointer(ConsumerRegistrationSchema, { ...unit, removing: false, builds }) },
     ];
     let message = `register(${unit.name}): build ${builds.length ? builds.join(", ") : "none"} ${trailer(runId)}`;
     if (deploy) {
@@ -371,6 +371,7 @@ export class Registrations {
         path: guard(stagePath(deploy.stage, unit.name)),
         content: serializePointer(ConsumerRegistrationSchema, {
           ...unit,
+          removing: false,
           chartPath: deploy.chartPath,
           cluster: deploy.cluster,
           host: deploy.host,
@@ -402,6 +403,15 @@ export class Registrations {
    *  overwrite each other's intent. */
   async setQuiesced(stage: Stage, name: string, quiesced: boolean, runId: string): Promise<{ commit: string }> {
     return this.flip(stage, name, { quiesced }, `${quiesced ? "quiesce" : "unquiesce"}(${name}) ${trailer(runId)}`);
+  }
+
+  /** Mark the stage registration as being REMOVED — the first commit of offboard, purge and the
+   *  onboard abort. The consumers ApplicationSet selects on it and prunes the generated Application
+   *  while the AppProject and the admission policy, generated off the same file, still stand; the
+   *  file itself is removed (removeRegistration) only once ArgoCD reports the Application gone
+   *  (hostyour-cloud#213). One-way: nothing unmarks a registration — a removal that stops is resumed. */
+  async setRemoving(stage: Stage, name: string, runId: string): Promise<{ commit: string }> {
+    return this.flip(stage, name, { removing: true }, `removing(${name}): ${stage} ${trailer(runId)}`);
   }
 
   /** Write the stage registration's `quota` — the six figures that bound the consumer's namespace,
@@ -495,7 +505,7 @@ export class Registrations {
    *  Both files move in ONE commit, from ONE read of the tree. Two commits would leave a window where
    *  the stage says paused and the build still runs, and a second fetch could decide against a tree
    *  other than the one it writes to. */
-  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; quota?: UnitQuota }, message: string): Promise<{ commit: string }> {
+  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; quota?: UnitQuota }, message: string): Promise<{ commit: string }> {
     return this.repo.withBranch(this.branch, async (books) => {
       const raw = await books.readFile(stagePath(stage, name));
       if (raw === null) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);

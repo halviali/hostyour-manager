@@ -157,7 +157,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     const repo = new FakePlatformRepo();
     const registrations = new Registrations(repo);
     repo.seed(repo.booksBranch, "registrations/ghost/prod.yaml", serializePointer(ConsumerRegistrationSchema, {
-      name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false,
+      name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
       chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     }));
     const found = await scanDetectedConsumers({ db: db.db, registrations });

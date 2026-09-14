@@ -12,24 +12,24 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 
-// remove-registration's RESUME-IDEMPOTENCY, split out of offboard.run.test.ts (that file is at its
-// line budget). The crash case: the step's git commit landed but its `ok` write was lost, and the
-// executor re-runs the WHOLE step on resume (a running step is reset to pending). The step must
-// converge — the read-first skip is the same one purge's remove-registration and the tenant twin
-// carry. Without it, the registrations's absence refusal ('consumer "acme" is not registered at prod')
-// failed the resumed run identically on every retry.
+// The RESUME-IDEMPOTENCY of mark-removing and remove-registration, and watch-removal's fail-fast, split
+// out of offboard.run.test.ts (that file is at its line budget). The crash case: the step's git commit
+// landed but its `ok` write was lost, and the executor re-runs the WHOLE step on resume (a running
+// step is reset to pending). The step must converge — the read-first skip is the same one purge's
+// twin steps and the tenant twin carry. Without it, the registrations's absence refusal ('consumer
+// "acme" is not registered at prod') failed the resumed run identically on every retry.
 
 
 let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
 afterEach(() => { db.sqlite.close(); });
 
-function ports(reg: Registrations): OffboardPorts {
+function ports(reg: Registrations, argo?: FakeMasterArgoReader): OffboardPorts {
   return {
     registrations: reg,
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
-      argoReader: new FakeMasterArgoReader({ status: { syncRevision: null, targetRevision: null, sync: "Unknown", health: "Missing" } }),
+      argoReader: argo ?? new FakeMasterArgoReader({ status: { syncRevision: null, targetRevision: null, sync: "Unknown", health: "Missing" } }),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
@@ -49,18 +49,28 @@ function ctx(logs: string[]): StepCtx {
   };
 }
 
+function seedApp(): void {
+  db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: null }).run();
+}
+
+/** acme's live stage registration on s1/prod, committed the way an onboard commits it. */
+async function registered(): Promise<Registrations> {
+  const reg = new Registrations(new FakePlatformRepo());
+  await reg.commitRegistration({
+    unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
+    builds: [],
+    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    runId: "run_onb",
+  });
+  return reg;
+}
+
 describe("offboard remove-registration on resume", () => {
   it("a second run after its git commit skips instead of wedging", async () => {
-    db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: null }).run();
-    const reg = new Registrations(new FakePlatformRepo());
-    await reg.commitRegistration({
-      unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
-      builds: [],
-      deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
-      runId: "run_onb",
-    });
+    seedApp();
+    const reg = await registered();
 
     const logs: string[] = [];
     const remove = makeOffboardDef(ports(reg)).steps({ appId: "app_1" }).find((s) => s.name === "remove-registration")!;
@@ -69,5 +79,36 @@ describe("offboard remove-registration on resume", () => {
 
     await remove.run(ctx(logs)); // the resumed step — must converge, not throw
     expect(logs.some((l) => l.includes("already removed — skipping (resume)"))).toBe(true);
+  });
+
+  it("mark-removing: a second run after its git commit skips, and the file still stands for the prune to run against", async () => {
+    seedApp();
+    const reg = await registered();
+
+    const logs: string[] = [];
+    const mark = makeOffboardDef(ports(reg)).steps({ appId: "app_1" }).find((s) => s.name === "mark-removing")!;
+    await mark.run(ctx(logs));
+    // The commit landed: the stage file stands, marked — and with it the AppProject and the fence
+    // generated off it, which is what the prune runs against (hostyour-cloud#213).
+    expect((await reg.readRegistration("prod", "acme"))?.entry.removing).toBe(true);
+    expect(logs.some((l) => l.includes("marked removing"))).toBe(true);
+
+    await mark.run(ctx(logs)); // the resumed step — must converge, not throw
+    expect(logs.some((l) => l.includes("already marked removing — skipping (resume)"))).toBe(true);
+  });
+});
+
+describe("offboard watch-removal", () => {
+  it("stops at once on ArgoCD's DeletionError — a deletion that will not finish on its own — and waits without a clock otherwise", async () => {
+    seedApp();
+    const argo = new FakeMasterArgoReader({ status: {
+      syncRevision: null, targetRevision: null, sync: "Unknown", health: "Unknown",
+      deletionError: 'error getting app project "acme-prod": appproject.argoproj.io "acme-prod" not found',
+    } });
+    const watch = makeOffboardDef(ports(await registered(), argo)).steps({ appId: "app_1" }).find((s) => s.name === "watch-removal")!;
+    await expect(watch.run(ctx([]))).rejects.toThrow(/ArgoCD reports: error getting app project "acme-prod"/);
+    // No budget: what ends the wait is Missing, the DeletionError, or the operator's cancel (#140).
+    expect(argo.lastWatchOpts?.timeoutMs).toBeUndefined();
+    expect(argo.lastWatchOpts?.failFast).toBeDefined();
   });
 });

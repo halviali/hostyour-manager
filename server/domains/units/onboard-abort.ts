@@ -24,7 +24,7 @@ import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { AppStatus } from "../../../shared/enums.ts";
 import {
-  removeRegistrationCleanup, watchConsumerPruneCleanup, deleteSmtpOpsGrantCleanup,
+  markRemovingCleanup, removeRegistrationCleanup, watchConsumerPruneCleanup, deleteSmtpOpsGrantCleanup,
   deleteRepoCredentialCleanup, removeDnsCleanup, removeBuildRegistrationCleanup,
 } from "./onboard-steps.ts";
 import { removeWebhookCleanup } from "./onboard-webhook.ts";
@@ -41,8 +41,9 @@ import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onb
  *  one itself, on a real create only. */
 export function deployableOnboardCleanups(ports: OnboardPorts, p: DeployableOnboardParams): Cleanup[] {
   return [
-    removeRegistrationCleanup(ports, p),
+    markRemovingCleanup(ports, p),
     watchConsumerPruneCleanup(ports, p),
+    removeRegistrationCleanup(ports, p),
     deleteSmtpOpsGrantCleanup(ports, p),
     deleteRepoCredentialCleanup(ports, p),
     removeDnsCleanup(ports, p),

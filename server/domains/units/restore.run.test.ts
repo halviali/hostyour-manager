@@ -108,7 +108,7 @@ describe("restore (consumer)", () => {
     const f = makeFakes();
     const ports = consumerPorts(f);
     const dumped = serializePointer(ConsumerRegistrationSchema, {
-      name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false,
+      name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
       chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb"], size: "medium", mongodb: "shared",
       quota: seedQuota("medium"),
     });

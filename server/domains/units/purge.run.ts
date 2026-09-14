@@ -161,14 +161,14 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
       },
     },
     {
-      name: "remove-registration",
-      title: "Remove the consumer registration (GitOps un-deploy)",
+      name: "mark-removing",
+      title: "Take the consumer Application down (GitOps un-deploy)",
       run: async (ctx) => {
-        // Remove registrations/<name>/<stage>.yaml so ArgoCD prunes the generated Application (→
-        // workloads + ServiceClaim → the provisioner deprovisions the mongo user+db). IDEMPOTENT: a
-        // true orphan may have died BEFORE write-registration, so an absent registration is the normal
-        // case, not an error — removeRegistration THROWS on absence, so read first and only remove
-        // when present.
+        // Mark registrations/<name>/<stage>.yaml removing so ArgoCD prunes the generated Application (→
+        // workloads + ServiceClaim → the provisioner deprovisions the mongo user+db) while the
+        // AppProject that deletion needs still stands (hostyour-cloud#213). IDEMPOTENT: a true orphan
+        // may have died BEFORE write-registration, so an absent registration is the normal case, not
+        // an error, and a resume finds the file marked already.
         const t = loadPurgeTarget(ctx.db, p);
         // The relocation mark goes FIRST, and BEFORE the absent-registration return: purge reaps a
         // namespace whose registration is already gone too, and deleting that namespace hands its
@@ -177,13 +177,18 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         await clearRelocationHold(ctx, clusterReader, [consumerNamespace(t.name, t.stage)], t.name);
         const current = await ports.registrations.readRegistration(t.stage, t.name);
         if (!current) {
-          ctx.checkpoint({ registration: null, removed: false });
-          ctx.log("meta", `no registration for ${t.name} at ${t.stage} — already absent, nothing to remove`);
+          ctx.checkpoint({ registration: null, marked: false });
+          ctx.log("meta", `no registration for ${t.name} at ${t.stage} — already absent, nothing to take down`);
           return;
         }
-        const { commit, unitRemoved } = await ports.registrations.removeRegistration(t.stage, t.name, ctx.runId);
-        ctx.checkpoint({ registration: `registrations/${t.name}/${t.stage}.yaml`, removed: true, unitRemoved, commit });
-        ctx.log("meta", `registration for ${t.name} (${t.stage}) removed (${commit}) — the ArgoCD on ${t.domain} will now prune the app`);
+        if (current.entry.removing) {
+          ctx.checkpoint({ registration: `registrations/${t.name}/${t.stage}.yaml`, marked: false });
+          ctx.log("meta", `registration for ${t.name} at ${t.stage} already marked removing — skipping (resume)`);
+          return;
+        }
+        const { commit } = await ports.registrations.setRemoving(t.stage, t.name, ctx.runId);
+        ctx.checkpoint({ registration: `registrations/${t.name}/${t.stage}.yaml`, marked: true, commit });
+        ctx.log("meta", `registration for ${t.name} (${t.stage}) marked removing (${commit}) — the ArgoCD on ${t.domain} will now prune the app; its AppProject and admission policy stay until it is gone`);
       },
     },
     {
@@ -194,21 +199,22 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         // never goes Missing; purge only OBSERVES the prune and CONTINUES either way, because an
         // orphan is precisely the crash-looping / stuck app that never reaches a clean Missing, and
         // blocking the teardown on it would strand exactly the consumer purge exists to reap.
-        // delete-namespace (next-but-one) force-reaps the workloads + the ServiceClaim regardless, so
-        // giving the graceful prune a bounded chance here — then moving on — loses nothing.
+        // delete-namespace (below) force-reaps the workloads + the ServiceClaim regardless, so giving
+        // the graceful prune a bounded chance here — then moving on — loses nothing; a DeletionError
+        // ArgoCD reports ends the observation at once, since that deletion will not finish on its own.
         const t = loadPurgeTarget(ctx.db, p);
         const appName = consumerArgoAppName(t.name, t.stage);
         const gone = (s: { health: string }): boolean => s.health === "Missing";
         try {
           const { argoReader, argoNamespace } = await ports.resolver.resolve(t.clusterId);
-          const status = await argoReader.watchApplication(argoNamespace, appName, gone, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal });
+          const status = await argoReader.watchApplication(argoNamespace, appName, gone, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, failFast: (s) => s.deletionError !== undefined });
           const pruned = gone(status);
           ctx.checkpoint({ application: appName, pruned, lastHealth: status.health });
           ctx.log(
             "meta",
             pruned
               ? `Application ${appName} pruned — the consumer is no longer deployed`
-              : `Application ${appName} not pruned within the watch budget (last health=${status.health})${status.message ? ` (${status.message})` : ""} — continuing; delete-namespace will force-reap the workloads + ServiceClaim`,
+              : `Application ${appName} not pruned ${status.deletionError ? `— ArgoCD reports: ${status.deletionError}` : `within the watch budget (last health=${status.health})${status.message ? ` (${status.message})` : ""}`} — continuing; delete-namespace will force-reap the workloads + ServiceClaim`,
           );
         } catch (err) {
           // A read failure here (ArgoCD unreachable) must NOT stop the teardown — if the master surface
@@ -217,6 +223,25 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
           ctx.checkpoint({ application: appName, pruned: false, watchError: err instanceof Error ? err.message : String(err) });
           ctx.log("meta", `could not confirm the prune of ${appName} (${err instanceof Error ? err.message : String(err)}) — continuing; delete-namespace will force-reap the workloads`);
         }
+      },
+    },
+    {
+      name: "remove-registration",
+      title: "Remove the consumer registration",
+      run: async (ctx) => {
+        // The file goes only now: the units ApplicationSet generates the AppProject and the admission
+        // policy off it, and pruning those under a standing Application is what left one with its
+        // deletionTimestamp for good (hostyour-cloud#213). Read first — an orphan has none, and a
+        // resume finds it gone.
+        const t = loadPurgeTarget(ctx.db, p);
+        if ((await ports.registrations.readRegistration(t.stage, t.name)) === null) {
+          ctx.checkpoint({ registration: null, removed: false });
+          ctx.log("meta", `no registration for ${t.name} at ${t.stage} — already absent, nothing to remove`);
+          return;
+        }
+        const { commit, unitRemoved } = await ports.registrations.removeRegistration(t.stage, t.name, ctx.runId);
+        ctx.checkpoint({ registration: `registrations/${t.name}/${t.stage}.yaml`, removed: true, unitRemoved, commit });
+        ctx.log("meta", `registration for ${t.name} (${t.stage}) removed (${commit}) — the AppProject and the admission policy of the stage go with it`);
       },
     },
     {

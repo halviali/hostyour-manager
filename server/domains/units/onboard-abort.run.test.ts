@@ -274,15 +274,17 @@ describe("aborting an onboard whose consumer never came up", () => {
     await h.executor.settle(runId);
 
     expect(getRun(db.db, runId)?.status).toBe("cancelled");
-    // The order IS the property: the registration goes first (it is what generates the Application),
-    // the prune is awaited, and only then do the two objects no reconciler renders come down — since
+    // The order IS the property: the registration is marked removing first (the mark is what drops the
+    // generated Application while its AppProject still stands, hostyour-cloud#213), the prune is
+    // awaited, the file goes, and only then do the two objects no reconciler renders come down — since
     // hostyour-cloud#174 the prune itself takes the AppProject, the admission policy and the three
     // build grants, so delete-appproject and delete-admission-policy are gone from this list. The
     // ceremony-secret inverse was armed by seed-secrets (a later step), so it runs ahead of the block.
     expect(cleanupSteps(runId)).toEqual([
       { name: "cleanup:remove-ceremony-secrets", status: "ok" },
-      { name: "cleanup:remove-consumer-registration", status: "ok" },
+      { name: "cleanup:mark-removing", status: "ok" },
       { name: "cleanup:watch-consumer-prune", status: "ok" },
+      { name: "cleanup:remove-consumer-registration", status: "ok" },
       { name: "cleanup:delete-smtp-ops-grant", status: "ok" },
       { name: "cleanup:delete-repo-credential", status: "ok" },
       { name: "cleanup:remove-dns", status: "ok" },

@@ -79,6 +79,12 @@ export interface ArgoAppStatus {
    *  from a terminally FAILED one (stop now, rather than burning the whole budget on something that can
    *  no longer converge). */
   opPhase?: string;
+  /** The message of a `DeletionError` condition — ArgoCD could not delete the Application's resources
+   *  (its project gone, its destination unreachable): a deletion that will not finish on its own, so
+   *  an Application carrying it keeps its deletionTimestamp for good and never reads Missing
+   *  (hostyour-cloud#213). watch-removal stops on it at once instead of waiting for the operator.
+   *  Absent while ArgoCD reports no such condition. */
+  deletionError?: string;
 }
 
 /** The revision the app last synced THE GIVEN REPO's source to: on a multi-source app, the entry

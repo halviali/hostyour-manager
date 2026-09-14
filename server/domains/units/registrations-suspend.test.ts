@@ -110,4 +110,18 @@ describe("Registrations suspend / quiesce", () => {
       chartPath: "deploy/chart", cluster: "s1", databases: ["example_auth"], services: ["postgresql"],
     });
   });
+
+  // The third flag is the one the consumers ApplicationSet SELECTS on: marked, the Application is
+  // pruned while the AppProject and the fence — generated off the same file — still stand, and the
+  // file goes only after (hostyour-cloud#213). build.yaml is the unit's and knows nothing of it.
+  it("marks the stage file removing in place and leaves build.yaml alone", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new Registrations(repo);
+    await reg.commitRegistration({ unit: unit(), builds: ["acme"], deploy: deploy(), runId: "run_1" });
+    await reg.setRemoving("prod", "acme", "run_2");
+    expect(repo.commits.at(-1)!.message).toBe("removing(acme): prod [run_2]");
+    expect(repo.commits.at(-1)!.write?.map((w) => w.path)).toEqual(["registrations/acme/prod.yaml"]);
+    expect((await reg.readRegistration("prod", "acme"))?.entry).toMatchObject({ removing: true, suspended: false, quiesced: false, cluster: "s1" });
+    expect((await reg.readBuildRegistration("acme"))?.entry.removing).toBe(false);
+  });
 });

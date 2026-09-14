@@ -151,7 +151,7 @@ describe("adopt-consumer run definition", () => {
     const repo = new FakePlatformRepo();
     // Registrations live on `master` (REGISTRATION_BRANCH), never on the domain's own install branch.
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", serializePointer(ConsumerRegistrationSchema, {
-      name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false,
+      name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false, removing: false,
       chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     }));
     const step = makeAdoptConsumerDef(ports(new Registrations(repo))).steps(PARAMS).find((s) => s.name === "read-pointer")!;

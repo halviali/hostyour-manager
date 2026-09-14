@@ -70,6 +70,7 @@ export function mapArgoStatus(raw: unknown): ArgoAppStatus {
   const status = app.status;
   const message = argoMessage(status);
   const opPhase = argoOpPhase(status);
+  const deletionError = argoDeletionError(status);
   const syncSources = mapSyncSources(status?.sync);
   const targetSources = mapTargetSources(app.spec);
   return {
@@ -81,6 +82,7 @@ export function mapArgoStatus(raw: unknown): ArgoAppStatus {
     health: pick(ARGO_HEALTH, status?.health?.status),
     ...(message !== undefined ? { message } : {}),
     ...(opPhase !== undefined ? { opPhase } : {}),
+    ...(deletionError !== undefined ? { deletionError } : {}),
   };
 }
 
@@ -115,6 +117,15 @@ function argoMessage(status: RawArgoApp["status"]): string | undefined {
   const op = status?.operationState?.message;
   if (typeof op === "string" && op !== "") return op;
   return (status?.conditions ?? []).find((c) => typeof c.message === "string" && c.message !== "")?.message;
+}
+
+/** The message of the app's `DeletionError` condition, when ArgoCD reports one — the condition it
+ *  sets while a deletion cannot proceed (`error getting app project …`). Kept apart from `message`,
+ *  which prefers the last operation's own text and would hide it behind "successfully synced".
+ *  Undefined otherwise, so the port field stays absent (exactOptionalPropertyTypes). */
+function argoDeletionError(status: RawArgoApp["status"]): string | undefined {
+  const c = (status?.conditions ?? []).find((c) => c.type === "DeletionError");
+  return typeof c?.message === "string" && c.message !== "" ? c.message : undefined;
 }
 
 /** The phase of the app's last sync operation (`status.operationState.phase`) — a non-empty string

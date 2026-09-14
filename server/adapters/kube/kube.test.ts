@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KubeConfig } from "@kubernetes/client-node";
 import { buildKubeConfig, KubeMasterArgoReader } from "./kube.ts";
+import { mapArgoStatus } from "./kube-map.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "./testing/fake.ts";
 import type { ArgoAppStatus, ResolvedClusterKube } from "./port.ts";
 
@@ -138,6 +139,31 @@ describe("KubeMasterArgoReader.watchApplication (poll loop: until / failFast / b
     const s = await reader.watchApplication("argocd", "acme-prod", until, { timeoutMs: 20 });
     expect(until(s)).toBe(false);
     expect(calls()).toBeGreaterThan(1);
+  });
+
+  // The removal watch (offboard, the onboard abort): no budget, and ArgoCD's own DeletionError — an
+  // Application whose project is gone keeps its deletionTimestamp for good — ends it at once
+  // (hostyour-cloud#213).
+  const DELETION_ERROR = 'error getting app project "acme-prod": appproject.argoproj.io "acme-prod" not found';
+  it("stops at once on a DeletionError with NO budget — the removal watch never waits on a deletion that cannot finish", async () => {
+    const stuck: ArgoAppStatus = { syncRevision: null, targetRevision: null, sync: "Unknown", health: "Unknown", deletionError: DELETION_ERROR };
+    const { reader, calls } = stubbedReader([stuck]);
+    const gone = (s: ArgoAppStatus): boolean => s.health === "Missing";
+    const s = await reader.watchApplication("argocd", "acme-prod", gone, { failFast: (st) => st.deletionError !== undefined });
+    expect(s.deletionError).toBe(DELETION_ERROR);
+    expect(gone(s)).toBe(false); // the caller (watch-removal) then throws, naming ArgoCD's message
+    expect(calls()).toBe(1);
+  });
+
+  it("maps the DeletionError condition to deletionError, apart from the operation's own message", () => {
+    const s = mapArgoStatus({ status: {
+      sync: { status: "Unknown" }, health: { status: "Unknown" },
+      operationState: { message: "successfully synced (all tasks run)", phase: "Succeeded" },
+      conditions: [{ type: "DeletionError", message: DELETION_ERROR }, { type: "InvalidSpecError", message: "Application referencing project acme-prod which does not exist" }],
+    } });
+    expect(s.deletionError).toBe(DELETION_ERROR);
+    expect(s.message).toBe("successfully synced (all tasks run)"); // untouched: `message` prefers the operation's text, which would hide the condition
+    expect(mapArgoStatus({ status: { sync: { status: "Synced" }, health: { status: "Healthy" } } })).not.toHaveProperty("deletionError");
   });
 });
 

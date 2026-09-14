@@ -20,9 +20,9 @@ import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { removeReleaseKit } from "./onboard-release-kit.ts";
 import { assertNoOrphans } from "./offboard-orphans.ts";
 
-// offboard: remove the consumers/** pointer, wait for the master ArgoCD to
-// prune, delete the (now-empty) target-cluster namespace, destroy the Vault secrets, and mark the row
-// offboarded.
+// offboard: mark the registration removing, wait for the master ArgoCD to prune the Application, remove
+// the registration (which takes the AppProject and the admission policy with it), delete the
+// (now-empty) target-cluster namespace, destroy the Vault secrets, and mark the row offboarded.
 //
 // WHAT THE PRUNE TAKES, AND WHY THIS RUN KIND IS SHORTER THAN IT WAS. Since hostyour-cloud#174 the
 // isolation AppProject, the admission policy with its Binding, the argo-sync grant and the two
@@ -87,29 +87,30 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
   return [
     attestTargetStep(ports, appId),
     {
-      name: "remove-registration",
-      title: "Remove the consumer registration (GitOps un-deploy)",
+      name: "mark-removing",
+      title: "Take the consumer Application down (GitOps un-deploy)",
       run: async (ctx) => {
         const ac = loadAppCluster(ctx.db, appId);
-        // The relocation mark goes FIRST, because the removal below is what sets off the prune, and
-        // the prune is what deletes the ServiceClaims this offboard means to deprovision.
+        // The relocation mark goes FIRST, because the mark below is what sets off the prune, and the
+        // prune is what deletes the ServiceClaims this offboard means to deprovision.
         const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
         await clearRelocationHold(ctx, clusterReader, [consumerNamespace(ac.name, ac.stage)], ac.name);
-        // Read first, remove only when present — removeRegistration REFUSES an absent file, and on a
-        // resume the absence is the normal case: a crash between this step's git commit and its `ok`
-        // write re-runs the whole step, which must converge instead of failing on its own earlier
-        // commit forever (purge's remove-registration and the tenant twin make the same read).
-        if ((await ports.registrations.readRegistration(ac.stage, ac.name)) === null) {
+        // Read first, write only when unmarked — on a resume the mark is the normal case: a crash
+        // between this step's git commit and its `ok` write re-runs the whole step, which must
+        // converge instead of failing on its own earlier commit forever (purge's mark-removing and
+        // remove-registration below make the same read).
+        const current = await ports.registrations.readRegistration(ac.stage, ac.name);
+        if (current === null) {
           ctx.log("meta", `registration for ${ac.name} at ${ac.stage} already removed — skipping (resume)`);
           return;
         }
-        const { commit, unitRemoved } = await ports.registrations.removeRegistration(ac.stage, ac.name, ctx.runId);
-        ctx.checkpoint({ commit, unitRemoved });
-        ctx.log(
-          "meta",
-          `registration for ${ac.name} (${ac.stage}) removed (${commit}) — the ArgoCD on ${ac.domain} will now prune the app` +
-            (unitRemoved ? "; it was the unit's last stage, so its build.yaml went too" : "; the unit stays registered at its other stages"),
-        );
+        if (current.entry.removing) {
+          ctx.log("meta", `registration for ${ac.name} at ${ac.stage} already marked removing — skipping (resume)`);
+          return;
+        }
+        const { commit } = await ports.registrations.setRemoving(ac.stage, ac.name, ctx.runId);
+        ctx.checkpoint({ commit });
+        ctx.log("meta", `registration for ${ac.name} (${ac.stage}) marked removing (${commit}) — the ArgoCD on ${ac.domain} will now prune the app; its AppProject and admission policy stay until it is gone`);
       },
     },
     {
@@ -122,11 +123,40 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         const appName = consumerArgoAppName(ac.name, ac.stage);
         const gone = (s: { health: string }): boolean => s.health === "Missing";
         const { argoReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
-        const status = await argoReader.watchApplication(argoNamespace, appName, gone, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal });
+        // Unbounded, like the deployment wait (#140): a prune takes what it takes (finalizers, a
+        // graceful shutdown), and what ends it is Missing, ArgoCD's own DeletionError — a deletion
+        // that will not finish on its own, so waiting on it is waiting for nothing — or the
+        // operator's cancel.
+        const status = await argoReader.watchApplication(argoNamespace, appName, gone, { signal: ctx.signal, failFast: (s) => s.deletionError !== undefined });
         if (!gone(status)) {
-          throw errNotFound(`Application ${appName} was not pruned — last seen health=${status.health}${status.message ? ` (${status.message})` : ""}; the pointer is removed but the workloads linger, check the master ArgoCD`);
+          throw errNotFound(
+            `Application ${appName} was not pruned — ${status.deletionError ? `ArgoCD reports: ${status.deletionError}` : `last seen health=${status.health}${status.message ? ` (${status.message})` : ""}`}; ` +
+              `the registration is marked removing but the workloads linger, check the ArgoCD on ${ac.domain}`,
+          );
         }
         ctx.log("meta", `Application ${appName} pruned — the consumer is no longer deployed`);
+      },
+    },
+    {
+      name: "remove-registration",
+      title: "Remove the consumer registration",
+      run: async (ctx) => {
+        const ac = loadAppCluster(ctx.db, appId);
+        // The file goes only now, with the Application gone: the units ApplicationSet generates the
+        // AppProject and the admission policy off the same file, and an Application whose project is
+        // pruned under it is one ArgoCD refuses to reconcile, its own deletion included
+        // (hostyour-cloud#213). Read-first for the resume, as above.
+        if ((await ports.registrations.readRegistration(ac.stage, ac.name)) === null) {
+          ctx.log("meta", `registration for ${ac.name} at ${ac.stage} already removed — skipping (resume)`);
+          return;
+        }
+        const { commit, unitRemoved } = await ports.registrations.removeRegistration(ac.stage, ac.name, ctx.runId);
+        ctx.checkpoint({ commit, unitRemoved });
+        ctx.log(
+          "meta",
+          `registration for ${ac.name} (${ac.stage}) removed (${commit}) — the AppProject and the admission policy of the stage go with it` +
+            (unitRemoved ? "; it was the unit's last stage, so its build.yaml went too" : "; the unit stays registered at its other stages"),
+        );
       },
     },
     {

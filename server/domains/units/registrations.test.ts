@@ -69,6 +69,7 @@ describe("ConsumerRegistrationSchema", () => {
     const r = ConsumerRegistrationSchema.parse({ name: "acme", repoURL: REPO, builds: [] });
     expect(r.suspended).toBe(false);
     expect(r.quiesced).toBe(false);
+    expect(r.removing).toBe(false);
   });
 });
 
@@ -80,6 +81,7 @@ describe("serializePointer (generic over the registration schemas)", () => {
     expect(y).toContain('builds: ["acme-backend"]');
     expect(y).toContain("suspended: false");
     expect(y).toContain("quiesced: false");
+    expect(y).toContain("removing: false"); // the selector's field, written on every commit
   });
 
   it("carries the literal databases[] and the claimed services[] verbatim", () => {

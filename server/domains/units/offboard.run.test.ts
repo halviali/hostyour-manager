@@ -134,7 +134,7 @@ describe("offboard run definition", () => {
     // after watch-removal (the consumer's own pods read that entry via ESO until the app is pruned)
     // and before record-offboard (which flips the row to the re-onboardable state — a surviving
     // entry plus a re-onboardable row is the silent-inheritance bug, since the seed is cas=0).
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-registration", "watch-removal", "delete-repo-credential", "delete-smtp-ops-grant", "delete-namespace", "remove-dns", "remove-webhook", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-offboard"]);
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "mark-removing", "watch-removal", "remove-registration", "delete-repo-credential", "delete-smtp-ops-grant", "delete-namespace", "remove-dns", "remove-webhook", "remove-release-kit", "remove-repo-pat", "remove-app-secrets", "remove-database-secrets", "assert-no-orphans", "record-offboard"]);
     expect(plan.locks).toEqual([{ resource: "git-branch", key: FAKE_BOOKS_BRANCH }, { resource: "git-branch", key: "s1.example" }, { resource: "master-kube", key: "m" }]);
     expect(plan.requiredSecrets).toEqual([]);
   });
@@ -158,9 +158,9 @@ describe("offboard run definition", () => {
   // A move writes the relocation mark on the SOURCE namespace at repoint, and only a later move
   // ARRIVING there, or clear-source deleting the namespace, ever takes it off again. An abandoned move
   // therefore leaves it standing — and while it stands the service-provisioner KEEPS a claim's
-  // databases instead of dropping them. remove-registration is what sets off the prune that hands the
+  // databases instead of dropping them. mark-removing is what sets off the prune that hands the
   // claims to that teardown, so the mark has to be gone before it commits.
-  it("remove-registration clears the relocation mark first — a stale mark must not make this offboard keep the data", async () => {
+  it("mark-removing clears the relocation mark first — a stale mark must not make this offboard keep the data", async () => {
     seedApp();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } });
     cluster.namespaceAnnotations.set("acme-prod", { "platform.hostyour.cloud/relocating": "true" });
@@ -168,13 +168,13 @@ describe("offboard run definition", () => {
     await seedRegistration(reg);
 
     const logs: string[] = [];
-    const remove = makeOffboardDef(ports(reg, { cluster })).steps({ appId: "app_1" }).find((s) => s.name === "remove-registration")!;
-    await remove.run(ctx("remove-registration", logs));
+    const remove = makeOffboardDef(ports(reg, { cluster })).steps({ appId: "app_1" }).find((s) => s.name === "mark-removing")!;
+    await remove.run(ctx("mark-removing", logs));
 
     expect(cluster.namespaceAnnotations.get("acme-prod")?.["platform.hostyour.cloud/relocating"]).toBeUndefined();
     // Order is the whole property: the mark is off BEFORE the commit that starts the prune.
     const cleared = logs.findIndex((l) => l.includes("platform.hostyour.cloud/relocating cleared"));
-    const removed = logs.findIndex((l) => l.includes("registration for acme (prod) removed"));
+    const removed = logs.findIndex((l) => l.includes("registration for acme (prod) marked removing"));
     expect(cleared).toBeGreaterThanOrEqual(0);
     expect(cleared).toBeLessThan(removed);
   });
@@ -505,7 +505,7 @@ describe("offboard run definition", () => {
     const prt = ports(reg, { argo: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }) });
     const steps = makeOffboardDef(prt).steps({ appId: "app_1" });
     await steps[0]!.run(ctx("attest-target", []));
-    await steps[1]!.run(ctx("remove-registration", []));
+    await steps[1]!.run(ctx("mark-removing", []));
     await expect(steps[2]!.run(ctx("watch-removal", []))).rejects.toThrow(/was not pruned/);
   });
 

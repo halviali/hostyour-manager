@@ -378,10 +378,10 @@ export function consumerArgocdUrl(masterFqdn: string | null, argoNamespace: stri
  *    <stage>.yaml — a DEPLOYABLE unit's per-stage file. Carries the deploy group
  *                   (chartPath/cluster/databases/services) and never `builds[]`.
  *
- *  `suspended` and `quiesced` are MANDATORY with default false and are written explicitly on every
- *  commit, so a chart may read them BARE under `missingkey=error` without a `dig`; `services` is
- *  mandatory in the deployable form (an empty list is fine) for the same reason — a fourth Application
- *  source gates on it.
+ *  `suspended`, `quiesced` and `removing` are MANDATORY with default false and are written explicitly
+ *  on every commit, so a chart may read the two pauses BARE under `missingkey=error` without a `dig`
+ *  and the ApplicationSet selects on the third; `services` is mandatory in the deployable form (an
+ *  empty list is fine) for the same reason — a fourth Application source gates on it.
  *
  *  The invariant `name == basename(repoURL)` is what makes the split safe: with ONE writer plus this
  *  invariant, the `repoURL` in a unit's build.yaml and in its stage files cannot contradict itself. */
@@ -395,6 +395,11 @@ export const ConsumerRegistrationSchema = z
     onboardedAt: z.string().optional(),
     suspended: z.boolean().default(false), // the off state the chart renders: replicas 0, no Ingress
     quiesced: z.boolean().default(false), // the deeper pause a removal-in-flight holds a unit in
+    // The removal itself, in flight: offboard, purge and the onboard abort write it true BEFORE the
+    // file goes, and the consumers ApplicationSet — the one generator that selects on it — drops the
+    // Application while the AppProject and the fence, generated off the same file, still stand
+    // (hostyour-cloud#213). Nothing reads it as a chart value, and nothing writes it back to false.
+    removing: z.boolean().default(false),
     // ---- the deploy group: present TOGETHER in a stage file, absent TOGETHER from build.yaml ----
     chartPath: z.string().regex(/^[^/].*$/).optional(),
     // The cluster this stage's Application lands on, by its SHORT NAME (clusterShortName of the
