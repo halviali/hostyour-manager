@@ -28,7 +28,7 @@ import { EmergencyStore, createEmergencyApp, serveAdminSocket } from "../domains
 import { registerRunRoutes } from "../domains/runs/api.ts";
 import { registerClustersRoutes, registerServerRoutes } from "../domains/inventory/api.ts";
 import { registerMailRoutes } from "../domains/mail/api.ts";
-import { NodePublicDns } from "../adapters/dns/public-dns.ts";
+import { DohPublicDns } from "../adapters/dns/public-dns.ts";
 import { createGitHubPlatform } from "../adapters/github-platform/github-platform-http.ts";
 import { registerBranchRoutes } from "../domains/branches/api.ts";
 import { registerReleaseRoutes } from "../domains/releases/api.ts";
@@ -220,7 +220,7 @@ export async function wire(): Promise<Wired> {
       registerServerRoutes(a, { db: db.db, creds: store, actor: runActor });
       // The mail DNS of the installation, measured at public resolvers; the units' DNS provider gives the
       // master's egress address (its own A record) and the platform repo the two sender domains.
-      registerMailRoutes(a, { db: db.db, publicDns: new NodePublicDns(), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(units.dns ? { dns: units.dns } : {}) });
+      registerMailRoutes(a, { db: db.db, publicDns: new DohPublicDns(), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(units.dns ? { dns: units.dns } : {}) });
       registerBranchRoutes(a, { db: db.db, config, ...(github ? { github } : {}) });
       // Which version each of an installation's platform apps runs, riding the pin search bound above.
       registerReleaseRoutes(a, { db: db.db, ...(readPlatformAppPins ? { readPlatformAppPins } : {}) });
