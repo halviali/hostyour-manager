@@ -175,6 +175,14 @@ export const HEALTHY_SLAVE_PREFLIGHT = [
   "PUBLIC_IP 203.0.113.7",
 ].join("\n");
 
+/** What a LIVE slave answers the same preflight with: its own Traefik serves 80/443 through a
+ *  hostPort, so nothing listens on the host and a connection to its own address is accepted anyway
+ *  — the reading the redeploy arm must pass on and the first deploy must refuse
+ *  (hostyour-manager#149). */
+export const LIVE_SLAVE_PREFLIGHT = HEALTHY_SLAVE_PREFLIGHT
+  .replace("PORT 80 listener=no connect=no", "PORT 80 listener=no connect=127.0.0.1")
+  .replace("PORT 443 listener=no connect=no", "PORT 443 listener=no connect=127.0.0.1");
+
 // A scripted two-host setup (mutable, so a test can change behavior between runs). Sessions
 // are keyed by target.host — the slave answers on its LAN address (10.1.1.11), the master on
 // its FQDN — which lets the tests assert multi-target routing end to end. Every remote exec leg

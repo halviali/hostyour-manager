@@ -17,7 +17,7 @@ import { servers, clusters } from "../../db/schema/inventory.ts";
 import {
   makeHarness, scriptedHosts, logger, ELEVATION_PASSWORD, MASTER_ID, SLAVE_ID,
   IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY, MASTER_PUBLIC_KEY, FIXTURE_REGISTRY_HOST, pullDocumentFor, seedMasterCluster,
-  type Harness, type HostsScript,
+  type Harness, type HostsScript, LIVE_SLAVE_PREFLIGHT,
 } from "./deploy-slave.fixture.ts";
 import type { DbHandle } from "../../db/client.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -328,6 +328,9 @@ export async function liveSlaveWorld(serve: ServeFixture, overrides: Partial<Hos
     authorizedKeys: [IMAGE_KEY_LINE, SLAVE_PUBLIC_KEY],
     passwordLogin: "no",
     ntp: "yes",
+    // A live slave serves its own ingress: the redeploy cases run over the reading the real machine
+    // gives, not over a bare box's (hostyour-manager#149).
+    preflightOut: LIVE_SLAVE_PREFLIGHT,
     // And it judges the key a session offers against that file, so the door really opens on the key
     // here: a slave whose password door is shut has no other way in, and a run that reached the
     // machine on something else would prove nothing about the one it will meet.

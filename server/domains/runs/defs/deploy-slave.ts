@@ -359,7 +359,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         const cap = await remoteScriptCapture(ctx, session, "slave-preflight", PREFLIGHT_SCRIPT, { timeoutMs: 60_000 });
         const parsed = parsePreflightOutput(cap.stdout);
         ctx.log("meta", formatNicsLine(parsed));
-        const checks = hardenPreflightForSlave(parsed.checks);
+        // On a REDEPLOY the machine is a live slave and its own Traefik serves 80/443; the policy reads
+        // the served ports as the state a live slave must be in (hostyour-manager#149).
+        const checks = hardenPreflightForSlave(parsed.checks, { ingressServed: redeploying });
 
         // Slave extra: the master's Vault must answer FROM THE SLAVE (the per-slave KV mount
         // lives there; slave-ESO authenticates against it). Reached over the Traefik

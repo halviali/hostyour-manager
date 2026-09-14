@@ -117,12 +117,27 @@ export function portCheck(reading: PortReading): PreflightCheck {
  *  "snapd missing" — mere warnings as the catalogue grades them — mean the box cannot be deployed. */
 export const SLAVE_FAIL_ON_WARN: ReadonlySet<string> = new Set(["port.80", "port.443", "snapd.present"]);
 
+/** The two ingress ports, whose served-ness a REDEPLOY reads the other way round: a live slave's
+ *  own Traefik serves 80/443 (a hostPort of the ingress DaemonSet — no host socket, the connection
+ *  accepted by the cluster's own forwarding), which is what the first deploy refuses and the
+ *  redeploy must find. */
+const INGRESS_PORTS: ReadonlySet<string> = new Set(["port.80", "port.443"]);
+
 /** The deploy-slave severity re-map (shared/preflight.ts: soft checks are "re-evaluated
  *  as hard by the deploy preflight") — a box that passes the catalogue's own grading may still
  *  be un-deployable. Every check becomes `hard` (any FAIL now blocks), and the
- *  SLAVE_FAIL_ON_WARN warns are promoted to fails. Pure over the parsed checks. */
-export function hardenPreflightForSlave(checks: PreflightCheck[]): PreflightCheck[] {
+ *  SLAVE_FAIL_ON_WARN warns are promoted to fails. Pure over the parsed checks.
+ *
+ *  `ingressServed` is the redeploy's reading of the two ingress ports: the machine is a live slave
+ *  whose own ingress serves them, so "already served" PASSES there — the same measurement that
+ *  refuses a first deploy (hostyour-manager#149: the redeploy of a live slave died on its own
+ *  Traefik). A free ingress port on a redeploy stays a pass too: the port is the cluster's to take
+ *  again, and the programs that follow are what put the ingress back. */
+export function hardenPreflightForSlave(checks: PreflightCheck[], opts: { ingressServed?: boolean } = {}): PreflightCheck[] {
   return checks.map((c) => {
+    if (opts.ingressServed && INGRESS_PORTS.has(c.id) && c.status === "warn") {
+      return { ...makeCheck(c.id, "pass", `${c.detail} — served by this cluster's own ingress, as a live slave's must be`), severity: "hard" };
+    }
     const promoted = c.status === "warn" && SLAVE_FAIL_ON_WARN.has(c.id);
     const out: PreflightCheck = { ...c, severity: "hard", status: promoted ? "fail" : c.status };
     if (out.status !== "pass" && out.hint === undefined) {

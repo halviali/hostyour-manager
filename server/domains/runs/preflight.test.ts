@@ -121,6 +121,23 @@ describe("portCheck", () => {
     expect(hasHardFailure({ checkedAt: 0, checks: hard })).toBe(true);
   });
 
+  // THE OTHER DIRECTION: on a REDEPLOY the machine is a live slave whose own Traefik serves the
+  // port through a hostPort — no socket, the connection accepted — and that reading must PASS
+  // there, or no live slave could ever be redeployed (hostyour-manager#149: apps4's redeploy died
+  // on exactly this line). The first deploy keeps refusing the same reading.
+  it("the same served port PASSES on a redeploy — a live slave's own ingress serves it", () => {
+    const served = portCheck({ port: 80, listener: false, answeredAt: "127.0.0.1" });
+    const redeploy = hardenPreflightForSlave([served], { ingressServed: true });
+    expect(redeploy[0]).toMatchObject({ id: "port.80", severity: "hard", status: "pass" });
+    expect(redeploy[0]?.detail).toMatch(/served by this cluster's own ingress/);
+    expect(redeploy[0]?.hint).toBeUndefined();
+    expect(hasHardFailure({ checkedAt: 0, checks: redeploy })).toBe(false);
+    // Only the two ingress ports read the other way: a missing snapd is a failure on either arm.
+    const snapd = hardenPreflightForSlave([makeCheck("snapd.present", "warn", "snapd missing")], { ingressServed: true });
+    expect(snapd[0]?.status).toBe("fail");
+    expect(hardenPreflightForSlave([served])[0]?.status).toBe("fail"); // the first deploy, unchanged
+  });
+
   // THE INNOCENT NEIGHBOUR: a bare machine, both readings empty. Without it the case above could mean
   // the check simply warns on every port it is asked about.
   it("PASSES a bare machine — no socket listening and every connection refused", () => {
