@@ -7,7 +7,7 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
-import { MASTER_ROLES, type Stage, type DriftVerdict } from "../../../shared/enums.ts";
+import { MASTER_ROLES, type Stage, type DriftVerdict, type ArgoSync } from "../../../shared/enums.ts";
 import type { LiveArgoView, LiveDriftView, ConsumerLiveProbeView } from "../../../shared/api-types.ts";
 import { syncedRevisionFor, targetedRevisionFor, type ClusterKubeResolver, type ClusterReader, type SmokeResult } from "../../adapters/kube/port.ts";
 import { consumerArgoAppName, consumerArgocdUrl, consumerNamespace } from "../../../shared/consumer.ts";
@@ -32,54 +32,46 @@ export async function smokeTenant(clusterReader: ClusterReader, namespaces: read
   };
 }
 
-/** The drift block BOTH live routes answer with, built in one place so the Consumers card and the
- *  Tenants card can never give different answers to the same situation.
- *
- *  `targeted` is what the Application's spec TARGETS for the unit's own repo, or null when that could
- *  not be read (ArgoCD unreachable, or a Missing app with no spec at all) — and it is the WHOLE of
- *  `pinned`. There is no second source and no fallback, because there is no second place a pin exists:
- *  the registration states no revision, and the revision the delivery branch stands on is the release
- *  cycle's to write. A unit whose Application cannot be read has nothing pinned, and that is what the
- *  card then says rather than promoting a Manager-side guess to a pin.
- *
- *  `argoRead` says whether ArgoCD answered AT ALL, which is what makes the verdict honest. WHICH verdict
- *  a revision pair earns is deploymentVerdict's answer below, from the resolved revisions alone, and
- *  that separation is the whole safety of this function. */
-export function driftOf(input: { targeted: string | null; deployed: string | null; argoRead: boolean }): LiveDriftView {
-  const { targeted, deployed, argoRead } = input;
+/** The revision block of a live card: `pinned` is what the unit's chart source TARGETS as ArgoCD sees it
+ *  — the delivery branch for a consumer, the books branch for a tenant, a SHA only where a pin says one
+ *  — `deployed` is the commit ArgoCD synced from that source, and `verdict` is ArgoCD's own comparison
+ *  of the two (deploymentVerdict). There is no second source and no fallback: the registration states
+ *  no revision, and the revision the delivery branch stands on is the release cycle's to write. A unit
+ *  whose Application cannot be read has nothing targeted, and that is what the card then says rather
+ *  than promoting a Manager-side guess to a pin. `argoRead` says whether ArgoCD answered AT ALL. */
+export function driftOf(input: { targeted: string | null; deployed: string | null; sync: ArgoSync | null; argoRead: boolean }): LiveDriftView {
+  const { targeted, deployed, sync, argoRead } = input;
   return {
     pinned: targeted,
     deployed,
-    verdict: deploymentVerdict({ pinned: targeted, deployed, argoRead }),
+    verdict: deploymentVerdict({ pinned: targeted, deployed, sync, argoRead }),
   };
 }
 
-/** The ONE deployment question, answered from the RESOLVED revisions and nothing else: does what the
- *  cluster RUNS match what the pointer PINS? (DRIFT_VERDICT, shared/enums.ts.)
- *
- *  The load-bearing line is the middle one. "converged" is a statement ABOUT a comparison, so it may be
- *  given only where a comparison actually took place; with no pin and nothing deployed there was nothing
- *  to compare, and answering `deployed === pinned` there is how `null === null` became a GREEN "in sync"
- *  on a unit with nothing running. That neutral answer is what makes this read HONEST WITHOUT THE ROW
- *  HAVING TO BE TRUSTWORTHY — and no inventory row is consulted here at all, which is the point:
- *
- *    A consumer RESUME moves the GitOps pointer in its second step and commits it (suspend-resume.run.ts
- *    `resume-pointer`), then records the row only in its fourth (`record-active`, on success), and
- *    nothing rolls the pointer back in between. A resume that fails at `watch-sync` therefore leaves
- *    apps.status = "suspended" while the pointer STANDS IN active/ pinning a SHA — and the failure that
- *    produces it is precisely the one where no Application exists (watch-sync's own message reports
- *    health=Missing). Read through the row, that consumer is "deliberately un-deployed"; read honestly,
- *    it is pinned with nothing running. "not-deployed" is TRUE of both readings — of the deliberate
- *    suspend AND of the broken resume — so the card stops asserting a conclusion it cannot support in
- *    either case, and an operator can never read "everything is fine" off a half-finished run.
+/** The ONE deployment question: does what the cluster RUNS match what the Application TARGETS?
+ *  (DRIFT_VERDICT, shared/enums.ts.) The answer is ARGOCD'S OWN COMPARISON, `status.sync.status`, and
+ *  never a string comparison of the two revisions: what a consumer Application targets is the delivery
+ *  BRANCH `deploy/<stage>` (a literal, by design — the registration pins no revision, the release
+ *  cycle moves the branch), and what it runs is a commit, so `deployed === pinned` was false on every
+ *  converged consumer and painted every card "drift" (hostyour-manager#141). ArgoCD resolved the branch
+ *  when it compared; Synced means the cluster carries that head, OutOfSync means it does not.
  *
  *  "unknown" comes first because an unread ArgoCD leaves both revisions unknown rather than absent, so
- *  it must not fall through to a claim about them. */
-function deploymentVerdict(input: { pinned: string | null; deployed: string | null; argoRead: boolean }): DriftVerdict {
-  const { pinned, deployed, argoRead } = input;
+ *  it must not fall through to a claim about them; "not-deployed" is the neutral answer where there is
+ *  no Application at all — nothing targeted, nothing running, nothing compared (a suspended consumer,
+ *  or a resume that died before its Application existed) — and never "converged", which is a
+ *  statement about a comparison that must have taken place. One side missing is drift: a source that
+ *  targets nothing of the unit's own repository any more (a foreign source written over the pin) or a
+ *  target nothing has been synced from yet. A sync status ArgoCD itself calls Unknown (the repository
+ *  unreachable, the comparison not made) is reported as exactly that. */
+function deploymentVerdict(input: { pinned: string | null; deployed: string | null; sync: ArgoSync | null; argoRead: boolean }): DriftVerdict {
+  const { pinned, deployed, sync, argoRead } = input;
   if (!argoRead) return "unknown";
   if (pinned === null && deployed === null) return "not-deployed";
-  return deployed === pinned ? "converged" : "drift";
+  if (pinned === null || deployed === null) return "drift";
+  if (sync === "Synced") return "converged";
+  if (sync === "OutOfSync") return "drift";
+  return "unknown";
 }
 
 /** The LIVE half of ONE consumer reconciliation read — the whole body of GET /api/consumers/:appId/live
@@ -132,6 +124,7 @@ export async function probeConsumerLive(
   let argo: LiveArgoView;
   let deployed: string | null = null;
   let targeted: string | null = null;
+  let sync: ArgoSync | null = null;
   if (argoRes.status === "fulfilled") {
     const s = argoRes.value;
     if (s === null) {
@@ -139,6 +132,7 @@ export async function probeConsumerLive(
     } else {
       deployed = input.repoUrl ? syncedRevisionFor(s, input.repoUrl) : s.syncRevision;
       targeted = input.repoUrl ? targetedRevisionFor(s, input.repoUrl) : s.targetRevision;
+      sync = s.sync;
       argo = { ok: true, sync: s.sync, health: s.health, syncRevision: deployed, ...(s.message !== undefined ? { message: s.message } : {}) };
     }
   } else {
@@ -151,7 +145,7 @@ export async function probeConsumerLive(
   // that column, while the pin moves through
   // GitOps. A consumer whose Application is absent — a finished suspend, a half-finished resume — earns
   // the NEUTRAL "not-deployed" and never "converged": nothing was compared (deploymentVerdict).
-  const drift = driftOf({ targeted, deployed, argoRead: argoRes.status === "fulfilled" });
+  const drift = driftOf({ targeted, deployed, sync, argoRead: argoRes.status === "fulfilled" });
   return { cluster, argo, drift, argocdUrl };
 }
 

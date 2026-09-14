@@ -190,6 +190,15 @@ describe("consumer live reconciliation (GET /api/consumers/:appId/live)", () => 
     expect(body.drift).toEqual({ pinned: SHA, deployed: DEPLOYED, verdict: "drift" });
   });
 
+  // What a consumer's chart source targets is the delivery BRANCH, a literal by design; the verdict is
+  // ArgoCD's own comparison against its head, never the string `deployed === pinned` — which was false
+  // on every converged consumer and painted each card "drift" (hostyour-manager#141).
+  it("a consumer following its delivery branch reads converged while ArgoCD says Synced", async () => {
+    seedConsumer();
+    const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: "deploy/prod", synced: DEPLOYED })));
+    expect((await live(app, cookie)).drift).toEqual({ pinned: "deploy/prod", deployed: DEPLOYED, verdict: "converged" });
+  });
+
   it("no drift when the deployed SHA matches the pinned revision", async () => {
     seedConsumer();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })));

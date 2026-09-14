@@ -19,6 +19,7 @@ describe("reconciliation vocabulary", () => {
   it("renders a revision as 7 chars, and a missing one as the stated word 'none'", () => {
     expect(sha7(SHA)).toBe("1a2b3c4");
     expect(sha7(null)).toBe("none");
+    expect(sha7("deploy/prod")).toBe("deploy/prod"); // a branch a consumer follows is shown whole, never cut like a commit
   });
 
   // THE REGRESSION for the false green the suspend fix introduced. A unit whose pointer generates no

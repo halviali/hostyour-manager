@@ -523,6 +523,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     // The registration's pin AS ARGOCD SEES IT (what the auth member's catalog source targets).
     // Stays null until the argo read succeeds and that member exists; the DB row is only the fallback.
     let targeted: string | null = null;
+    let argoSync: ArgoSync | null = null;
     if (argoRes.status === "fulfilled") {
       const byName = argoRes.value;
       const statuses = expectedApps.map((n) => byName.get(n)).filter((s): s is ArgoAppStatus => s !== undefined);
@@ -540,6 +541,9 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
       // catalog and its `$values` chain from hostyour-cloud, so source 0 would answer about the
       // wrong repo, exactly the defect the consumer path already fixed.
       targeted = authStatus ? targetedRevisionFor(authStatus, catalogRepoUrl) : null;
+      // The verdict compares the ANCHOR: the auth member's own sync status, not the rollup — a member
+      // that is missing shows in the rolled-up health, and is not a drift of the anchor's revision.
+      argoSync = authStatus ? authStatus.sync : null;
       argo = { ok: true, sync: rolled.sync, health: rolled.health, syncRevision: deployed };
     } else {
       argo = { ok: false, error: errText(argoRes.reason) };
@@ -550,7 +554,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     // revision and the tenants row records none either, so a comparison is offered exactly where ArgoCD
     // gave both halves. A SUSPENDED tenant keeps every member Application by design, so it goes on
     // being compared exactly like an active one.
-    const drift = driftOf({ targeted, deployed, argoRead: argoRes.status === "fulfilled" });
+    const drift = driftOf({ targeted, deployed, sync: argoSync, argoRead: argoRes.status === "fulfilled" });
     return c.json({ row, cluster, argo, drift, argocdUrl } satisfies TenantLiveView);
   });
 

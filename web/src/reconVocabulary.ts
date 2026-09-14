@@ -34,7 +34,10 @@ export const DEPLOYED = "deployed";
  *  a rendering glitch, while "none" states the fact (nothing pinned / nothing deployed), which is exactly
  *  what a suspended unit's pruned Application looks like. */
 export function sha7(revision: string | null): string {
-  return revision ? revision.slice(0, 7) : "none";
+  if (!revision) return "none";
+  // Only a commit is shortened. What a consumer's chart source targets is the delivery BRANCH
+  // (`deploy/prod`), which cut to seven characters reads as a mangled "deploy/" (hostyour-manager#141).
+  return /^[0-9a-f]{40}$/.test(revision) ? revision.slice(0, 7) : revision;
 }
 
 /** How ONE verdict is shown: the word the operator reads, and the badge tone it wears. `tone` is a
