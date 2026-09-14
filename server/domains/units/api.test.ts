@@ -126,8 +126,8 @@ function onboardPorts(): OnboardPorts {
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,
-    releaseWorkflowTimeoutMs: 100,
-    releaseBuildTimeoutMs: 100,
+    deployRefVisibleMs: 100,
+    releaseBuildAppearMs: 100,
     releasePollIntervalMs: 1,
   };
 }

@@ -92,8 +92,8 @@ function ports(over: Partial<OnboardPorts> & { cluster?: FakeClusterReader } = {
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,
-    releaseWorkflowTimeoutMs: 200,
-    releaseBuildTimeoutMs: 200,
+    deployRefVisibleMs: 200,
+    releaseBuildAppearMs: 200,
     resolveBuildPlaneFqdn: async () => "s1.example",
     ...portOver,
   };

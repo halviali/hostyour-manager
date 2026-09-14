@@ -157,7 +157,8 @@ export interface MasterArgoReader {
     namespace: string,
     name: string,
     until: (s: ArgoAppStatus) => boolean,
-    opts: { timeoutMs: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean },
+    /** No timeoutMs ⇒ unbounded: the watch ends on `until`, `failFast` or the signal alone. */
+    opts: { timeoutMs?: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean },
   ): Promise<ArgoAppStatus>;
   /** Watch a SET of Applications (a tenant fan-out) until `until(byName)` holds or the timeout
    *  fires; returns the last observed name→status map. One list per poll tick (filtered by

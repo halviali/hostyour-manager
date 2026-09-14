@@ -10,7 +10,7 @@ export class FakeMasterArgoReader implements MasterArgoReader {
   readonly watched: string[] = [];
   /** The opts the most recent single-app watch was called with — lets a test inspect the budget and
    *  the fail-fast predicate watch-sync supplied for the phase-aware watch. */
-  lastWatchOpts?: { timeoutMs: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean };
+  lastWatchOpts?: { timeoutMs?: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean };
 
   /** `everyName` answers a set-watch for ANY name asked, and is what a fixture whose subject is not
    *  the watch scripts: enumerating names there means a name added later times out silently instead
@@ -70,7 +70,7 @@ export class FakeMasterArgoReader implements MasterArgoReader {
     namespace: string,
     name: string,
     _until: (s: ArgoAppStatus) => boolean,
-    opts: { timeoutMs: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean },
+    opts: { timeoutMs?: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean },
   ): Promise<ArgoAppStatus> {
     // Single-shot: the test scripts the terminal status the watch converges on; the caller
     // evaluates `until` against it (so a non-terminal scripted status models a timeout, and a

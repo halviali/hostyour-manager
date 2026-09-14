@@ -107,32 +107,6 @@ export interface DispatchWorkflowInput {
   signal?: AbortSignal;
 }
 
-/** One workflow run as GitHub reports it — the fields the release watch correlates + judges on. */
-export interface WorkflowRunSummary {
-  id: number;
-  /** GitHub's display title — the workflow's `run-name`, e.g. "Release 0.1.0-stable". */
-  displayTitle: string;
-  /** queued | in_progress | completed | ... (GitHub's status vocabulary, verbatim). */
-  status: string;
-  /** success | failure | cancelled | ... once completed; null while running. */
-  conclusion: string | null;
-  /** ISO creation time — the trigger step's t0 bounds the correlation window with it. */
-  createdAt: string;
-  /** The run's page on GitHub — surfaced in failure messages so the operator lands on the log. */
-  htmlUrl: string;
-}
-
-export interface ListWorkflowRunsInput {
-  owner: string;
-  repo: string;
-  token: string;
-  workflowFile: string;
-  /** Only runs created at/after this ISO instant (GitHub's `created` filter) — the correlation
-   *  window's lower bound. Absent ⇒ every run of the workflow (the caller filters). */
-  createdAfter?: string;
-  signal?: AbortSignal;
-}
-
 export interface GitHubConsumer {
   /** Read the consumer PAT's granted scopes via a SINGLE GET /repos/{owner}/{repo}, off GitHub's
    *  X-OAuth-Scopes response header (returned on any authenticated classic-PAT request, even a 404).
@@ -173,10 +147,6 @@ export interface GitHubConsumer {
   dispatchWorkflow(input: DispatchWorkflowInput): Promise<void>;
   /** The workflow's runs, newest first — the correlation read behind watch-release-workflow: the
    *  watcher matches displayTitle + the trigger's t0 and aborts on ambiguity. */
-  listWorkflowRuns(input: ListWorkflowRunsInput): Promise<WorkflowRunSummary[]>;
-  /** One workflow run by id — the follow read: polled until status "completed", then judged on its
-   *  conclusion. */
-  getWorkflowRun(input: { owner: string; repo: string; token: string; runId: number; signal?: AbortSignal }): Promise<WorkflowRunSummary>;
 }
 
 /** The PAT lacks the admin:repo_hook scope — GitHub answers 403 (or 404, to avoid leaking repo

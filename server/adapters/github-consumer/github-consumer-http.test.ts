@@ -218,7 +218,7 @@ describe("github-consumer adapter — readTokenScopes", () => {
   });
 });
 
-describe("github-consumer adapter — the release workflow (dispatch + runs)", () => {
+describe("github-consumer adapter — the release workflow (dispatch)", () => {
   const stub204 = (path: string) => (async (url: string | URL | Request, init?: RequestInit) => {
     const u = typeof url === "string" ? url : url.toString();
     const key = `${init?.method ?? "GET"} ${u.replace("https://api.github.com", "")}`;
@@ -247,25 +247,10 @@ describe("github-consumer adapter — the release workflow (dispatch + runs)", (
     await expect(client.dispatchWorkflow({ owner: "x", repo: "acme", token: "tkn", workflowFile: "release.yml", ref: "main", inputs: {} })).rejects.toThrow(/422: Unexpected inputs provided/);
   });
 
-  it("lists the workflow runs with the created>= window and maps GitHub's fields to the summary shape", async () => {
-    const created = encodeURIComponent(">=2026-07-28T10:00:00.000Z");
+  it("resolves the repo's default branch off GET /repos", async () => {
     const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
-      [`GET /repos/x/acme/actions/workflows/release.yml/runs?event=workflow_dispatch&per_page=100&created=${created}`]: {
-        status: 200,
-        body: { workflow_runs: [{ id: 12, display_title: "Release 1.0.0-stable", status: "completed", conclusion: "success", created_at: "2026-07-28T10:00:05Z", html_url: "https://github.com/x/acme/actions/runs/12" }] },
-      },
-    }) });
-    expect(await client.listWorkflowRuns({ owner: "x", repo: "acme", token: "tkn", workflowFile: "release.yml", createdAfter: "2026-07-28T10:00:00.000Z" })).toEqual([
-      { id: 12, displayTitle: "Release 1.0.0-stable", status: "completed", conclusion: "success", createdAt: "2026-07-28T10:00:05Z", htmlUrl: "https://github.com/x/acme/actions/runs/12" },
-    ]);
-  });
-
-  it("gets one run by id and resolves the repo's default branch off GET /repos", async () => {
-    const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
-      "GET /repos/x/acme/actions/runs/12": { status: 200, body: { id: 12, display_title: "Release 1.0.0-stable", status: "in_progress", conclusion: null, created_at: "t", html_url: "u" } },
       "GET /repos/x/acme": { status: 200, body: { default_branch: "master" } },
     }) });
-    expect((await client.getWorkflowRun({ owner: "x", repo: "acme", token: "tkn", runId: 12 })).status).toBe("in_progress");
     expect(await client.getDefaultBranch({ owner: "x", repo: "acme", token: "tkn" })).toBe("master");
   });
 });

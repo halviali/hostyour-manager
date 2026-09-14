@@ -98,7 +98,7 @@ describe("onboard run definition", () => {
     expect(def.steps({} as OnboardParams).map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
       "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
-      "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-workflow", "watch-release-build", "watch-deployment",
+      "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);
     expect(() => def.plan({} as OnboardParams, { db: db.db })).toThrow(/planStream/);
@@ -185,7 +185,6 @@ describe("onboard run definition", () => {
     expect(row).not.toHaveProperty("version");
 
     // the watches read the cycle's own results — the minted tag is read, never computed
-    expect(logs.some((l) => l.includes("release run \"Release 1.0.0-stable\" completed with conclusion success"))).toBe(true);
     expect(logs.some((l) => l.includes(`the bump wrote ${MINTED_TAG}-abc1234`))).toBe(true);
   });
 

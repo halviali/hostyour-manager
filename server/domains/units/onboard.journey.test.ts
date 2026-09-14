@@ -102,8 +102,8 @@ function fakePorts(over: Partial<OnboardPorts> = {}): OnboardPorts {
     tenantSubdomains: async () => [],
     declareListening: true,
     argoWatchTimeoutMs: 1000,
-    releaseWorkflowTimeoutMs: 200,
-    releaseBuildTimeoutMs: 200,
+    deployRefVisibleMs: 200,
+    releaseBuildAppearMs: 200,
     releasePollIntervalMs: 1,
     dispatchRetry: { budgetMs: 50, intervalMs: 1 },
     github: new FakeGitHubConsumer(),
@@ -172,7 +172,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     expect(planned?.steps.map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
       "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
-      "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-workflow", "watch-release-build", "watch-deployment",
+      "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);
     expect(planned?.targetKind).toBe("cluster");

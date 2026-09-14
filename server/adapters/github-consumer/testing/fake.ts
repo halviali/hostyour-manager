@@ -6,7 +6,7 @@
 // contract the HTTP client answers.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput, ListWorkflowRunsInput, WorkflowRunSummary,
+  DispatchWorkflowInput,
 } from "../port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener } from "../port.ts";
 
@@ -53,7 +53,7 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   /** When true, readTokenScopes throws WebhookScopeError (the PAT is invalid/expired — a 401). */
   tokenInvalid = false;
 
-  // ---- workflow simulation (trigger-release + watch-release-workflow) ----
+  // ---- the release trigger (trigger-release) ----
   /** Every dispatch call, in order — a test asserts the trigger fired once with {version, channel,
    *  stage} and against which workflow file. */
   readonly dispatches: DispatchWorkflowInput[] = [];
@@ -63,12 +63,6 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   /** When set, every dispatch throws GitHubConsumerError with this message + status — the 422/403
    *  surface-GitHub's-own-message path. */
   dispatchRefusal: { status: number; message: string } | null = null;
-  /** The runs a dispatch mints: each dispatch appends one run whose displayTitle follows the kit's
-   *  run-name ("Release <version>-<channel>") and whose lifecycle a test drives via completeRun(). */
-  private readonly runs: WorkflowRunSummary[] = [];
-  /** What a freshly dispatched run reports until completeRun() settles it. */
-  dispatchedRunStatus = "completed";
-  dispatchedRunConclusion: string | null = "success";
 
   /** owner/repo -> the tag names listReleaseTags answers; unseeded repos answer none. */
   private readonly tags = new Map<string, string[]>();
@@ -140,29 +134,7 @@ export class FakeGitHubConsumer implements GitHubConsumer {
     return { deleted: matches.length, urls: matches.map((h) => h.targetUrl) };
   }
 
-  /** Pre-seed a workflow run (e.g. an OLD run of the same version+channel that must NOT be matched,
-   *  or a second identical run to drive the ambiguity abort). */
-  seedRun(run: Partial<WorkflowRunSummary> & { displayTitle: string }): WorkflowRunSummary {
-    const full: WorkflowRunSummary = {
-      id: this.nextId++,
-      status: "completed",
-      conclusion: "success",
-      createdAt: new Date(0).toISOString(),
-      htmlUrl: `https://github.com/x/y/actions/runs/${this.nextId}`,
-      ...run,
-    };
-    this.runs.push(full);
-    return full;
-  }
 
-  /** Settle a run a test dispatched with dispatchedRunStatus "in_progress". */
-  completeRun(id: number, conclusion: string): void {
-    const run = this.runs.find((r) => r.id === id);
-    if (run) {
-      run.status = "completed";
-      run.conclusion = conclusion;
-    }
-  }
 
   /** What getDefaultBranch answers — overridable so a test can drive a master-named repo. */
   defaultBranch = "main";
@@ -183,26 +155,6 @@ export class FakeGitHubConsumer implements GitHubConsumer {
       );
     }
     this.dispatches.push(input);
-    const version = input.inputs["version"] ?? "";
-    const channel = input.inputs["channel"] ?? "";
-    this.runs.push({
-      id: this.nextId++,
-      displayTitle: `Release ${version}-${channel}`,
-      status: this.dispatchedRunStatus,
-      conclusion: this.dispatchedRunStatus === "completed" ? this.dispatchedRunConclusion : null,
-      createdAt: new Date().toISOString(),
-      htmlUrl: `https://github.com/${input.owner}/${input.repo}/actions/runs/${this.nextId}`,
-    });
   }
 
-  async listWorkflowRuns(input: ListWorkflowRunsInput): Promise<WorkflowRunSummary[]> {
-    const floor = input.createdAfter ? Date.parse(input.createdAfter) : Number.NEGATIVE_INFINITY;
-    return this.runs.filter((r) => Date.parse(r.createdAt) >= floor).map((r) => ({ ...r }));
-  }
-
-  async getWorkflowRun(input: { owner: string; repo: string; token: string; runId: number; signal?: AbortSignal }): Promise<WorkflowRunSummary> {
-    const run = this.runs.find((r) => r.id === input.runId);
-    if (!run) throw new GitHubConsumerError(`fake: no workflow run ${input.runId}`, 404);
-    return { ...run };
-  }
 }

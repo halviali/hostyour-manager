@@ -10,7 +10,7 @@
 // the bump wrote (never computing it) and holds the Application to the bump commit, fail-fast on a
 // terminally failed sync operation.
 import { describe, it, expect } from "vitest";
-import { triggerReleaseStep, watchReleaseWorkflowStep, watchReleaseBuildStep, watchDeploymentStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
+import { triggerReleaseStep, watchReleaseBuildStep, watchDeploymentStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
@@ -37,8 +37,8 @@ function portsWith(over: Partial<OnboardPorts> = {}): OnboardPorts {
       argoNamespace: "argocd",
     }),
     argoWatchTimeoutMs: 1000,
-    releaseWorkflowTimeoutMs: 100,
-    releaseBuildTimeoutMs: 100,
+    deployRefVisibleMs: 100,
+    releaseBuildAppearMs: 100,
     releasePollIntervalMs: 1,
     dispatchRetry: { budgetMs: 50, intervalMs: 1 },
     ...over,
@@ -61,22 +61,20 @@ const ctx = (logs: string[]): StepCtx =>
   }) as unknown as StepCtx;
 
 describe("trigger-release", () => {
-  it("dispatches release.yml on the repo's default branch with {version, channel, stage} and records the trigger window", async () => {
+  it("dispatches release.yml on the repo's default branch with {version, channel, stage}", async () => {
     const github = new FakeGitHubConsumer();
     github.defaultBranch = "master";
-    const runtime: ReleaseCycleRuntime = {};
-    await triggerReleaseStep(portsWith({ github }), params(), runtime).run(ctx([]));
+    await triggerReleaseStep(portsWith({ github }), params()).run(ctx([]));
     expect(github.dispatches).toEqual([
       expect.objectContaining({ owner: "x", repo: "acme", workflowFile: "release.yml", ref: "master", inputs: { version: "1.0.0", channel: "stable", stage: "prod" } }),
     ]);
-    expect(runtime.triggeredAtIso).toBeDefined(); // the correlation window's lower bound
   });
 
   it("retries the not-yet-indexed 404 inside the budget, then succeeds", async () => {
     const github = new FakeGitHubConsumer();
     github.dispatchNotFoundTimes = 2; // the kit landed moments ago; GitHub indexes with a lag
     const logs: string[] = [];
-    await triggerReleaseStep(portsWith({ github }), params(), {}).run(ctx(logs));
+    await triggerReleaseStep(portsWith({ github }), params()).run(ctx(logs));
     expect(github.dispatches).toHaveLength(1);
     expect(logs.filter((l) => l.includes("retrying the dispatch"))).toHaveLength(2);
   });
@@ -84,49 +82,14 @@ describe("trigger-release", () => {
   it("surfaces a 422 IMMEDIATELY with GitHub's own message — an old kit's workflow will not heal by waiting", async () => {
     const github = new FakeGitHubConsumer();
     github.dispatchRefusal = { status: 422, message: "Unexpected inputs provided: [\"stage\"]" };
-    await expect(triggerReleaseStep(portsWith({ github }), params(), {}).run(ctx([]))).rejects.toThrow(/422: Unexpected inputs provided/);
+    await expect(triggerReleaseStep(portsWith({ github }), params()).run(ctx([]))).rejects.toThrow(/422: Unexpected inputs provided/);
     expect(github.dispatches).toHaveLength(0); // never recorded as fired, never retried
   });
 
   it("surfaces a 403 immediately with GitHub's own message", async () => {
     const github = new FakeGitHubConsumer();
     github.dispatchRefusal = { status: 403, message: "Resource not accessible by personal access token" };
-    await expect(triggerReleaseStep(portsWith({ github }), params(), {}).run(ctx([]))).rejects.toThrow(/403: Resource not accessible/);
-  });
-});
-
-describe("watch-release-workflow", () => {
-  it("correlates THE run by the kit's run-name inside the trigger window and follows it to success", async () => {
-    const github = new FakeGitHubConsumer();
-    // An OLD run of the same title outside the window must not be matched.
-    github.seedRun({ displayTitle: "Release 1.0.0-stable", createdAt: new Date(0).toISOString() });
-    const runtime: ReleaseCycleRuntime = {};
-    await triggerReleaseStep(portsWith({ github }), params(), runtime).run(ctx([]));
-    const logs: string[] = [];
-    await watchReleaseWorkflowStep(portsWith({ github }), params(), runtime).run(ctx(logs));
-    expect(logs.some((l) => l.includes('release run "Release 1.0.0-stable" completed with conclusion success'))).toBe(true);
-  });
-
-  it("aborts on ambiguity — two runs of this title inside the window mean the correlation cannot name ITS run", async () => {
-    const github = new FakeGitHubConsumer();
-    const runtime: ReleaseCycleRuntime = {};
-    await triggerReleaseStep(portsWith({ github }), params(), runtime).run(ctx([]));
-    github.seedRun({ displayTitle: "Release 1.0.0-stable", createdAt: new Date().toISOString() });
-    await expect(watchReleaseWorkflowStep(portsWith({ github }), params(), runtime).run(ctx([]))).rejects.toThrow(/refusing to guess/);
-  });
-
-  it("fails with the run's conclusion + URL when the workflow completed without success", async () => {
-    const github = new FakeGitHubConsumer();
-    github.dispatchedRunConclusion = "failure";
-    const runtime: ReleaseCycleRuntime = {};
-    await triggerReleaseStep(portsWith({ github }), params(), runtime).run(ctx([]));
-    await expect(watchReleaseWorkflowStep(portsWith({ github }), params(), runtime).run(ctx([]))).rejects.toThrow(/conclusion "failure".*actions\/runs/);
-  });
-
-  it("fails when no run of this title ever appears inside the watch budget", async () => {
-    const github = new FakeGitHubConsumer();
-    const runtime: ReleaseCycleRuntime = { triggeredAtIso: new Date().toISOString() };
-    await expect(watchReleaseWorkflowStep(portsWith({ github }), params(), runtime).run(ctx([]))).rejects.toThrow(/no workflow run titled/);
+    await expect(triggerReleaseStep(portsWith({ github }), params()).run(ctx([]))).rejects.toThrow(/403: Resource not accessible/);
   });
 });
 
@@ -134,7 +97,7 @@ describe("watch-release-build", () => {
   it("awaits the unit's release run, reads the FULL minted tag off it, and keeps it in-run for the record", async () => {
     const buildPlane = new FakeBuildPlane();
     buildPlane.seedReleaseRun("acme", { runName: "acme-release-9", releaseTag: MINTED_TAG, succeeded: true });
-    const runtime: ReleaseCycleRuntime = { triggeredAtIso: new Date().toISOString() };
+    const runtime: ReleaseCycleRuntime = {};
     const logs: string[] = [];
     await watchReleaseBuildStep(portsWith({ buildPlane }), params(), runtime).run(ctx(logs));
     expect(buildPlane.releaseWatches).toEqual([expect.objectContaining({ unit: "acme", version: "1.0.0", channel: "stable" })]);
@@ -148,8 +111,8 @@ describe("watch-release-build", () => {
     await expect(watchReleaseBuildStep(portsWith({ buildPlane }), params(), {}).run(ctx([]))).rejects.toThrow(/acme-build\/acme-release-9.*FAILED/);
   });
 
-  it("fails when no matching run settles inside the budget (the webhook fired nothing)", async () => {
-    await expect(watchReleaseBuildStep(portsWith(), params(), {}).run(ctx([]))).rejects.toThrow(/no release PipelineRun for 1\.0\.0-stable-\*/);
+  it("fails when no matching run APPEARS inside the budget (the webhook fired nothing)", async () => {
+    await expect(watchReleaseBuildStep(portsWith(), params(), {}).run(ctx([]))).rejects.toThrow(/no release PipelineRun for 1\.0\.0-stable-\* appeared/);
   });
 });
 
@@ -168,7 +131,7 @@ describe("watch-deployment", () => {
   it("fails when the delivery branch never carries the release's pins (the bump commit is not visible)", async () => {
     const prt = portsWith({
       repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "0.0.0-placeholder"\n' } }),
-      releaseWorkflowTimeoutMs: 30,
+      deployRefVisibleMs: 30,
     });
     await expect(watchDeploymentStep(prt, deployable()).run(ctx([]))).rejects.toThrow(/bump commit is not visible/);
   });

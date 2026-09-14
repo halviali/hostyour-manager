@@ -110,16 +110,16 @@ export class TektonBuildPlane implements BuildPlane {
     this.pollMs = cfg.pollMs ?? DEFAULT_POLL_MS;
   }
 
-  async awaitReleaseRun(query: ReleaseRunQuery, opts: { timeoutMs: number; signal?: AbortSignal }): Promise<ReleaseRunOutcome | null> {
+  async awaitReleaseRun(query: ReleaseRunQuery, opts: { appearMs: number; signal?: AbortSignal }): Promise<ReleaseRunOutcome | null> {
     // The run lives in the UNIT's own build namespace and was created by the EventListener when the
     // release script pushed the deploy ref — this is a pure watch, nothing is created. The match:
-    // the ownership label, the release-tag param's `<version>-<channel>-` prefix (the ts14 half of
-    // the tag is minted repo-side and the manager never computes it), and — when the trigger time
-    // is known — a creation at/after it, so an OLD run of the same release is never adopted.
+    // the ownership label and the release-tag param's `<version>-<channel>-` prefix (the ts14 half
+    // of the tag is minted repo-side and the manager never computes it). The deadline bounds the
+    // APPEARANCE only: once the run exists, it is followed to its end without a clock.
     const ns = `${query.unit}-build`;
     const selector = `image-builder.io/consumer=${query.unit}`;
     const prefix = `${query.version}-${query.channel}-`;
-    const deadline = Date.now() + opts.timeoutMs;
+    const appearBy = Date.now() + opts.appearMs;
     for (;;) {
       let runs: ListedPipelineRun[];
       try {
@@ -129,7 +129,6 @@ export class TektonBuildPlane implements BuildPlane {
       }
       const match = runs
         .filter((r) => (r.params["release-tag"] ?? "").startsWith(prefix))
-        .filter((r) => query.sinceIso === undefined || r.creationTimestamp >= query.sinceIso)
         .sort((a, b) => a.creationTimestamp.localeCompare(b.creationTimestamp))
         .at(-1);
       if (match) {
@@ -140,10 +139,11 @@ export class TektonBuildPlane implements BuildPlane {
           throw upstream(`could not read PipelineRun ${ns}/${match.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
         if (outcome !== null) return { runName: match.name, releaseTag: match.params["release-tag"] ?? "", succeeded: outcome.succeeded };
+      } else if (Date.now() >= appearBy) {
+        return null; // nothing appeared — the caller decides
       }
-      const remaining = deadline - Date.now();
-      if (remaining <= 0 || opts.signal?.aborted) return null; // timed out / cancelled — the caller decides
-      await sleep(Math.min(this.pollMs, remaining), opts.signal);
+      if (opts.signal?.aborted) return null;
+      await sleep(this.pollMs, opts.signal);
       if (opts.signal?.aborted) return null;
     }
   }

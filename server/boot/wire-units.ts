@@ -89,10 +89,10 @@ const GATE_POLL_BUDGET_MS = GATE_JOB_BUDGET_MS + 2 * 60_000;
 const RELOCATION_JOB_TIMEOUT_MS = 30 * 60_000;
 // The release workflow only mints the tag and pushes the deploy ref (checkout + two git pushes), so
 // its correlation + follow budget is minutes; watch-deployment's bump-commit read shares it.
-const RELEASE_WORKFLOW_TIMEOUT_MS = 5 * 60_000;
+const DEPLOY_REF_VISIBLE_MS = 5 * 60_000; // the bump's push becomes visible in seconds; five minutes is generous
 // The build-plane release run (clone + install + buildah + bump + sync) gets the cold-build ceiling —
 // the same order the tenant ensure-images budget uses, for the same reason.
-const RELEASE_BUILD_TIMEOUT_MS = 30 * 60_000;
+const RELEASE_BUILD_APPEAR_MS = 5 * 60_000; // the webhook fires the PipelineRun in seconds; five minutes is generous
 // A whole tenant fan-out (base + trio + N per-app stacks) has more to converge than a single consumer
 // app, so it gets a longer budget before the set-watch fails loudly.
 const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
@@ -475,8 +475,8 @@ function buildConsumerOnboarding(
     webhookSubdomain: config.webhook.subdomain,
     resolveBuildPlaneFqdn,
     // The release-cycle watches: the workflow correlation/follow and the build-plane release run.
-    releaseWorkflowTimeoutMs: RELEASE_WORKFLOW_TIMEOUT_MS,
-    releaseBuildTimeoutMs: RELEASE_BUILD_TIMEOUT_MS,
+    deployRefVisibleMs: DEPLOY_REF_VISIBLE_MS,
+    releaseBuildAppearMs: RELEASE_BUILD_APPEAR_MS,
     buildPlane,
     // The unit's ONE public DNS record (provision-dns / remove-dns). Absent ⇒ fail loud.
     ...(dns ? { dns } : {}),

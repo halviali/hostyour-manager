@@ -196,9 +196,9 @@ export class KubeMasterArgoReader implements MasterArgoReader {
     namespace: string,
     name: string,
     until: (s: ArgoAppStatus) => boolean,
-    opts: { timeoutMs: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean },
+    opts: { timeoutMs?: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean },
   ): Promise<ArgoAppStatus> {
-    const deadline = Date.now() + opts.timeoutMs;
+    const deadline = opts.timeoutMs === undefined ? Number.POSITIVE_INFINITY : Date.now() + opts.timeoutMs;
     const stop = (s: ArgoAppStatus): boolean => until(s) || (opts.failFast?.(s) ?? false);
     let last = (await this.getApplication(namespace, name)) ?? MISSING_APP;
     while (!stop(last) && !opts.signal?.aborted) {

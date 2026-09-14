@@ -27,7 +27,7 @@ import {
 } from "./onboard-steps.ts";
 import { deployableOnboardCleanups, buildOnlyOnboardCleanups, assertOnboardAbortable } from "./onboard-abort.ts";
 import {
-  triggerReleaseStep, watchReleaseWorkflowStep, watchReleaseBuildStep, watchDeploymentStep, type ReleaseCycleRuntime,
+  triggerReleaseStep, watchReleaseBuildStep, watchDeploymentStep, type ReleaseCycleRuntime,
 } from "./onboard-release-cycle.ts";
 import { checkStep, DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
 import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
@@ -227,12 +227,12 @@ export interface OnboardPorts {
    *  and this bound only catches a PipelineRun that never settles. */
   validationBudgetMs?: number;
   argoWatchTimeoutMs: number;
-  /** How long the workflow correlation + follow may take (trigger → the run completes) — the
-   *  workflow only mints the tag and pushes the deploy ref, so this is minutes, not the build
-   *  budget. watch-deployment's bump-commit read shares it (the same order of magnitude). */
-  releaseWorkflowTimeoutMs: number;
-  /** How long the build-plane release run may take (clone + install + buildah + bump + sync). */
-  releaseBuildTimeoutMs: number;
+  /** How long the bump's commit may take to become VISIBLE on the delivery branch (a push lag of
+   *  seconds); the deployment it produces is then followed without a clock. */
+  deployRefVisibleMs: number;
+  /** How long the release PipelineRun may take to APPEAR on the build plane after the deploy ref was
+   *  pushed (a webhook delivery of seconds); the build itself is followed without a clock. */
+  releaseBuildAppearMs: number;
   /** Poll tick of the release watches; overridable for tests. */
   releasePollIntervalMs?: number;
   /** The trigger's 404 retry window (a just-committed workflow indexes with a lag); overridable for
@@ -357,8 +357,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     setupWebhookStep(ports, p),
     // The trigger + the watches: start the cycle ONCE through the injected workflow
     // — the proof of the injection — and read its results back stage by stage.
-    triggerReleaseStep(ports, p, release),
-    watchReleaseWorkflowStep(ports, p, release),
+    triggerReleaseStep(ports, p),
     watchReleaseBuildStep(ports, p, release),
     watchDeploymentStep(ports, p),
     smokeStep(ports, p),
@@ -397,7 +396,7 @@ function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] 
     awaitBuildNamespaceStep(ports, p),
     injectReleaseKitStep(ports, p),
     setupWebhookStep(ports, p),
-    triggerReleaseStep(ports, p, release),
+    triggerReleaseStep(ports, p),
     watchReleaseBuildStep(ports, p, release),
     recordBuildOnlyStep(ports, p, release),
   ];

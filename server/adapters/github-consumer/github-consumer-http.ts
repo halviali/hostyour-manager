@@ -5,7 +5,7 @@
 // github.ts one is platform-repo/single-token scoped and has no hook or workflow methods.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput, ListWorkflowRunsInput, WorkflowRunSummary,
+  DispatchWorkflowInput,
 } from "./port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener } from "./port.ts";
 
@@ -15,27 +15,6 @@ type FetchLike = typeof fetch;
 interface RepoHook {
   id: number;
   config?: { url?: string };
-}
-
-/** One workflow run as GitHub returns it — only the fields the release watch reads. */
-interface ApiWorkflowRun {
-  id: number;
-  display_title?: string;
-  status?: string;
-  conclusion?: string | null;
-  created_at?: string;
-  html_url?: string;
-}
-
-function toSummary(r: ApiWorkflowRun): WorkflowRunSummary {
-  return {
-    id: r.id,
-    displayTitle: r.display_title ?? "",
-    status: r.status ?? "",
-    conclusion: r.conclusion ?? null,
-    createdAt: r.created_at ?? "",
-    htmlUrl: r.html_url ?? "",
-  };
 }
 
 export class HttpGitHubConsumer implements GitHubConsumer {
@@ -214,21 +193,4 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     throw new GitHubConsumerError(`GitHub POST ${path} → ${res.status}: ${message}`, res.status);
   }
 
-  async listWorkflowRuns(input: ListWorkflowRunsInput): Promise<WorkflowRunSummary[]> {
-    const base = this.repoPath(input.owner, input.repo);
-    const created = input.createdAfter ? `&created=${encodeURIComponent(`>=${input.createdAfter}`)}` : "";
-    const path = `${base}/actions/workflows/${encodeURIComponent(input.workflowFile)}/runs?event=workflow_dispatch&per_page=100${created}`;
-    const res = await this.send(input.token, path, input.signal ? { signal: input.signal } : undefined);
-    if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
-    const body = (await res.json()) as { workflow_runs?: ApiWorkflowRun[] };
-    return (body.workflow_runs ?? []).map(toSummary);
-  }
-
-  async getWorkflowRun(input: { owner: string; repo: string; token: string; runId: number; signal?: AbortSignal }): Promise<WorkflowRunSummary> {
-    const base = this.repoPath(input.owner, input.repo);
-    const path = `${base}/actions/runs/${input.runId}`;
-    const res = await this.send(input.token, path, input.signal ? { signal: input.signal } : undefined);
-    if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
-    return toSummary((await res.json()) as ApiWorkflowRun);
-  }
 }

@@ -45,15 +45,15 @@ describe("TektonBuildPlane", () => {
       outcomes: [{ succeeded: true }],
     });
     const plane = new TektonBuildPlane(cfg(), c);
-    const out = await plane.awaitReleaseRun({ unit: "acme", version: "1.0.0", channel: "stable", sinceIso: "2026-07-28T10:00:00Z" }, { timeoutMs: 100 });
+    const out = await plane.awaitReleaseRun({ unit: "acme", version: "1.0.0", channel: "stable" }, { appearMs: 100 });
     expect(out).toEqual({ runName: "acme-release-7", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
     expect(c.rec.listSelectors.at(-1)).toBe("image-builder.io/consumer=acme");
     expect(c.rec.listNamespaces.at(-1)).toBe("acme-build"); // the per-unit namespace, never image-builder
   });
 
-  it("awaitReleaseRun returns null when no matching run settles inside the budget (the caller decides)", async () => {
+  it("awaitReleaseRun returns null when no matching run APPEARS inside the budget (the caller decides)", async () => {
     const c = new FakeCluster({ runs: [] });
     const plane = new TektonBuildPlane(cfg(), c);
-    await expect(plane.awaitReleaseRun({ unit: "acme", version: "1.0.0", channel: "stable" }, { timeoutMs: 5 })).resolves.toBeNull();
+    await expect(plane.awaitReleaseRun({ unit: "acme", version: "1.0.0", channel: "stable" }, { appearMs: 5 })).resolves.toBeNull();
   });
 });
