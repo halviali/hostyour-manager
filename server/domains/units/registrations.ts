@@ -428,18 +428,35 @@ export class Registrations {
   }
 
   /** Repoint the stage registration's `cluster` field — the WHOLE move, as far as GitOps is
-   *  concerned: the appsets select on this field, so the source cluster stops generating the
-   *  Application and the target starts. The file keeps its path, so a unit moves within its stage,
-   *  never across one. */
+   *  concerned: the delivery appset selects on this field, so the source cluster stops generating
+   *  the Application and the target starts. The source's name moves into `leaving`, which the two
+   *  fence appsets ALSO select on: the source keeps the AppProject the Application's own deletion
+   *  needs, until clearLeaving takes the name off (hostyour-cloud#214). The file keeps its path, so a
+   *  unit moves within its stage, never across one. */
   async setCluster(stage: Stage, name: string, cluster: string, runId: string): Promise<{ commit: string }> {
     const current = await this.readRegistration(stage, name);
     if (!current) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
+    const leaving = current.entry.cluster;
     return this.repo.withBranch(this.branch, (books) =>
       books.commit({
-        message: `migrate(${name}): ${current.entry.cluster} -> ${cluster} ${trailer(runId)}`,
-        write: [{ path: guard(stagePath(stage, name)), content: serializePointer(ConsumerRegistrationSchema, { ...current.entry, cluster }) }],
+        message: `migrate(${name}): ${leaving} -> ${cluster} ${trailer(runId)}`,
+        write: [{
+          path: guard(stagePath(stage, name)),
+          content: serializePointer(ConsumerRegistrationSchema, { ...current.entry, cluster, ...(leaving !== undefined && leaving !== cluster ? { leaving } : {}) }),
+        }],
       }),
     );
+  }
+
+  /** Take `leaving` off the stage registration — the last GitOps act of a move, once the source
+   *  Application is gone: the source's fence appsets stop selecting the file and prune the
+   *  AppProject, the admission policy and the argo-sync grant. A registration that carries none is
+   *  left as it stands (a resume, or a move that never set it). */
+  async clearLeaving(stage: Stage, name: string, runId: string): Promise<{ commit: string } | null> {
+    const current = await this.readRegistration(stage, name);
+    if (!current) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
+    if (current.entry.leaving === undefined) return null;
+    return this.flip(stage, name, { leaving: undefined }, `migrate(${name}): left ${current.entry.leaving} ${trailer(runId)}`);
   }
 
   /** Remove a unit's registration for ONE stage (offboard), and — when that was its LAST stage file —
@@ -505,7 +522,7 @@ export class Registrations {
    *  Both files move in ONE commit, from ONE read of the tree. Two commits would leave a window where
    *  the stage says paused and the build still runs, and a second fetch could decide against a tree
    *  other than the one it writes to. */
-  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; quota?: UnitQuota }, message: string): Promise<{ commit: string }> {
+  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; leaving?: string | undefined; quota?: UnitQuota }, message: string): Promise<{ commit: string }> {
     return this.repo.withBranch(this.branch, async (books) => {
       const raw = await books.readFile(stagePath(stage, name));
       if (raw === null) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);

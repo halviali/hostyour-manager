@@ -124,4 +124,23 @@ describe("Registrations suspend / quiesce", () => {
     expect((await reg.readRegistration("prod", "acme"))?.entry).toMatchObject({ removing: true, suspended: false, quiesced: false, cluster: "s1" });
     expect((await reg.readBuildRegistration("acme"))?.entry.removing).toBe(false);
   });
+
+  // A move: the repoint names the source in `leaving` so the source's fence ApplicationSets keep its
+  // AppProject standing while the source Application is deleted; the last act takes the name off
+  // (hostyour-cloud#214).
+  it("a repoint names the cluster the unit is leaving, and clearLeaving takes the name off once", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new Registrations(repo);
+    await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy(), runId: "run_1" });
+    await reg.setCluster("prod", "acme", "s2", "run_2");
+    expect(repo.commits.at(-1)!.message).toBe("migrate(acme): s1 -> s2 [run_2]");
+    expect((await reg.readRegistration("prod", "acme"))?.entry).toMatchObject({ cluster: "s2", leaving: "s1" });
+    expect(await reg.clearLeaving("prod", "acme", "run_3")).toEqual({ commit: expect.any(String) });
+    expect(repo.commits.at(-1)!.message).toBe("migrate(acme): left s1 [run_3]");
+    const entry = (await reg.readRegistration("prod", "acme"))!.entry;
+    expect(entry.cluster).toBe("s2");
+    expect(entry.leaving).toBeUndefined();
+    expect(repo.read(repo.booksBranch, "registrations/acme/prod.yaml")).not.toContain("leaving"); // the field is gone from the file, not written empty
+    expect(await reg.clearLeaving("prod", "acme", "run_4")).toBeNull(); // a resume finds nothing to take off
+  });
 });

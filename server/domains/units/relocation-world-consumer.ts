@@ -13,8 +13,8 @@ import { localTx } from "../../executor/stepkit.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { serializePointer, parseRegistration, type Registrations } from "./registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
-import { unitApexFromChain, consumerAdmissionPolicyName } from "./admission-policy.ts";
-import { renderConsumerArgoSync } from "./build-rbac.ts";
+import { unitApexFromChain } from "./admission-policy.ts";
+import { } from "./build-rbac.ts";
 import { renderConsumerRepoCredential, consumerRepoCredentialName } from "./repo-credential.ts";
 import { consumerUnitHost } from "./unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
@@ -207,26 +207,23 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       // The chain is (the TARGET cluster's domain, the UNIT's stage).
       dnsRecordName: async (_c, target) => consumerUnitHost(ac.host, ac.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, ac.stage))),
       clearSourceCluster: async (c) => {
-        const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
-        await clusterReader.deleteAdmissionPolicy(consumerAdmissionPolicyName(ac.name, ac.stage));
-        await projectWriter.deleteAppProject(argoNamespace, namespace);
-        // The argo-sync grant ONLY. The unit's two other build grants live in the stage-free
-        // `<name>-build` namespace, which does not move with the unit and is the one place its release
-        // PipelineRun is created — deleting them here would leave the unit unable to build on its new
-        // cluster; they are also clusters/inventories/consumer-build's to render and prune, off a
-        // build registration this move never touches. The tenant world clears its source the same way
-        // (one argo-sync grant, nothing else).
-        //
-        // THESE THREE DELETES STAND ON PURPOSE while nothing has ever run a relocation. The repoint
-        // already took the unit out of the source reconciler's selection, and both units-appset.yaml
-        // sets prune with the resources finalizer, so ArgoCD should have removed all three long
-        // before this step — which verify-source-released measured for the delivery Application off
-        // the same selector. Until one real move says so on a real cluster, a leftover cluster-scoped
-        // policy on a shared source is worth three idempotent calls (hostyour-manager#113).
-        if (ports.buildRbac) await ports.buildRbac.deleteBuildRbac([renderConsumerArgoSync({ name: ac.name, stage: ac.stage, argoNamespace })]);
+        const { clusterReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
+        // The source's three GitOps-rendered objects — its AppProject, its admission policy and its
+        // argo-sync grant — go the way they came: the repoint left the source's name in `leaving`, the
+        // fence ApplicationSets kept generating them off it while the source Application was still
+        // being deleted (an Application whose project is pruned under it is one ArgoCD refuses to
+        // reconcile, deletion included — hostyour-cloud#214), and taking the name off now, with the
+        // source Application long gone (verify-source-released), is what prunes them. No hand delete
+        // beside it: a second writer of a generated object is what left the earlier belt standing.
+        const left = await ports.registrations.clearLeaving(ac.stage, ac.name, c.runId);
+        c.log("meta", left
+          ? `registration for ${ac.name} (${ac.stage}) no longer names the source it left (${left.commit}) — the source's fence ApplicationSets prune its AppProject, admission policy and argo-sync grant`
+          : `registration for ${ac.name} (${ac.stage}) names no source it is leaving — nothing to take off (resume)`);
+        // The two objects no reconciler renders stay the Manager's to delete, as at offboard: the
+        // repository credential, and the namespace (Delete=false on it by design, so the prune leaves it).
         if (ports.repoCredential) await ports.repoCredential.deleteRepoCredential(argoNamespace, consumerRepoCredentialName(ac.name, ac.stage));
         const { deleted } = await clusterReader.deleteNamespace(namespace);
-        c.log("meta", `source cluster cleared for ${ac.name} at ${ac.stage} — admission policy, AppProject, argo-sync grant, repository credential removed; namespace ${namespace} ${deleted ? "deleted" : "already absent"} (the per-consumer PostgreSQL and the PVCs fall with it)`);
+        c.log("meta", `source cluster cleared for ${ac.name} at ${ac.stage} — repository credential removed, fences left to the prune; namespace ${namespace} ${deleted ? "deleted" : "already absent"} (the per-consumer PostgreSQL and the PVCs fall with it)`);
         // The one thing a move does NOT take off the source. The objectstore claim's teardown skipped
         // its DeleteBucket at repoint (Garage refuses it on a non-empty bucket, and the retrying
         // finalizer would have kept the source Application standing past verify-source-released), and

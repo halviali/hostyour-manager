@@ -68,15 +68,24 @@ describe("migrate (consumer)", () => {
     f.source.reader.setJobResult(`reloc-list-source-${CONSUMER}`, { succeeded: true, logs: "DB acme_db" });
 
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
+    let leavingAtRelease: string | undefined;
     await driveSteps(db, makeMigrateDef(ports).steps(params), params, [], {
       // After the repoint the source appset stops generating the Application — model exactly that.
-      "verify-source-released": () => f.source.argo.setStatus(missing),
+      // The registration still NAMES the source in `leaving` here: the source's fences stand until
+      // the Application is gone (hostyour-cloud#214).
+      "verify-source-released": async () => {
+        leavingAtRelease = (await ports.registrations.readRegistration("prod", CONSUMER))?.entry.leaving;
+        f.source.argo.setStatus(missing);
+      },
     });
+    expect(leavingAtRelease).toBe(SOURCE.cluster);
 
-    // The registration points at the target and is open again.
+    // The registration points at the target, is open again, and names no source any more — clear-source
+    // took the name off, which is what prunes the source's fences.
     const reg = await ports.registrations.readRegistration("prod", CONSUMER);
     expect(reg?.entry.cluster).toBe(TARGET.cluster);
     expect(reg?.entry.quiesced).toBe(false);
+    expect(reg?.entry.leaving).toBeUndefined();
     // ONE record, updated in place with the target cluster's own address.
     const upsert = f.dns.upserts.find((u) => u.name === `${CONSUMER}.${TARGET.domain}`);
     expect(upsert).toEqual({ name: `${CONSUMER}.${TARGET.domain}`, type: "A", content: TARGET.ip, created: false });

@@ -406,6 +406,12 @@ export const ConsumerRegistrationSchema = z
     // cluster's FQDN, e.g. "m1") — the appset's post-selector matches on it. Any active cluster: the
     // stage is the unit's own, stated by this file's path, and the cluster's map says nothing about it.
     cluster: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/).optional(),
+    // The cluster a MOVE is taking this stage away from, by its short name, standing from the repoint
+    // until clear-source. The delivery ApplicationSet selects on `cluster` alone and prunes the
+    // source Application at once; the two fence ApplicationSets select on `cluster` OR `leaving`, so
+    // the source keeps the AppProject that deletion needs until the Application is gone
+    // (hostyour-cloud#214). Absent outside a move.
+    leaving: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/).optional(),
     // The LITERAL Mongo database name(s) copied VERBATIM from ConsumerManifest.databases — the
     // registration is the outward projection the consumers ApplicationSet reads to set
     // mongodb.databases, so the service-provisioner creates EXACTLY these names (no prefix, no
