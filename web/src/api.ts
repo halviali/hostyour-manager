@@ -262,7 +262,7 @@ export interface OnboardInput {
    *  TLS; the Manager seals it server-side and it never appears in any run/params/log. */
   repoPat: string;
 }
-/** What the wizard's "Read the release line" sends (POST /api/consumers/prefill): the repository and
+/** What the wizard's "Check the repository" sends (POST /api/consumers/prefill): the repository and
  *  the PAT that reads its release tags — used for that one read and not kept. */
 export interface OnboardPrefillInput {
   repoURL: string;

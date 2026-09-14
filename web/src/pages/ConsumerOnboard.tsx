@@ -75,8 +75,8 @@ export function ConsumerOnboard() {
     setForm((f) => ({ ...f, consumerName: e.target.value }));
   };
 
-  // Read the version and the channel off the repository. The PAT goes over once, is sealed for the one
-  // clone and purged again server-side; what comes back is a number and the place it was read from.
+  // The check under the PAT field: the PAT lists the repository's release tags once and is not kept;
+  // what comes back is the version the onboarding will release and the place it was read from.
   async function readRepository(): Promise<void> {
     setReading(true);
     setError(null);
@@ -170,13 +170,14 @@ export function ConsumerOnboard() {
             </span>
           </label>
           <div className="field">
-            <span className="field__label">Read from repository</span>
+            <span className="field__label">Check the repository</span>
             <button type="button" className="btn" disabled={!canRead} onClick={() => void readRepository()}>
-              {reading ? "Reading…" : "Read the release line"}
+              {reading ? "Checking…" : "Check the repository"}
             </button>
             <span className="field__hint">
-              Clones the repository once with the PAT and fills in the version it states (package.json, else the chart&apos;s
-              appVersion) — you confirm a number instead of typing one.
+              A check, not a step of the onboarding: lists the repository&apos;s release tags with the PAT — so the PAT is
+              proven to read the repository — and shows the version the onboarding will release under Version. Nothing is
+              cloned and nothing is kept.
             </span>
           </div>
           <label className="field">
