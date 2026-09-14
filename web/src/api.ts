@@ -248,9 +248,8 @@ export interface ConsumerView {
 export interface OnboardInput {
   consumerName: string;
   repoURL: string;
-  /** The release the onboarding TRIGGERS: version x.y.z + channel. The release script in the repo
-   *  mints (or reuses) the full tag from them — the manager never composes a tag. */
-  version: string;
+  /** The channel the onboarding releases on. The version is not sent: the Manager reads the next
+   *  number after the repository's release tags and the release script mints the tag from it. */
   channel: "alpha" | "beta" | "stable";
   /** The unit's own stage, for both forms — the namespace, the host, the registration path and the
    *  Vault path all follow it, and the plan holds it against the channel's ceiling. */
@@ -263,13 +262,11 @@ export interface OnboardInput {
    *  TLS; the Manager seals it server-side and it never appears in any run/params/log. */
   repoPat: string;
 }
-/** What the wizard's "Read from repository" sends (POST /api/consumers/prefill): the repository, the
- *  PAT that reads it — sealed for the one clone and purged again server-side — and the chart path
- *  whose Chart.yaml answers where package.json does not. */
+/** What the wizard's "Read the release line" sends (POST /api/consumers/prefill): the repository and
+ *  the PAT that reads its release tags — used for that one read and not kept. */
 export interface OnboardPrefillInput {
   repoURL: string;
   repoPat: string;
-  chartPath?: string;
 }
 export const listConsumers = (): Promise<ConsumerView[]> => req<ConsumerView[]>("/api/consumers");
 export const getConsumerLive = (appId: string): Promise<ConsumerLiveView> => req<ConsumerLiveView>(`/api/consumers/${appId}/live`);
@@ -279,8 +276,8 @@ export const listOnboardTargets = (): Promise<OnboardTargetView[]> => req<Onboar
  *  pipeline enforces the ceiling at the point that writes; the wizard offers the stages a channel
  *  admits, and the plan refuses the rest. */
 export const getChannelStages = (): Promise<ChannelStagesView> => req<ChannelStagesView>("/api/consumers/channels");
-/** The wizard's prefill: the version and the channel the repository itself states, each with the
- *  source it was read from, so the operator confirms a number instead of typing one. */
+/** The wizard's prefill: the version the onboarding will release — the next number after the
+ *  repository's release tags — and the default channel, each with its source. */
 export const prefillOnboard = (input: OnboardPrefillInput): Promise<OnboardPrefillView> =>
   post<OnboardPrefillView>("/api/consumers/prefill", input as unknown as Record<string, unknown>);
 export const onboardConsumer = (input: OnboardInput): Promise<{ runId: string }> =>

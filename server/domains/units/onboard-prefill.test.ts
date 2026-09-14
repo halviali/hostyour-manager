@@ -1,70 +1,57 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import pino from "pino";
-import { openDb, type DbHandle } from "../../db/client.ts";
-import { CredentialStore } from "../../security/store.ts";
-import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { describe, it, expect } from "vitest";
+import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { OnboardPrefillRequest, readOnboardPrefill } from "./onboard-prefill.ts";
 
-// The wizard's prefill: the version the repository states, read once with a PAT that does not
-// outlive the read. Three sources in order — package.json, the chart's appVersion, the default —
-// and the credential row is gone afterwards whatever the read answered.
-
-let db: DbHandle;
-let store: CredentialStore;
-beforeEach(() => {
-  db = openDb(":memory:");
-  store = new CredentialStore({ db: db.db, logger: pino({ level: "silent" }) });
-});
-afterEach(() => { db.sqlite.close(); });
+// The wizard's prefill: the version the onboarding will release, read off the release tags — the
+// next number, never the last one — and the repositories it was read over named in the source.
 
 const REPO = "https://github.com/x/acme.git";
 const request = (over: Partial<OnboardPrefillRequest> = {}): OnboardPrefillRequest => OnboardPrefillRequest.parse({ repoURL: REPO, repoPat: "github_pat_test", ...over });
 const signal = (): AbortSignal => new AbortController().signal;
 
 describe("readOnboardPrefill", () => {
-  it("answers package.json's version first, naming the source", async () => {
-    const repo = new FakeRepoReader({ files: { "package.json": '{"name":"acme","version":"1.4.0"}', "deploy/chart/Chart.yaml": "apiVersion: v2\nname: acme\nversion: 0.1.0\nappVersion: 9.9.9\n" } });
-    const view = await readOnboardPrefill({ repo, store }, request(), signal());
-    expect(view).toEqual({ version: "1.4.0", versionSource: "package.json version", channel: "stable", channelSource: "default" });
+  it("answers the next number after the repository's release tags, naming the repository", async () => {
+    const github = new FakeGitHubConsumer();
+    github.seedTags("x", "acme", ["0.1.0-stable-20260909094733", "0.1.2-stable-20260909121415", "0.1.1-beta-20260909114034", "v9"]);
+    const view = await readOnboardPrefill({ github }, request(), signal());
+    expect(view).toEqual({ version: "0.1.3", versionSource: "the next number after the release tags of x/acme", channel: "stable", channelSource: "default" });
+    expect(github.tagReads).toEqual([{ owner: "x", repo: "acme" }]);
   });
 
-  it("falls back to the chart's appVersion at the request's chart path, then to 0.1.0 — each naming its source", async () => {
-    const chart = new FakeRepoReader({ files: { "charts/app/Chart.yaml": "apiVersion: v2\nname: acme\nversion: 0.1.0\nappVersion: 2.0.0\n" } });
-    expect(await readOnboardPrefill({ repo: chart, store }, request({ chartPath: "charts/app" }), signal())).toMatchObject({ version: "2.0.0", versionSource: "charts/app/Chart.yaml appVersion" });
-    const bare = new FakeRepoReader({ files: {} });
-    const view = await readOnboardPrefill({ repo: bare, store }, request(), signal());
+  it("starts a repository with no release tag at 0.1.0", async () => {
+    const view = await readOnboardPrefill({ github: new FakeGitHubConsumer() }, request(), signal());
     expect(view.version).toBe("0.1.0");
-    expect(view.versionSource).toContain("default");
-    expect(view.versionSource).toContain("deploy/chart/Chart.yaml");
   });
 
-  it("passes over a version outside the release grammar instead of offering a number the run would refuse", async () => {
-    const repo = new FakeRepoReader({ files: { "package.json": '{"version":"1.4.0-beta.1"}', "deploy/chart/Chart.yaml": "appVersion: 01.2.3\n" } });
-    expect((await readOnboardPrefill({ repo, store }, request(), signal())).version).toBe("0.1.0");
+  it("reads a platform-line unit over the platform's line: its own repo, the platform repo and the engine's", async () => {
+    const github = new FakeGitHubConsumer();
+    github.seedTags("simetrixch", "hostyour-manager", ["0.8.169-stable-20260913211928"]);
+    github.seedTags("simetrixch", "hostyour-cloud", ["0.8.170-stable-20260914032934"]);
+    github.seedTags("simetrixch", "ansiwise-cli", ["0.8.165-stable-20260911210935"]);
+    const platformRepo = { withBranch: async (_b: string, fn: (t: { readFile: (p: string) => Promise<string | null> }) => Promise<string | null>) => fn({ readFile: async () => "cliTools:\n  ansiwise:\n    version: 0.8.165-stable-20260911210935\n    upstream: { kind: github_release, project: simetrixch/ansiwise-cli }\n" }) };
+    const view = await readOnboardPrefill(
+      { github, platformGitHub: { owner: "simetrixch", repo: "hostyour-cloud" }, platformRepo: platformRepo as never },
+      request({ repoURL: "https://github.com/simetrixch/hostyour-manager.git" }),
+      signal(),
+    );
+    expect(view.version).toBe("0.8.171");
+    expect(view.versionSource).toBe("the next number after the release tags of simetrixch/hostyour-manager, simetrixch/hostyour-cloud, simetrixch/ansiwise-cli");
   });
 
-  it("seals the PAT for the one clone and purges it again — no credential row outlives the read", async () => {
-    const repo = new FakeRepoReader({ files: { "package.json": '{"version":"1.0.0"}' } });
-    await readOnboardPrefill({ repo, store }, request(), signal());
-    expect(repo.clones).toHaveLength(1);
-    expect(repo.clones[0]?.credentialId).toMatch(/^cred_/);
-    expect(await store.list({ kind: "pat" })).toEqual([]);
-    await expect(store.open(repo.clones[0]!.credentialId!, { purpose: "onboard-prefill:test" })).rejects.toThrow(/not found/);
-  });
-
-  it("purges the PAT even when the clone fails", async () => {
-    const repo = new FakeRepoReader({});
-    repo.cloneAtRef = () => Promise.reject(new Error("authentication required"));
-    await expect(readOnboardPrefill({ repo, store }, request(), signal())).rejects.toThrow(/authentication required/);
-    expect(await store.list({ kind: "pat" })).toEqual([]);
+  it("reads a customer's unit over its own tags only, whatever the platform's line holds", async () => {
+    const github = new FakeGitHubConsumer();
+    github.seedTags("x", "acme", ["1.4.0-stable-20260909094733"]);
+    github.seedTags("simetrixch", "hostyour-cloud", ["0.8.170-stable-20260914032934"]);
+    const view = await readOnboardPrefill({ github, platformGitHub: { owner: "simetrixch", repo: "hostyour-cloud" } }, request(), signal());
+    expect(view.version).toBe("1.4.1");
+    expect(github.tagReads).toEqual([{ owner: "x", repo: "acme" }]);
   });
 });
 
 describe("OnboardPrefillRequest", () => {
-  it("takes a .git https URL, a non-empty PAT and a relative chart path defaulting to deploy/chart", () => {
-    expect(request().chartPath).toBe("deploy/chart");
+  it("takes a .git https URL and a non-empty PAT", () => {
     expect(OnboardPrefillRequest.safeParse({ repoURL: "git@github.com:x/acme.git", repoPat: "p" }).success).toBe(false);
     expect(OnboardPrefillRequest.safeParse({ repoURL: REPO, repoPat: "" }).success).toBe(false);
-    expect(OnboardPrefillRequest.safeParse({ repoURL: REPO, repoPat: "p", chartPath: "/etc" }).success).toBe(false);
+    expect(OnboardPrefillRequest.safeParse({ repoURL: REPO, repoPat: "p" }).success).toBe(true);
   });
 });

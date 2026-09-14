@@ -3,11 +3,6 @@ import { useNavigate } from "react-router";
 import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, type OnboardTargetView } from "../api.ts";
-import { RELEASE_VERSION_RE } from "../../../shared/release.ts";
-
-/** The version grammar as an HTML `pattern` (implicitly anchored, so the RegExp's own ^/$ anchors are
- *  stripped) — the SAME regex the server enforces (shared/release.ts), never a second hand-kept copy. */
-const VERSION_PATTERN = RELEASE_VERSION_RE.source.replace(/^\^/, "").replace(/\$$/, "");
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -40,7 +35,7 @@ function deriveConsumerName(repoURL: string): string {
 
 export function ConsumerOnboard() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ consumerName: "", repoURL: "", version: "", channel: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart" });
+  const [form, setForm] = useState({ consumerName: "", repoURL: "", channel: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart" });
   // Deployable (the manifest declares a chart → pick a cluster) vs build-only (no chart → the stage
   // alone says where the one triggered release run puts the release). The server checks the choice
   // against the manifest's own shape.
@@ -86,10 +81,9 @@ export function ConsumerOnboard() {
     setReading(true);
     setError(null);
     try {
-      const chartPath = form.chartPath.trim();
-      const view = await prefillOnboard({ repoURL: form.repoURL.trim(), repoPat: repoPat.trim(), ...(chartPath ? { chartPath } : {}) });
+      const view = await prefillOnboard({ repoURL: form.repoURL.trim(), repoPat: repoPat.trim() });
       setPrefill(view);
-      setForm((f) => ({ ...f, version: view.version, channel: view.channel, stage: "" }));
+      setForm((f) => ({ ...f, channel: view.channel, stage: "" }));
     } catch (err) {
       setError(msg(err));
     } finally {
@@ -111,7 +105,6 @@ export function ConsumerOnboard() {
       const { runId } = await onboardConsumer({
         consumerName: form.consumerName.trim(),
         repoURL: form.repoURL.trim(),
-        version: form.version.trim(),
         channel: form.channel as "alpha" | "beta" | "stable",
         stage: form.stage as Stage,
         ...(buildOnly ? {} : { clusterId: form.clusterId }),
@@ -179,7 +172,7 @@ export function ConsumerOnboard() {
           <div className="field">
             <span className="field__label">Read from repository</span>
             <button type="button" className="btn" disabled={!canRead} onClick={() => void readRepository()}>
-              {reading ? "Reading…" : "Read version and channel"}
+              {reading ? "Reading…" : "Read the release line"}
             </button>
             <span className="field__hint">
               Clones the repository once with the PAT and fills in the version it states (package.json, else the chart&apos;s
@@ -194,16 +187,20 @@ export function ConsumerOnboard() {
               Defaults to the repo name, editable.
             </span>
           </label>
-          <label className="field">
+          <div className="field">
             <span className="field__label">Version</span>
-            <input value={form.version} onChange={set("version")} placeholder="0.1.0" pattern={VERSION_PATTERN} required />
             <span className="field__hint">
-              {prefill ? <>Read from {prefill.versionSource}. </> : null}
-              x.y.z, no leading zeros. The repo&apos;s release script mints the full tag{" "}
-              <code>{"<version>-<channel>-<timestamp>"}</code> from it — or reuses the existing tag of this
-              version+channel, so re-running never rebuilds.
+              {prefill ? (
+                <>
+                  <code>{prefill.version}</code> — {prefill.versionSource}.{" "}
+                </>
+              ) : null}
+              Not typed: the Manager reads the next number after the repository&apos;s release tags when the
+              onboarding is planned, and the repo&apos;s release script mints{" "}
+              <code>{"<version>-<channel>-<timestamp>"}</code> from it, so what the gates validated is what the
+              release builds.
             </span>
-          </label>
+          </div>
           <label className="field">
             <span className="field__label">Channel</span>
             <select value={form.channel} onChange={(e) => setForm((f) => ({ ...f, channel: e.target.value, stage: "" }))} required>
@@ -288,7 +285,6 @@ export function ConsumerOnboard() {
               (!buildOnly && noTargets) ||
               !form.consumerName ||
               !form.repoURL ||
-              !form.version ||
               !form.channel ||
               !form.stage ||
               !targetChosen ||

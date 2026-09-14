@@ -160,6 +160,11 @@ export interface GitHubConsumer {
   /** The repo's default branch (GET /repos/{owner}/{repo} → default_branch) — the ref a workflow
    *  dispatch runs on, resolved per repo because main vs master is never assumed. */
   getDefaultBranch(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string>;
+
+  /** Every tag name of the repository (paginated), for the next-version read (shared/release.ts
+   *  nextReleaseVersion): the caller keeps the ones in the release grammar. A non-2xx is an error —
+   *  the repository was cloneable a moment ago, so a refusal here is a right the token lacks. */
+  listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]>;
   /** Fire the release workflow once (POST .../actions/workflows/<file>/dispatches — HTTP 204, no
    *  body). Throws WorkflowNotFoundError on a 404: a workflow committed moments ago is not indexed
    *  yet, and the trigger step RETRIES exactly that case. A 422 (the workflow refuses the inputs —

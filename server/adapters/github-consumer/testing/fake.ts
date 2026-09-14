@@ -70,6 +70,20 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   dispatchedRunStatus = "completed";
   dispatchedRunConclusion: string | null = "success";
 
+  /** owner/repo -> the tag names listReleaseTags answers; unseeded repos answer none. */
+  private readonly tags = new Map<string, string[]>();
+  /** Every listReleaseTags call, so a test can assert which repositories the next-version read spanned. */
+  readonly tagReads: Array<{ owner: string; repo: string }> = [];
+
+  seedTags(owner: string, repo: string, names: readonly string[]): void {
+    this.tags.set(this.key(owner, repo), [...names]);
+  }
+
+  async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]> {
+    this.tagReads.push({ owner: input.owner, repo: input.repo });
+    return [...(this.tags.get(this.key(input.owner, input.repo)) ?? [])];
+  }
+
   private key(owner: string, repo: string): string {
     return `${owner}/${repo}`;
   }

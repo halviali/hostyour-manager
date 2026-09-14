@@ -29,6 +29,7 @@ import type { ObjectStore } from "../adapters/object-store/port.ts";
 import { HttpActivator } from "../adapters/activation/activation-http.ts";
 import type { Activator } from "../adapters/activation/port.ts";
 import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
+import type { GitHubConsumer } from "../adapters/github-consumer/port.ts";
 import { HelmCliRenderer } from "../adapters/helm/helm.ts";
 import { Registrations } from "../domains/units/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
@@ -147,6 +148,11 @@ export interface UnitsWiring {
    *  exists — the SAME GitRepoReader the onboard run clones with. Undefined when consumer
    *  onboarding is not configured; the prefill route then answers 501. */
   repoReader?: RepoReader;
+  /** The consumer-PAT GitHub client and the platform repository's GitHub identity, threaded to the
+   *  onboard POST and the prefill so both read the version an onboarding releases off the release
+   *  tags (domains/units/release-version.ts). Undefined when consumer onboarding is not configured. */
+  github?: GitHubConsumer;
+  platformGitHub?: { owner: string; repo: string };
   /** A cluster's public unit apex (global.unitApex off its values chain), threaded to
    *  registerTenantRoutes so POST /api/tenants/:id/invite-admin addresses the tenant's example-auth at
    *  `auth.<subdomain>.<unitApex>` — the host the member's chart renders. The SAME resolver the tenant
@@ -182,6 +188,8 @@ interface Family {
   /** Present only for the consumer family — the repository reader its prefill route clones with.
    *  Undefined when the family is not configured. */
   repoReader?: RepoReader;
+  github?: GitHubConsumer;
+  platformGitHub?: { owner: string; repo: string };
   /** Present only for the tenant family — bring the catalog's books branch into being and to the
    *  catalog's trunk, so the tenant ApplicationSet's git generator has a revision to resolve before
    *  the first tenant exists and the member charts on that revision are the current ones. It crosses
@@ -300,6 +308,8 @@ export function buildUnits(
     ...(consumer.resolver ? { resolver: consumer.resolver } : {}),
     ...(consumer.registrations ? { registrations: consumer.registrations } : {}),
     ...(consumer.repoReader ? { repoReader: consumer.repoReader } : {}),
+    ...(consumer.github ? { github: consumer.github } : {}),
+    ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),
     ...(tenant.resolver ? { tenantResolver: tenant.resolver } : {}),
     ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
@@ -528,7 +538,7 @@ function buildConsumerOnboarding(
   // access at request time (the same resolver the runs already resolve through); the registrations rides
   // out so the detected scan (GET /api/consumers/detected) diffs the very pointers the runs commit;
   // the repository reader rides out so the wizard's prefill clones with the reader the run clones with.
-  return { defs, enabled: true, resolver, registrations, repoReader: repo };
+  return { defs, enabled: true, resolver, registrations, repoReader: repo, github, platformGitHub: { owner: config.github.owner, repo: config.github.repo } };
 }
 
 // ---- Tenant (multi-app) onboarding: catalog + the manager-side HelmRenderer ----

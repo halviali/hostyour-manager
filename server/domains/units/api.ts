@@ -38,6 +38,8 @@ import { TENANT_COLUMNS } from "./tenant-columns.ts";
 import { inviteOrResendTenantAdmin, BOOTSTRAP_TOKEN_KEY, InviteAdminRequest } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { tenantMemberHost } from "./unit-dns.ts";
+import { resolveNextVersion } from "./release-version.ts";
+import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
 // Consumer API. Deliberately THIN: the onboard trigger and the lifecycle
@@ -59,6 +61,11 @@ export interface ConsumerApiDeps {
  *  exists — the tenant routes never see a raw secret, so the store rides only here. */
 export interface ConsumerOnboardApiDeps extends ConsumerApiDeps {
   store: CredentialStore;
+  /** The consumer-PAT GitHub client — the onboard POST reads the repository's release tags with it
+   *  to name the version the onboarding releases (release-version.ts). Absent ⇒ the POST answers 501. */
+  github?: GitHubConsumer;
+  /** The platform repository on GitHub, for the platform's own release line (release-version.ts). */
+  platformGitHub?: { owner: string; repo: string };
   /** The platform GitOps repo — the channel-table read (GET /api/consumers/channels) serves
    *  global.channelStages LITERALLY from clusters/platform/values-common.yaml, so the manager keeps no
    *  copy of the one table the release pipeline enforces. Absent ⇒ the route answers 501. */
@@ -110,7 +117,7 @@ function targetClusters(db: Db): Array<{ id: string; domain: string; stage: Stag
 }
 
 export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardApiDeps): void {
-  const { executor, db, store, onboardingEnabled, resolver, registrations, platformRepo } = deps;
+  const { executor, db, store, onboardingEnabled, resolver, registrations, platformRepo, github, platformGitHub } = deps;
 
   // The consumer inventory: every onboarded app, its own stage, and which cluster it runs on
   // (apps.clusterId -> clusters.domain). provenance "manager" marks a consumer this Manager onboarded
@@ -261,10 +268,15 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     // Fail-closed: a seal failure is a thrown error, no run is created. The zod issues above carry
     // field paths + generic messages only, never the submitted value.
     const { repoPat, ...req } = parsed.data;
+    if (!github) throw errNotConfigured("onboarding is not configured on this manager — the GitHub client that reads a repository's release tags is not wired");
+    // The version the onboarding releases: the next number after the release tags, read with the raw
+    // PAT before it is sealed. Nobody types it, so no onboarding can name a release that already
+    // stands at another commit (hostyour-manager#139).
+    const { version } = await resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: repoPat, signal: c.req.raw.signal });
     const plaintext = Buffer.from(repoPat, "utf8");
     const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
     const ref = await store.seal({ kind: "pat", label: `consumer repo PAT (${req.consumerName})`, plaintext, fingerprint });
-    return c.json(await executor.planStreamed("consumer-onboard", { ...req, repoCredentialId: ref.id }), 201);
+    return c.json(await executor.planStreamed("consumer-onboard", { ...req, version, repoCredentialId: ref.id }), 201);
   });
 
   // Lifecycle: offboard/suspend/resume plan synchronously (no gate-runner) — approve via the Runs API.

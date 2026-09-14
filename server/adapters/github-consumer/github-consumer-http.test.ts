@@ -269,3 +269,23 @@ describe("github-consumer adapter — the release workflow (dispatch + runs)", (
     expect(await client.getDefaultBranch({ owner: "x", repo: "acme", token: "tkn" })).toBe("master");
   });
 });
+
+describe("github-consumer adapter — listReleaseTags", () => {
+  it("walks every page of /tags and returns the names", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ name: `0.1.${i}-stable-20260901000000` }));
+    const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
+      "GET /repos/x/acme/tags?per_page=100&page=1": { status: 200, body: page1 },
+      "GET /repos/x/acme/tags?per_page=100&page=2": { status: 200, body: [{ name: "v2" }] },
+    }) });
+    const names = await client.listReleaseTags({ owner: "x", repo: "acme", token: "tkn" });
+    expect(names).toHaveLength(101);
+    expect(names.at(-1)).toBe("v2");
+  });
+
+  it("throws GitHubConsumerError with GitHub's own message on a non-2xx", async () => {
+    const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
+      "GET /repos/x/acme/tags?per_page=100&page=1": { status: 403, body: { message: "Resource not accessible" } },
+    }) });
+    await expect(client.listReleaseTags({ owner: "x", repo: "acme", token: "tkn" })).rejects.toThrow(/403: Resource not accessible/);
+  });
+});

@@ -28,6 +28,7 @@ import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "./app-catalog.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
+import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
@@ -158,7 +159,7 @@ async function make(onboardingEnabled: boolean, resolver?: FakeClusterKubeResolv
     registerAuth: () => undefined,
     // The live reconciliation read (GET /api/consumers/:id/live) reads the cluster + ArgoCD through
     // the resolver; when absent (or onboarding disabled) it degrades to SQL-only.
-    registerProtected: (a) => registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled, ...(resolver ? { resolver } : {}) }),
+    registerProtected: (a) => registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled, github: new FakeGitHubConsumer(), ...(resolver ? { resolver } : {}) }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, executor, cookie, store };
@@ -181,8 +182,9 @@ function seedSlaveCluster(): void {
 }
 
 const RAW_PAT = "github_pat_raw_secret_value";
-// {version, channel} — the onboard TRIGGERS the release; the request carries no ref and no tag.
-const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team", repoPat: RAW_PAT };
+// {channel} — the onboard TRIGGERS the release at the next version after the repo's release tags;
+// the request carries no version, no ref and no tag.
+const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team", repoPat: RAW_PAT };
 
 describe("consumer API", () => {
   it("501 NOT_CONFIGURED on onboard when onboarding is not wired", async () => {

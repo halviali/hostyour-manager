@@ -34,7 +34,13 @@ export const ANSIWISE_PIN_KEY = "cliTools.ansiwise.version";
 /** The slice of clusters/platform/versions.yaml this reader takes. Everything else in the file — every other
  *  component, every stamp site, every upstream — is ignored. */
 const VersionsFile = z.object({
-  cliTools: z.object({ ansiwise: z.object({ version: z.string().min(1) }) }),
+  cliTools: z.object({
+    ansiwise: z.object({
+      version: z.string().min(1),
+      // Where the report asks: for the engine a github_release with the repository as `project`.
+      upstream: z.object({ project: z.string().min(1).optional() }).passthrough().optional(),
+    }),
+  }),
 });
 
 /** The pinned version, or a typed error naming the file, the branch and the key. There is no
@@ -51,4 +57,14 @@ export async function readAnsiwisePin(repo: PlatformRepo): Promise<string> {
     );
   }
   return parsed.data.cliTools.ansiwise.version;
+}
+
+/** The engine's own repository (`cliTools.ansiwise.upstream.project`, "owner/repo"), or null when the
+ *  entry names none. The platform's release line (rules §17) spans this repository beside the
+ *  platform repo and the Manager's own, so the next number of a platform-line unit is read over it. */
+export async function readAnsiwiseUpstreamProject(repo: PlatformRepo): Promise<string | null> {
+  const raw = await repo.withBranch(ANSIWISE_PIN_BRANCH, (trunk) => trunk.readFile(ANSIWISE_PIN_PATH));
+  if (raw === null) return null;
+  const parsed = VersionsFile.safeParse(parseYaml(raw));
+  return parsed.success ? (parsed.data.cliTools.ansiwise.upstream?.project ?? null) : null;
 }

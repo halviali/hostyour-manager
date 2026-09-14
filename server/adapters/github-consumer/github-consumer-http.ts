@@ -184,6 +184,19 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     return body.default_branch;
   }
 
+  async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]> {
+    const base = this.repoPath(input.owner, input.repo);
+    const names: string[] = [];
+    for (let page = 1; ; page += 1) {
+      const path = `${base}/tags?per_page=100&page=${page}`;
+      const res = await this.send(input.token, path, input.signal ? { signal: input.signal } : undefined);
+      if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+      const body = (await res.json()) as Array<{ name?: string }>;
+      for (const t of body) if (typeof t.name === "string") names.push(t.name);
+      if (body.length < 100) return names;
+    }
+  }
+
   async dispatchWorkflow(input: DispatchWorkflowInput): Promise<void> {
     const base = this.repoPath(input.owner, input.repo);
     const path = `${base}/actions/workflows/${encodeURIComponent(input.workflowFile)}/dispatches`;

@@ -42,6 +42,22 @@ export function parseReleaseTag(tag: string): ParsedRelease | null {
   return { version: `${major}.${minor}.${patch}`, channel: channel as ReleaseChannel, ts14 };
 }
 
+/** The version the NEXT release of a repository takes: the highest x.y.z among its release tags,
+ *  patch + 1 — whatever channel the tags were cut on, because a version number is used once per
+ *  repository (and once per platform line, rules §17). `first` is what a repository with no release
+ *  tag starts at. Tags outside the grammar (a `v` prefix, an image tag with its sha7) are not
+ *  releases and are passed over. */
+export function nextReleaseVersion(tags: readonly string[], first = "0.1.0"): string {
+  let best: [number, number, number] | null = null;
+  for (const tag of tags) {
+    const parsed = parseReleaseTag(tag);
+    if (!parsed) continue;
+    const v = parsed.version.split(".").map(Number) as [number, number, number];
+    if (best === null || v[0] > best[0] || (v[0] === best[0] && (v[1] > best[1] || (v[1] === best[1] && v[2] > best[2])))) best = v;
+  }
+  return best === null ? first : `${best[0]}.${best[1]}.${best[2] + 1}`;
+}
+
 /** The bare version half of the grammar — `x.y.z`, no leading zeros. What every release surface takes
  *  from the operator: version + channel, never a whole tag. Who turns the pair into a tag differs by
  *  what is being released — see composeReleaseTag. */

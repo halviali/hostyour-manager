@@ -407,8 +407,10 @@ function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
   return p.form === "build-only" ? buildOnlySteps(ports, p) : deployableSteps(ports, p as DeployableOnboardParams);
 }
 
-/** The raw operator request from the onboard wizard. Carries {version, channel} — never a ref or a
- *  tag: the release script mints (or reuses) the tag repo-side, and the run only triggers it. The
+/** The raw operator request from the onboard wizard. Carries the `channel` and no version: the
+ *  version the onboarding releases is the next number after the repository's release tags, read by
+ *  the API handler (release-version.ts) and written into the plan request. Never a ref or a tag:
+ *  the release script mints the tag repo-side, and the run only triggers it. The
  *  STAGE is always given — it is the unit's own — and `clusterId` alone decides the form: given, the
  *  unit deploys onto that cluster (deployable); absent, only its build is registered (build-only).
  *  The manifest's own shape (chart present or not) is checked against that choice at plan time.
@@ -420,7 +422,6 @@ function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
 const OnboardRequestFields = z.object({
   consumerName: consumerNameSchema,
   repoURL: repoURLSchema,
-  version: z.string().regex(RELEASE_VERSION_RE, { message: "must be x.y.z with no leading zeros — the release script mints the full tag from it" }),
   channel: z.enum(RELEASE_CHANNEL),
   owner: z.string().min(1),
   // The chart subpath of a DEPLOYABLE unit; the contract's conventional default. A build-only
@@ -446,6 +447,9 @@ export type OnboardRequest = z.infer<typeof OnboardRequest>;
  *  structurally unable to reach params_json. */
 export const OnboardPlanRequest = OnboardRequestFields.omit({ repoPat: true }).extend({
   repoCredentialId: z.string().min(1), // the sealed repo PAT (the run's read credential)
+  // The version this onboarding releases — the next after the repository's release tags, read by the
+  // API handler; the kit mints <version>-<channel>-<ts14> from it.
+  version: z.string().regex(RELEASE_VERSION_RE),
 });
 export type OnboardPlanRequest = z.infer<typeof OnboardPlanRequest>;
 
