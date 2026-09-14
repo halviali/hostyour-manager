@@ -6,7 +6,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import { fingerprintSecret } from "../../security/fingerprint.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
-import { MASTER_ROLES, TENANT_SETTLED_STATUS, type Stage, type TenantStatus, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
+import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type TenantStatus, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
 import type { OrphanScanView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView, ChannelStagesView } from "../../../shared/api-types.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
@@ -93,6 +93,20 @@ const LIFECYCLE = [
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** The target picker both wizards read: the ACTIVE clusters whose server carries the slave part
+ *  (SLAVE_ROLES). The master's self-cluster row stays in the inventory and enters this list the
+ *  moment cluster-deploy-slave turns its server into master+slave. No cluster-name list anywhere:
+ *  who qualifies is a row question, read at request time. The `stage` here is the CLUSTER's, the
+ *  platform's own; it decides nothing about the unit, whose stage the wizard asks separately. */
+function targetClusters(db: Db): Array<{ id: string; domain: string; stage: Stage; status: string }> {
+  return db
+    .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, status: clusters.status })
+    .from(clusters)
+    .innerJoin(servers, eq(servers.id, clusters.serverId))
+    .where(and(eq(clusters.status, "active"), inArray(servers.role, [...SLAVE_ROLES])))
+    .all();
 }
 
 export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardApiDeps): void {
@@ -221,21 +235,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     return c.json({ row, unitHost, ...probe } satisfies ConsumerLiveView);
   });
 
-  // The onboard target picker: the clusters a consumer can be onboarded to — ALL active clusters,
-  // including the master's self-cluster — the owner may onboard their OWN trusted apps to
-  // it). The master self-cluster is seeded as a regular clusters row, so it appears here
-  // dynamically from inventory — no cluster-name list anywhere; who qualifies is purely a row
-  // question (status = active). The `stage` here is the CLUSTER's, the platform's own; it decides
-  // nothing about the unit, whose stage the wizard asks separately.
-  app.get("/api/consumers/targets", (c) =>
-    c.json(
-      db
-        .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, status: clusters.status })
-        .from(clusters)
-        .where(eq(clusters.status, "active"))
-        .all(),
-    ),
-  );
+  app.get("/api/consumers/targets", (c) => c.json(targetClusters(db)));
 
   // The channel table the onboard wizard reads: which stages a release channel may reach.
   // The source is LITERALLY the platform repo's clusters/platform/values-common.yaml → global.channelStages —
@@ -547,15 +547,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   // slave and equally on a master+slave, and the tenant's own stage is the wizard's separate input.
   // The same list the consumer picker offers, and the create-tenant plan re-checks `active` itself
   // (resolveCluster), so this route is the UI convenience it always was.
-  app.get("/api/tenants/targets", (c) =>
-    c.json(
-      db
-        .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, status: clusters.status })
-        .from(clusters)
-        .where(eq(clusters.status, "active"))
-        .all(),
-    ),
-  );
+  app.get("/api/tenants/targets", (c) => c.json(targetClusters(db)));
 
   // The create-tenant wizard's app-type CATALOG: the app-types the picker can offer, DISCOVERED from
   // catalog charts/example-engine/values-<app>.yaml (app-catalog.ts) — never a hardcoded list —

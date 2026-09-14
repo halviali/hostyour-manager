@@ -174,7 +174,7 @@ function seedCluster(): void {
 }
 
 // A slave-hosted cluster next to the master self-cluster — the target-picker tests seed both to
-// prove both pickers offer every ACTIVE cluster whatever role it carries.
+// prove both pickers offer the clusters whose server carries the slave part, and not the pure master.
 function seedSlaveCluster(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
@@ -258,12 +258,21 @@ describe("consumer API", () => {
     expect(rows[0]).toMatchObject({ name: "acme", domain: "s1.example", provenance: "manager" });
   });
 
-  it("targets lists ALL active clusters, the master self-cluster included", async () => {
-    seedCluster();
-    seedSlaveCluster();
+  it("targets lists the active clusters whose server carries the slave part — a pure master is not one", async () => {
+    seedCluster(); // cls_1 on srv_1, role "master": no slave tier, nothing to deploy a unit with
+    seedSlaveCluster(); // cls_2 on srv_2, role "slave"
     const { app, cookie } = await make(true);
     const rows = (await (await app.request("/api/consumers/targets", authed(cookie))).json()) as Array<{ id: string }>;
-    expect(rows.map((r) => r.id).sort()).toEqual(["cls_1", "cls_2"]); // consumers may run on the master AND the slaves
+    expect(rows.map((r) => r.id)).toEqual(["cls_2"]);
+  });
+
+  it("targets lists the master's self-cluster once its server is master+slave", async () => {
+    seedCluster();
+    seedSlaveCluster();
+    db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, "srv_1")).run(); // what cluster-deploy-slave on the master does
+    const { app, cookie } = await make(true);
+    const rows = (await (await app.request("/api/consumers/targets", authed(cookie))).json()) as Array<{ id: string }>;
+    expect(rows.map((r) => r.id).sort()).toEqual(["cls_1", "cls_2"]);
   });
 
   it("offboard: 201 + runId for an existing consumer", async () => {
@@ -429,22 +438,24 @@ describe("tenant API", () => {
     expect(res.status).toBe(404);
   });
 
-  it("targets lists EVERY active cluster — the master self-cluster included", async () => {
-    seedCluster(); // cls_1 on the master (srv_1, role "master")
+  it("targets lists the active clusters whose server carries the slave part — the same list the consumer picker offers", async () => {
+    seedCluster(); // cls_1 on the master (srv_1, role "master"): no slave tier
     seedSlaveCluster(); // cls_2 on srv_2 (role "slave")
     const { app, cookie } = await makeTenant(true);
     const rows = (await (await app.request("/api/tenants/targets", authed(cookie))).json()) as Array<{ id: string }>;
-    // Placement is anywhere: the role is not a placement rule, so it is not a filter either.
-    expect(rows.map((r) => r.id).sort()).toEqual(["cls_1", "cls_2"]);
+    expect(rows.map((r) => r.id)).toEqual(["cls_2"]);
+    db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, "srv_1")).run();
+    const both = (await (await app.request("/api/tenants/targets", authed(cookie))).json()) as Array<{ id: string }>;
+    expect(both.map((r) => r.id).sort()).toEqual(["cls_1", "cls_2"]);
   });
 
-  it("targets filters on cluster STATUS, which is the one thing that does gate a target", async () => {
+  it("targets filters on cluster STATUS beside the role: a rebuilding slave is not offered", async () => {
     seedCluster();
     seedSlaveCluster();
-    db.db.update(clusters).set({ status: "rebuilding" }).where(eq(clusters.id, "cls_1")).run();
+    db.db.update(clusters).set({ status: "rebuilding" }).where(eq(clusters.id, "cls_2")).run();
     const { app, cookie } = await makeTenant(true);
     const rows = (await (await app.request("/api/tenants/targets", authed(cookie))).json()) as Array<{ id: string }>;
-    expect(rows.map((r) => r.id)).toEqual(["cls_2"]);
+    expect(rows).toEqual([]);
   });
 
   it("tenant-suspend: 201 + runId for an existing tenant", async () => {

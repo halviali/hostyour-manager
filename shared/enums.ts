@@ -47,6 +47,13 @@ export function isMasterRole(role: ServerRole): boolean {
   return (MASTER_ROLES as readonly ServerRole[]).includes(role);
 }
 
+/** The members of SERVER_ROLE that carry the SLAVE part: the per-slave ArgoCD instance, the shared
+ *  databases and the service-provisioner — everything that deploys a unit. A pure master carries
+ *  none of it, so the target pickers (domains/units/api.ts targetClusters) key on this set: a unit
+ *  onboarded to a server outside it passes every gate and then waits on its ServiceClaims forever.
+ *  READONLY like MASTER_ROLES; Drizzle call sites spread it. */
+export const SLAVE_ROLES = ["slave", "master+slave"] as const satisfies readonly ServerRole[];
+
 export const STAGE = ["dev", "test", "prod"] as const;
 export type Stage = (typeof STAGE)[number];
 
