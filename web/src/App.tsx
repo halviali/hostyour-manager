@@ -8,6 +8,7 @@ import { Servers } from "./pages/Servers.tsx";
 import { OperatorKeys } from "./pages/OperatorKeys.tsx";
 import { RunDetail } from "./pages/RunDetail.tsx";
 import { Branches } from "./pages/Branches.tsx";
+import { Mail } from "./pages/Mail.tsx";
 import { ResetWizard } from "./pages/ResetWizard.tsx";
 import { Consumers } from "./pages/Consumers.tsx";
 import { ConsumerOnboard } from "./pages/ConsumerOnboard.tsx";
@@ -53,6 +54,7 @@ export function App() {
               <Route path="/runs/:id" element={<RunDetail />} />
               <Route path="/sizes" element={<UnitSizes />} />
               <Route path="/branches" element={<Branches />} />
+              <Route path="/mail" element={<Mail />} />
               <Route path="/reset" element={<ResetWizard />} />
             </Routes>
           </main>

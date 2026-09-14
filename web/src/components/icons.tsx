@@ -11,7 +11,7 @@ const stroke = {
   strokeLinejoin: "round",
 } as const;
 
-export type NavIconName = "clusters" | "servers" | "runs" | "branches" | "reset" | "consumers" | "tenants" | "sizes";
+export type NavIconName = "clusters" | "servers" | "runs" | "branches" | "reset" | "consumers" | "tenants" | "sizes" | "mail";
 
 /** Nav glyphs, keyed by the NAV config's icon id (clusters = overview grid, servers = rack,
  *  runs = terminal prompt, branches = git-branch, reset = restore arrow, consumers = package box,
@@ -33,6 +33,12 @@ export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number 
           <rect x="3" y="4" width="18" height="7" rx="2" />
           <rect x="3" y="13" width="18" height="7" rx="2" />
           <path d="M7 7.5h.01M7 16.5h.01" />
+        </>
+      )}
+      {name === "mail" && (
+        <>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
         </>
       )}
       {name === "runs" && (
