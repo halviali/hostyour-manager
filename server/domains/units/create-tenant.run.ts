@@ -629,6 +629,8 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           stage: req.stage,
           apps: req.apps,
           probeGuid: guid,
+          subdomain: req.subdomain,
+          seedUsers: req.seedUsers,
           clusterValueFiles,
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },

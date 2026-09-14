@@ -111,7 +111,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => ATTESTED,

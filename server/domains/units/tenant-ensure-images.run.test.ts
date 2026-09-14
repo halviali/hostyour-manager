@@ -116,7 +116,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     platformRepoURL: PLATFORM_URL,
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
@@ -224,7 +224,7 @@ describe("create-tenant planStream resolves the registry host", () => {
       resolveClusterValueFiles: async (domain, stage) => {
         resolved.push(`${domain}/${stage}`);
         // the profile's zot.<build-plane> for a foreign build plane
-        return [{ path: clusterMapPath("m1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.build1.example\n" }];
+        return [{ path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.build1.example\n" }];
       },
     });
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
@@ -237,7 +237,7 @@ describe("create-tenant planStream resolves the registry host", () => {
   it("rejects loud when the target cluster's chain resolves no registry host", async () => {
     seedClusters();
     // A chain that states no registry host — registryHostFromChain itself must reject the plan loud.
-    const prt = ports({ resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: "global: {}\n" }] });
+    const prt = ports({ resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n" }] });
     await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "a.example", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
   });
 });

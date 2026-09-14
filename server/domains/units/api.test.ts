@@ -349,7 +349,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
     resolveUnitApex: async () => "example.com",
-    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
   };
 }
 

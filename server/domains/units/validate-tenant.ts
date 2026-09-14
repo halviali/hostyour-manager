@@ -20,7 +20,9 @@ import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { identityProviderMember, memberNamespace, resolveFanout, resolveMembers, type AppRef } from "./tenant-fanout.ts";
+import { identityProviderMember, memberNamespace, resolveFanout, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
+import { stageApex, tenantZone } from "../../../shared/unit-host.ts";
+import { unitApexFromChain } from "./admission-policy.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 import { collectContainerImages } from "./ensure-images.ts";
 import {
@@ -47,6 +49,11 @@ export interface ValidateTenantRequest {
   stage: Stage;
   apps: AppRef[];
   probeGuid: string; // the throwaway guid the fan-out is rendered at
+  /** The subdomain the tenant stands on — the members render at `<member>.<subdomain>.<stage apex>`
+   *  (tenant.zone), so the validation holds the hosts the deploy will serve. */
+  subdomain: string;
+  /** The IdP's user boot-seed flag the registration will carry; delivered to the members like the deploy does. */
+  seedUsers?: boolean;
   /** The target cluster's values chain off its install branch. The tenant appsets layer exactly
    *  this chain onto every member chart at deploy, and the charts require values from it
    *  (example-lib.image reads global.endpoints.registry.host, the auth host composes from
@@ -159,10 +166,30 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // charts via .Release.Name / .Release.Namespace (releaseName "<guid>-<render>", namespace
       // "<guid>-<member>") — the exact naming the tenant appsets use — so validation renders what the
       // cluster deploys without guessing a values key, and T3 can hold each member to its own
-      // namespace. The target cluster's chain rides every render as the folded override, the same
-      // values the appsets layer at deploy. A helm failure is DATA on the result, never a throw
-      // (helm port contract).
+      // namespace. The target cluster's chain rides every render as the folded override, and OVER IT
+      // the values the tenants ApplicationSet delivers to every member at deploy
+      // (hostyour-cloud clusters/argocd/files/tenants-appset.yaml, valuesObject): the tenant's own
+      // facts and the zone it stands under, composed by the one host law (shared/unit-host.ts). The
+      // charts switch their tenant mode on `tenant.guid` and require `tenant.zone` and
+      // `global.stageApex` there, so a render without these proves a mode the cluster never deploys
+      // (hostyour-manager#137). A helm failure is DATA on the result, never a throw (helm port contract).
       const chainValues = foldChain(req.clusterValueFiles);
+      const unitApex = unitApexFromChain(req.clusterValueFiles);
+      const deliveredTo = (member: FanoutMember): Record<string, unknown> => ({
+        tenant: {
+          guid: req.probeGuid,
+          member: member.member,
+          appName: member.member,
+          subdomain: req.subdomain,
+          stage: req.stage,
+          zone: tenantZone(req.subdomain, req.stage, unitApex),
+        },
+        global: { stageApex: stageApex(unitApex, req.stage) },
+        suspended: false,
+        quiesced: false,
+        seedUsers: req.seedUsers ?? false,
+        apps: req.apps,
+      });
       const renders: MemberRender[] = [];
       const docsByMember: MemberDocs[] = [];
       for (const member of members) {
@@ -172,7 +199,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           workdir: cloned.workdir,
           chartPath: member.chart,
           valueFiles: member.valueFiles,
-          valuesObject: chainValues,
+          valuesObject: mergeDeep(chainValues, deliveredTo(member)),
           releaseName: `${req.probeGuid}-${member.name}`,
           namespace,
           signal: deps.signal, // a DELETE/budget abort kills the in-flight helm child immediately

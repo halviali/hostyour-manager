@@ -19,6 +19,7 @@ import { TenantSpecSchema } from "../../../shared/consumer.ts";
 import { TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
+import { memberNamespace } from "./tenant-fanout.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { RenderedDoc, HelmRenderResult } from "../../adapters/helm/port.ts";
@@ -73,7 +74,7 @@ const CHAIN = [
 ];
 
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {
-  return { repoURL: "https://github.com/acme/acme-catalog.git", ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, clusterValueFiles: CHAIN, ...over };
+  return { repoURL: "https://github.com/acme/acme-catalog.git", ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, ...over };
 }
 
 function deps(repo: RepoReader, helm: FakeHelmRenderer, log: (l: string) => void = () => {}): ValidateTenantDeps {
@@ -413,5 +414,26 @@ describe("validateTenant", () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
     await validateTenant(req({ apps: [], credentialId: "cred_deploy" }), deps(repo, helm));
     expect(repo.clones[0]?.credentialId).toBe("cred_deploy");
+  });
+});
+
+describe("validateTenant — what every member is rendered with", () => {
+  it("layers the values the tenants ApplicationSet delivers over the folded chain: the tenant's facts and its zone", async () => {
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } });
+    await validateTenant(req({ stage: "dev", seedUsers: true }), deps(repo, helm));
+    const auth = helm.requests.find((r) => r.namespace === memberNamespace(PROBE, "auth", "dev"));
+    expect(auth?.valuesObject).toMatchObject({
+      global: { env: "prod", stageApex: "dev.example.com" }, // the chain's own keys stay; the delivered zone joins them
+      tenant: { guid: PROBE, member: "auth", appName: "auth", subdomain: "acme", stage: "dev", zone: "acme.dev.example.com" },
+      suspended: false,
+      quiesced: false,
+      seedUsers: true,
+      apps: [{ name: "erp" }],
+    });
+    // prod stands directly under the unit apex — the same law the DNS step and the activation use.
+    helm.requests.length = 0;
+    await validateTenant(req(), deps(repo, helm));
+    expect(helm.requests[0]?.valuesObject).toMatchObject({ tenant: { zone: "acme.example.com" }, global: { stageApex: "example.com" } });
   });
 });

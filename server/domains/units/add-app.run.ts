@@ -326,6 +326,8 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           stage: tc.stage,
           apps: [{ name: req.app }],
           probeGuid: tc.guid,
+          subdomain: current.entry.subdomain,
+          seedUsers: current.entry.seedUsers,
           clusterValueFiles,
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
