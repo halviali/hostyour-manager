@@ -380,6 +380,7 @@ export const RUN_KIND = [
   // reports every key in it and not only the ones this platform put there: a key nobody here placed
   // is exactly what it exists to surface.
   "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
+  "mail-dns-publish",                                           // the mail DNS of ONE sender domain, published from the master
   // The consumer lifecycle. `consumer-purge` is force-offboard BY NAME (orphan removal), not a mode
   // on `consumer-offboard`.
   "consumer-onboard", "consumer-suspend", "consumer-resume", "consumer-offboard", "consumer-purge",
@@ -433,6 +434,7 @@ export const RUN_FAMILY = {
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin", "cluster-tailnet-read",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
+    "mail-dns-publish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-backup", "consumer-restore", "consumer-migrate"],
   tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
@@ -485,3 +487,9 @@ export type TargetKind = (typeof TARGET_KIND)[number];
 export const LOCK_RESOURCE = ["server", "git-branch", "master-kube",
   "master-vault", "manager", "all"] as const;
 export type LockResource = (typeof LOCK_RESOURCE)[number];
+
+/** What receivers do with mail that fails DMARC alignment — the `p=` of the DMARC record the
+ *  catalogue's publish-mail-dns writes. Start at none (reports without enforcement) and tighten once
+ *  the reports show only the installation's own mail. */
+export const DMARC_POLICY = ["none", "quarantine", "reject"] as const;
+export type DmarcPolicy = (typeof DMARC_POLICY)[number];

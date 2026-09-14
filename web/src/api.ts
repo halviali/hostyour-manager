@@ -23,6 +23,7 @@ import type {
   // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
   OperatorKeyView,
 } from "../../shared/api-types.ts";
+import type { MailDnsPublishInput } from "../../shared/mail.ts";
 // The tenant reads project three server enums verbatim; importing them (rather than restating the
 // literals here) is what makes a rename in shared/enums.ts break THIS build — the same rule
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
@@ -150,6 +151,9 @@ export const deploySlave = (serverId: string, opts: { stage: string; domain: str
  *  the FQDN and the stage are what that server's active cluster row already says, so there is nothing
  *  for the operator to re-state and nothing to get wrong. */
 export const redeploySlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-redeploy", { serverId });
+/** The mail DNS of ONE sender domain, published from the master (the Mail page offers one run per domain). */
+export const publishMailDns = (input: MailDnsPublishInput): Promise<{ runId: string }> =>
+  planRun("mail-dns-publish", input as unknown as Record<string, unknown>);
 /** Take a slave OUT of the installation: the master's whole per-slave management plane, the
  *  cluster's map, then the rows. It takes ONLY the server for the same reason redeploy does. Every
  *  act runs on the MASTER and the slave is not reached at all, which is what makes it the run kind

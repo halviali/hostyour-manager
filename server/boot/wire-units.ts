@@ -99,6 +99,9 @@ const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
 
 export interface UnitsWiring {
   defs: AnyRunDefinition[];
+  /** The DNS provider, for the mail DNS run kind (the master's egress address is read off its own
+   *  A record there) — the same instance the unit records are written with. Absent without one. */
+  dns?: DnsProvider;
   /** Consumer onboarding routes go live (gate-runner + platform repo both configured). */
   enabled: boolean;
   /** Tenant onboarding routes go live (the catalog write PAT is configured). */
@@ -319,6 +322,9 @@ export function buildUnits(
     activator,
     ...(resolveUnitApex ? { resolveUnitApex } : {}),
     ...(platformRepo ? { platformRepo } : {}),
+    // The DNS provider rides up for the mail DNS run kind (the master's egress address is read off
+    // its own A record there) — the same instance the unit records are written with.
+    ...(dns ? { dns } : {}),
   };
 }
 

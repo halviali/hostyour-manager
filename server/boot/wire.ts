@@ -104,6 +104,7 @@ export async function wire(): Promise<Wired> {
     // and carrying no credential — the setting defaults to the product's own repository and that
     // repository is public, so there is no pair to be half-configured.
     catalogueOrigin: { repoURL: config.deployProgramsRepoUrl },
+    ...(units.dns ? { dns: units.dns } : {}),
     // The mounted manager-registry-pull document, narrowed to one address — what a machine that
     // keeps no books is given so it pulls through the installation's own registry rather than
     // silently from docker.io. Unconditional: the path is where this manager's own chart mounts it,

@@ -5,6 +5,8 @@ import { noopDef } from "./defs/noop.run.ts";
 import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.ts";
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
+import { makeMailDnsPublishDef } from "./defs/mail-dns-publish.ts";
+import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { makeRemoveSlaveDef } from "./defs/remove-slave.ts";
 import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
@@ -27,6 +29,9 @@ export function register<P>(runDefinitions: RunDefinitions, def: RunDefinition<P
  *  two arms it runs, and a definition's steps() is handed the persisted params and no database. */
 export interface RunDefinitionsPorts extends DeploySlavePorts, AnsiwisePorts {
   db: Db;
+  /** The DNS provider mail-dns-publish reads the master's egress address from (its own A record).
+   *  Absent on a manager without a DNS provider: the run kind then refuses at its answers. */
+  dns?: DnsProvider;
 }
 
 export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDefinition[] = []): RunDefinitions {
@@ -37,6 +42,9 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // machine layer of a cluster that is already live.
   register(runDefinitions, makeDeploySlaveDef(ports));
   register(runDefinitions, makeRedeployDef(ports));
+  // The mail DNS of one sender domain, published by running the catalogue's publish-mail-dns on the
+  // master — a master-side act like redeploy's master arm, so it takes the same ports.
+  register(runDefinitions, makeMailDnsPublishDef(ports));
   // The inverse of the first: take a slave OUT of the installation. Every act is on the MASTER —
   // the remove-slave program, the books branch, the rows — so it takes the same ports the two
   // above do and reaches the slave not at all.
