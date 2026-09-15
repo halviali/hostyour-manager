@@ -109,6 +109,9 @@ export const MASTER_MARKING_YAML = [
   "  vaultKubernetesAuthPath: kubernetes-m1",
   "  registryPullUser: puller",
   "  registryPushUser: pusher",
+  // THE OBJECT STORAGE, on the one line the template writes it. A regeneration the manager drives
+  // has to hand both halves on, and a fixture without the line cannot fail when it does not.
+  `  objectStorage: {r2: {accountId: '0123456789abcdef0123456789abcdef', jurisdiction: 'eu'}}`,
   // WHERE THE MACHINES OF THIS CLUSTER CAN BE REACHED. A fact about the MASTER's box, and the one
   // global key a slave must not inherit — the fence the gate sandbox draws would otherwise be drawn
   // around this machine while the slave's own address stood outside it.

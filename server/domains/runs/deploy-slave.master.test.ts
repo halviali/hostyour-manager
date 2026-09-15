@@ -165,6 +165,10 @@ release: 0.7.9-stable-20260903202414`);
       // demanding it. That default is platform-local, so an unanswered issuer is a silent reissue of
       // every certificate from the cluster's own root.
       expect(answers.cluster_issuer).toBe("platform-acme");
+      // Both halves of the map's one object-storage line: without them the regeneration drops the
+      // line and the installation's tenant engines read an empty account (#155).
+      expect(answers.cloudflare_r2_account_id).toBe("0123456789abcdef0123456789abcdef");
+      expect(answers.cloudflare_r2_jurisdiction).toBe("eu");
       expect(answers.lan_host).toBe("10.1.1.5");
       expect(answers.role).toBe(MASTER_AND_SLAVE_ROLE);
       // Not an inference: it is the identity this manager already commits into this repository under.

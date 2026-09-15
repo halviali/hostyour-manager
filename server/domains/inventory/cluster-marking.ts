@@ -141,6 +141,12 @@ const ClusterMarkingFileSchema = z.object({
     registryPullUser: z.string().min(1).optional(),
     registryPushUser: z.string().min(1).optional(),
     endpoints: z.object({}).passthrough().optional(),
+    // The installation's object storage, as the map template writes it on ONE line (the two slots
+    // are optional together, so a map either states both or neither). Declared so the read is typed;
+    // it travels in globalRest like endpoints, so the serializer writes it back unchanged.
+    objectStorage: z.object({
+      r2: z.object({ accountId: z.string().min(1), jurisdiction: z.string().min(1) }),
+    }).optional(),
   // PASSTHROUGH, and only here. The global block carries every value the charts of this platform
   // read, and this process has no business refusing a key a chart added — it would fail every map
   // read on the next release that introduces one. What it does refuse is an unknown key at the TOP,
@@ -208,6 +214,11 @@ export interface ClusterMarking {
    *  account the build presents (hostyour-manager#128). */
   registryPullUser?: string;
   registryPushUser?: string;
+  /** The installation's object-storage account and jurisdiction, off `global.objectStorage.r2`.
+   *  Handed on to the master's own regeneration as the two answers the map template fills its
+   *  one-line slot pair from; a regeneration not told them writes a map without the line, and every
+   *  tenant engine on the installation then reads an empty account. */
+  objectStorage?: { accountId: string; jurisdiction: string };
   /** Everything `global` carried that this module does not name, carried VERBATIM. The schema lets
    *  the block through on purpose, so a chart may add a value without failing every map read on the
    *  release that introduces it - but a writer that emits only what it understands turns that
@@ -253,6 +264,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
   // Derived, like catalogRepo: the unit stands in the endpoints block, which travels whole in
   // globalRest, so reading it by name here does not make this module a second writer of it.
   const mailHost = (g.endpoints as { mail?: { host?: string } } | undefined)?.mail?.host;
+  const objectStorage = g.objectStorage === undefined ? undefined : { accountId: g.objectStorage.r2.accountId, jurisdiction: g.objectStorage.r2.jurisdiction };
   const rest = Object.fromEntries(Object.entries(g).filter(([k]) => !NAMED_GLOBALS.has(k)));
   return {
     ...(header !== undefined ? { header } : {}),
@@ -278,6 +290,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
           .map((m) => m.trim()).filter((m) => m.length > 0) }
       : {}),
     ...(mailHost !== undefined ? { mailHost } : {}),
+    ...(objectStorage !== undefined ? { objectStorage } : {}),
     ...(catalogRepo ? { catalogRepo } : {}),
     ...(g.clusterIssuer !== undefined ? { clusterIssuer: g.clusterIssuer } : {}),
     ...(g.letsencryptEmail !== undefined ? { letsencryptEmail: g.letsencryptEmail } : {}),

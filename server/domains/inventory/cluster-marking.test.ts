@@ -127,12 +127,16 @@ describe("resolveClusterMarking", () => {
   const installerTail = `  unitApex: example.com\n  platformDomain: example.com\n`;
 
   it("resolves a map exactly as today's writers leave it, carrying platform-domain", async () => {
-    const installerSlave = `${slaveMap}${installerTail}  endpoints:\n    mail:\n      host: post\n  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
+    const installerSlave = `${slaveMap}${installerTail}  endpoints:\n    mail:\n      host: post\n  objectStorage: {r2: {accountId: '0123456789abcdef0123456789abcdef', jurisdiction: 'eu'}}\n  apiHost: 100.64.0.11\n  apiPort: 16443\n`;
     const repo = repoWith({ [MASTER]: `${masterMap}${installerTail}`, [SLAVE]: installerSlave });
-    expect(await resolveClusterMarking(repo, "m1")).toMatchObject({ fqdn: MASTER, platformDomain: "example.com" });
+    const master = await resolveClusterMarking(repo, "m1");
+    expect(master).toMatchObject({ fqdn: MASTER, platformDomain: "example.com" });
+    // A map without the object-storage line reads as an installation without one, never as empty strings.
+    expect(master.objectStorage).toBeUndefined();
     expect(await resolveClusterMarking(repo, "s1")).toMatchObject({
       fqdn: SLAVE, unitApex: "example.com", platformDomain: "example.com",
       mailHost: "post", apiHost: "100.64.0.11", apiPort: 16443,
+      objectStorage: { accountId: "0123456789abcdef0123456789abcdef", jurisdiction: "eu" },
     });
   });
 

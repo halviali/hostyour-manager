@@ -239,6 +239,12 @@ export function branchAnswers(target: SlaveTarget, serverId: string, ports: Depl
       // The unit that is the installation's mail service, the master's answer handed on: a
       // tenant's members require it, and the slave's map is what its fan-out reads.
       ...(marking.mailHost !== undefined ? { mail_host: marking.mailHost } : {}),
+      // The object-storage account and jurisdiction, the master's answer handed on: the map template
+      // writes both on one optional line, so a regeneration not told them drops the line, and every
+      // tenant engine of the installation then renders against an empty account (#155).
+      ...(marking.objectStorage !== undefined
+        ? { cloudflare_r2_account_id: marking.objectStorage.accountId, cloudflare_r2_jurisdiction: marking.objectStorage.jurisdiction }
+        : {}),
       role: MASTER_AND_SLAVE_ROLE,
     };
   };
