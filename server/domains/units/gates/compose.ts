@@ -9,7 +9,7 @@
 // Every gate here is HARD: there is no severity switch, and no gate that runs can end in anything
 // but a pass or a fail of the whole onboarding.
 //
-// FOUR OF THEM DO NOT ALWAYS RUN, and that is the one conditional path. G16/G18/G19/G24
+// FIVE OF THEM DO NOT ALWAYS RUN, and that is the one conditional path. G16/G18/G19/G24/G27
 // (MANIFEST_FED_GATE_IDS) read the manifest the sandbox parsed; a report that carries none leaves
 // them with no input, and a gate given no input can only report an empty declaration — which reads
 // exactly like a repository that declares nothing. They are not run at all then, and gateManifestInput
@@ -27,7 +27,7 @@ import { STAGE, type Stage } from "../../../../shared/enums.ts";
 import { consumerNamespace } from "../../../../shared/consumer.ts";
 import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "../build-rbac.ts";
-import { consumerUnitHost } from "../unit-dns.ts";
+import { consumerUnitHost, standingHostRefusal, type StandingHost } from "../unit-dns.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "../../../../shared/unit-size.ts";
 
@@ -365,7 +365,7 @@ export function gateFqdnGrant(input: {
  *  Held as ONE list because two readers need the same answer: the refusal row, which names what did
  *  not run, and compose.test.ts, which holds this list against the gates a full run actually emits
  *  so a gate added here later cannot go unnamed. */
-export const MANIFEST_FED_GATE_IDS: readonly string[] = ["G16", "G18", "G19", "G24"];
+export const MANIFEST_FED_GATE_IDS: readonly string[] = ["G16", "G18", "G19", "G24", "G27"];
 
 /** G26 manifest input (HARD). What the manager-side gates are given, judged before they judge
  *  anything. MANIFEST_FED_GATE_IDS read the manifest the sandbox parsed; when the report carries
@@ -510,4 +510,53 @@ export function gateUnitSize(input: {
       { source: "manager" as const, name: unitName, fieldPath: "quota", value: figures.slice(0, 256) },
     ],
   };
+}
+
+/** G27 unit host (HARD). The ZONE, read before the run writes anything: the unit's host
+ *  `<label>.<stage apex>` as the DNS provider answers it now, judged against this installation's own
+ *  clusters (unit-dns.ts readStandingHost). The gates above hold the host against registrations and
+ *  tenant subdomains, never against the zone — and the zone is exactly what stopped a run at its
+ *  thirteenth step after twelve writes (hostyour-manager#151: a record the abandoned installation's
+ *  onboarding had left at the old slave's address).
+ *
+ *  Four readings, two verdicts: a free host and a host already at the target's address pass; a host
+ *  at an address none of this installation's clusters has passes too and SAYS that provision-dns
+ *  will replace it, with the address as evidence; a host at another cluster of this installation
+ *  fails with the sentence provision-dns would refuse it with. `standing: null` is a Manager with
+ *  no DNS provider: a deployable unit cannot be onboarded there at all, and this row says so before
+ *  provision-dns would have said it at step thirteen. */
+export function gateUnitHost(input: { host: string; unitName: string; clusterFqdn: string; standing: StandingHost | null }): GateResult {
+  const expected = `the host ${input.host} is free, already answers with the address of ${input.clusterFqdn}, or stands at an address no cluster of this installation has (a record an installation that is gone left in the zone, which provision-dns replaces) — never at another cluster of this installation`;
+  const base = { id: "G27", title: "unit host", severity: "hard" as const, expected };
+  const s = input.standing;
+  if (s === null) {
+    return {
+      ...base, status: "fail",
+      found: "no DNS provider is wired on this manager, so the zone could not be read",
+      reason: "the unit's ONE public record is a mandatory part of this run kind (provision-dns fails loud without a provider); set CLOUDFLARE_DNS_API_TOKEN on the manager and plan the onboarding again",
+      detail: "no DNS provider — the host cannot be measured",
+    };
+  }
+  switch (s.kind) {
+    case "free":
+      return { ...base, status: "pass", found: `${input.host} is free — no record stands under it`, reason: null, detail: "host is free" };
+    case "ours":
+      return { ...base, status: "pass", found: `${input.host} already answers with the address of ${input.clusterFqdn} — a re-run of this onboarding, not a takeover`, reason: null, detail: "host already ours" };
+    case "leftover":
+      return {
+        ...base, status: "pass",
+        found: cap(`${input.host} stands at ${s.standing}, an address no cluster of this installation has — what an installation that is gone left in the zone; provision-dns replaces it with the address of ${input.clusterFqdn}`),
+        reason: null,
+        detail: "host is a leftover of a gone installation — will be replaced",
+        evidence: [{ source: "manager" as const, name: input.host, fieldPath: "standing", value: s.standing }],
+      };
+    case "collision":
+      return {
+        ...base, status: "fail",
+        found: cap(standingHostRefusal(input.host, input.unitName, s)),
+        reason: "one stage of a unit has ONE host, and another cluster of this installation serves it — offboard the unit there first, or give the two clusters different unit_apex answers",
+        detail: "host is served by another cluster of this installation",
+        evidence: [{ source: "manager" as const, name: input.host, fieldPath: "standing", value: `${s.standing} (${s.cluster})` }],
+      };
+  }
 }

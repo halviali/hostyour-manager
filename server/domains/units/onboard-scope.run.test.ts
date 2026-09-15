@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
+import { clusters, servers } from "../../db/schema/inventory.ts";
 import { provisionDnsStep, deleteSmtpOpsGrantCleanup } from "./onboard-steps.ts";
 import { OnboardParams, type OnboardPorts, type DeployableOnboardParams } from "./onboard.run.ts";
 import { Registrations } from "./registrations.ts";
@@ -78,13 +79,30 @@ function ctx(stepName: string, logs: string[]): StepCtx {
 }
 
 describe("onboard scope — a second stage beside a live one", () => {
-  it("provision-dns REFUSES a host another cluster already answers, and leaves that address alone", async () => {
+  it("provision-dns REFUSES a host another cluster of THIS installation answers, names it, and leaves that address alone", async () => {
     const dns = new FakeDnsProvider();
     dns.seed("s1.example", "A", "203.0.113.10"); // this cluster's own address
-    dns.seed("acme.example.com", "A", "203.0.113.20"); // the same stage on another cluster, under the shared apex
+    dns.seed("s2.example", "A", "203.0.113.20"); // the other cluster of this installation
+    dns.seed("acme.example.com", "A", "203.0.113.20"); // the same stage on that cluster, under the shared apex
+    db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "203.0.113.20", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active", slaveId: 2 }).run();
     const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
-    await expect(step.run(ctx("provision-dns", []))).rejects.toThrow(/already answers with 203\.0\.113\.20/);
+    await expect(step.run(ctx("provision-dns", []))).rejects.toThrow(/already answers with 203\.0\.113\.20, the address of s2\.example of this installation/);
     expect(dns.record("acme.example.com", "A")).toBe("203.0.113.20"); // untouched
+  });
+
+  it("provision-dns REPLACES a record at an address no cluster of this installation has — a gone installation's leftover — and says what stood there", async () => {
+    // What stopped a real run at its thirteenth step: post.digitacloud.app still at the abandoned
+    // apps4 when apps7 onboarded the same unit. Only this installation's token writes the zone, so a
+    // record at an address none of its clusters has is nobody's live service.
+    const dns = new FakeDnsProvider();
+    dns.seed("s1.example", "A", "203.0.113.10");
+    dns.seed("acme.example.com", "A", "157.90.201.150");
+    const logs: string[] = [];
+    const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
+    await expect(step.run(ctx("provision-dns", logs))).resolves.toBeUndefined();
+    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
+    expect(logs.join("\n")).toMatch(/stood at 157\.90\.201\.150, an address no cluster of this installation has/);
   });
 
   it("provision-dns is idempotent over its OWN record — the same address is a re-run, not a takeover", async () => {

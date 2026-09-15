@@ -3,7 +3,7 @@
 // validate.ts — this step only runs them and holds the outcome against the approved facts.
 import type { Step } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import { validateOnboard, type OnboardTarget } from "./validate.ts";
+import { validateOnboard, standingHostFrom, type OnboardTarget } from "./validate.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "./unit-size.ts";
 import { DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts";
@@ -47,6 +47,7 @@ export function checkStep(ports: OnboardPorts, p: OnboardParams): Step {
           repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains,
           log: (l) => ctx.log("stdout", l), signal: ctx.signal, declareListening: ports.declareListening,
           resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings),
+          ...standingHostFrom(ports.dns, ctx.db, ctx.signal),
         },
       );
       if (outcome.verdict !== "pass" || outcome.builds === null) {

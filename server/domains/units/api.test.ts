@@ -14,7 +14,7 @@ import { getRun } from "../../executor/read.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "./api.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
-import { CHANNEL_STAGES } from "./onboard.fixture.ts";
+import { CHANNEL_STAGES, seededDns } from "./onboard.fixture.ts";
 import { makeOffboardDef } from "./offboard.run.ts";
 import { makeSuspendDef, makeResumeDef } from "./suspend-resume.run.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -123,7 +123,7 @@ function onboardPorts(): OnboardPorts {
     seeder: fakeSeeder(),
     // Reuse the lifecycle resolver so onboard drives the same master-local fakes.
     resolver: lifecycle.resolver,
-    tenantSubdomains: async () => [],
+    tenantSubdomains: async () => [], dns: seededDns(),
     declareListening: true,
     argoWatchTimeoutMs: 1000,
     deployRefVisibleMs: 100,

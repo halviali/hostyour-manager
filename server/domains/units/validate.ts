@@ -25,7 +25,10 @@ import type { Stage } from "../../../shared/enums.ts";
 import { consumerHostLabel } from "../../../shared/consumer.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
+import { consumerUnitHost, readStandingHost, type StandingHost } from "./unit-dns.ts";
+import type { DnsProvider } from "../../adapters/dns/port.ts";
+import type { Db } from "../../db/client.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "../../../shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -117,6 +120,12 @@ export interface ValidateDeps {
   /** The size table, bound to the Manager's own inventory by the caller — G24 needs the six figures
    *  a size resolves to for what the unit brings, and this module holds no db of its own. */
   resolveQuota: (size: UnitSize, brings: UnitComposition) => UnitQuota;
+  /** The unit's host as the DNS provider answers it now, judged against this installation's own
+   *  clusters (unit-dns.ts readStandingHost) — G27's input, bound by the caller to the provider and
+   *  the inventory through standingHostFrom. Absent where the Manager has no DNS provider: G27 then
+   *  fails a deployable target before the run writes anything, where provision-dns would have failed
+   *  at its thirteenth step for the same reason. */
+  standingHost?: (host: string, clusterFqdn: string) => Promise<StandingHost>;
   /** Poll pacing; the fake returns "done" on the first poll, so this never fires in tests. */
   pollIntervalMs?: number;
   /** Terminating deadline of the whole runner poll (default DEFAULT_POLL_BUDGET_MS). The sandbox
@@ -292,6 +301,15 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       gateFqdnGrant({ unitName: req.consumerName, hostLabel, stage: target.stage, fqdn: declaredFqdn, unitApex, clusterDomain, foreignFqdns }),
       gateUnitSize({ unitName: req.consumerName, size: req.size, brings, quota: brings ? deps.resolveQuota(req.size, brings) : null }),
     );
+    // G27 reads the ZONE, not a registration — the one obstacle the gates above cannot see. Only where
+    // something will be written under the host: a deployable target on a chain that names the apex
+    // (a build-only unit has no host, and a chain naming no apex is refused by the plan before this).
+    const hostApex = target.chartPath !== undefined ? unitApexIfStated(target.clusterValueFiles) : null;
+    if (hostApex !== null) {
+      const host = consumerUnitHost(hostLabel, target.stage, hostApex);
+      const standing = deps.standingHost ? await deps.standingHost(host, target.domain) : null;
+      managerGates.push(gateUnitHost({ host, unitName: req.consumerName, clusterFqdn: target.domain, standing }));
+    }
     for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
 
     const report = composeReport(runnerReport, managerGates);
@@ -305,4 +323,24 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
   } finally {
     await deps.repo.dispose(cloned.workdir);
   }
+}
+
+/** The apex the chain states, or null where it states none — the tolerant read G27 takes, because a
+ *  chain naming no apex is the plan's refusal (unitApexFromChain, before any gate) and not this
+ *  gate's: the gate judges the zone under a host, and without an apex there is no host to judge. */
+function unitApexIfStated(files: readonly { path: string; content: string }[]): string | null {
+  let found: string | null = null;
+  for (const file of files) {
+    const parsed: unknown = parseYaml(file.content);
+    const apex = (parsed as { global?: { unitApex?: unknown } } | null)?.global?.unitApex;
+    if (typeof apex === "string" && apex.length > 0) found = apex;
+  }
+  return found;
+}
+
+/** G27's reader, bound to the DNS provider and the inventory — the same reading provision-dns takes
+ *  at its own step. Empty where the Manager has no provider, so the gate says so. */
+export function standingHostFrom(dns: DnsProvider | undefined, db: Db, signal: AbortSignal): Pick<ValidateDeps, "standingHost"> {
+  if (!dns) return {};
+  return { standingHost: (host, clusterFqdn) => readStandingHost(dns, db, { recordName: host, clusterFqdn, signal }) };
 }

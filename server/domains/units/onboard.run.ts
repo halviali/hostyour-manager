@@ -35,7 +35,7 @@ import { resolveUnitQuota } from "./unit-size.ts";
 import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep } from "./onboard-registration.ts";
 import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader } from "../../adapters/kube/port.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
-import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
+import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome, standingHostFrom } from "./validate.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { clusterShortName, type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
 import { assertChannelReaches, type ChannelStages } from "../inventory/channel-stages.ts";
@@ -554,7 +554,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         const outcome = await validateOnboard(
           { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId, size: req.size },
           { domain: master.domain, stage, clusterValueFiles: [] },
-          { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, declareListening: ports.declareListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
+          { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, declareListening: ports.declareListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...standingHostFrom(ports.dns, ctx.db, ctx.signal), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
         );
         if (outcome.verdict !== "pass" || outcome.builds === null) {
           const failed = outcome.report.gates.filter((g) => g.status !== "pass");
@@ -616,7 +616,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       const outcome = await validateOnboard(
         { repoURL: req.repoURL, ref: DEFAULT_BRANCH_HEAD, consumerName: req.consumerName, repoCredentialId: req.repoCredentialId, size: req.size },
         { ...r.target, clusterValueFiles },
-        { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, declareListening: ports.declareListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
+        { repo: ports.repo, runner: ports.runner, registrations: ports.registrations, tenantSubdomains: ports.tenantSubdomains, log: ctx.log, signal: ctx.signal, declareListening: ports.declareListening, resolveQuota: (size, brings) => resolveUnitQuota(ctx.db, size, brings), ...standingHostFrom(ports.dns, ctx.db, ctx.signal), ...(ports.validationBudgetMs !== undefined ? { pollBudgetMs: ports.validationBudgetMs } : {}) },
       );
       if (outcome.verdict !== "pass" || outcome.builds === null) {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");

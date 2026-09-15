@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { makeOnboardDef, OnboardParams, DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
-import { CHANNEL_STAGES } from "./onboard.fixture.ts";
+import { CHANNEL_STAGES, seededDns } from "./onboard.fixture.ts";
 import { Registrations } from "./registrations.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
@@ -78,6 +78,7 @@ function ports(over: Partial<OnboardPorts> = {}): OnboardPorts {
       argoNamespace: "argocd",
     }),
     tenantSubdomains: async () => [],
+    dns: seededDns(),
     declareListening: true,
     argoWatchTimeoutMs: 1000,
     deployRefVisibleMs: 200,

@@ -74,7 +74,9 @@ class FakeAttestedBuilds implements AttestedBuildReader, AttestedFqdnReader {
 }
 
 function deps(repo: RepoReader, runner: GateRunner, over: Partial<ValidateDeps> = {}): ValidateDeps {
-  return { repo, runner, registrations: new FakeAttestedBuilds(), tenantSubdomains: async () => [], log: () => {}, signal: new AbortController().signal, declareListening: true, resolveQuota: (size, brings) => seedQuota(size, brings), ...over };
+  // The zone answers "free" unless a case says otherwise — G27 reads it for every deployable target
+  // whose chain names the apex.
+  return { repo, runner, registrations: new FakeAttestedBuilds(), tenantSubdomains: async () => [], log: () => {}, signal: new AbortController().signal, declareListening: true, resolveQuota: (size, brings) => seedQuota(size, brings), standingHost: async () => ({ kind: "free" as const }), ...over };
 }
 
 /** A manifest that declares `builds`, with a chart unless `chart` is false. */
@@ -332,9 +334,11 @@ describe("validateOnboard", () => {
     // this red instead of silently judging a repository from a default.
     it("accounts for every manager-side gate a full run emits", async () => {
       const repoFull = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
+      // A FULL run is a deployable target on a chain that names the apex: G27 judges the zone under the
+      // unit's host, and a chain naming none has no host to judge (that is the plan's refusal, not a gate).
       const full = await validateOnboard(
         req(),
-        target(),
+        target({ clusterValueFiles: APEX_CHAIN }),
         deps(repoFull, new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) })),
       );
       const none = await validateOnboard(
@@ -421,5 +425,52 @@ describe("validateOnboard — every poll exit reaps the gate objects", () => {
     const p = validateOnboard(req(), target(), deps(repo(), runner, { pollIntervalMs: 1, pollBudgetMs: 15 }));
     await expect(p).rejects.toThrow(/did not settle within 15ms/);
     expect(runner.cancelled).toEqual(["job_stuck"]);
+  });
+});
+
+describe("G27 unit host — the zone is read at validation, before anything is written", () => {
+  it("runs for a deployable target whose chain names the apex, and a leftover passes with the address it will replace", async () => {
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
+    const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
+    const asked: string[] = [];
+    const outcome = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), deps(repo, runner, {
+      standingHost: async (host, clusterFqdn) => { asked.push(`${host} on ${clusterFqdn}`); return { kind: "leftover", standing: "157.90.201.150" }; },
+    }));
+    expect(asked).toEqual(["acme.dev.units.example.com on s1.example"]);
+    const g27 = outcome.report.gates.find((g) => g.id === "G27");
+    expect(g27?.status).toBe("pass");
+    expect(g27?.found).toContain("157.90.201.150");
+    expect(outcome.verdict).toBe("pass");
+  });
+
+  it("rejects the onboarding on a collision with another cluster of this installation — no step has run", async () => {
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
+    const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
+    const outcome = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), deps(repo, runner, {
+      standingHost: async () => ({ kind: "collision", standing: "203.0.113.20", cluster: "s2.example" }),
+    }));
+    expect(outcome.verdict).toBe("fail");
+    expect(outcome.builds).toBeNull();
+    expect(outcome.report.gates.find((g) => g.id === "G27")?.found).toContain("s2.example");
+  });
+
+  it("rejects a deployable target on a manager with no DNS provider, where provision-dns would have died at step thirteen", async () => {
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
+    const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
+    const d = deps(repo, runner);
+    delete (d as { standingHost?: unknown }).standingHost;
+    const outcome = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), d);
+    expect(outcome.verdict).toBe("fail");
+    expect(outcome.report.gates.find((g) => g.id === "G27")?.found).toContain("no DNS provider");
+  });
+
+  it("does not run for a build-only unit — nothing is written under a host", async () => {
+    const repo = new FakeRepoReader({ resolvedSha: SHA });
+    const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"], false)) });
+    const { chartPath: _chartPath, ...buildOnly } = target({ clusterValueFiles: APEX_CHAIN });
+    const outcome = await validateOnboard(req(), buildOnly, deps(repo, runner, {
+      standingHost: async () => ({ kind: "collision", standing: "203.0.113.20", cluster: "s2.example" }),
+    }));
+    expect(outcome.report.gates.find((g) => g.id === "G27")).toBeUndefined();
   });
 });

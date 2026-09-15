@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
+import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
 import { DEFAULT_UNIT_SIZE, seedQuota, UNIT_SIZE, type MongodbMode, type UnitSize } from "../../../../shared/unit-size.ts";
 import { mapBuildsToChartPins } from "../builds.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
@@ -396,5 +396,41 @@ describe("G24 unit size (hard)", () => {
 
   it("is HARD — a size that does not cover what the unit brings rejects the onboarding, never warns", () => {
     expect(size(DEFAULT_UNIT_SIZE, true, "shared").severity).toBe("hard");
+  });
+});
+
+describe("G27 unit host (hard) — the zone, read before the first write", () => {
+  const host = "acme.units.example.com";
+  const on = (standing: Parameters<typeof gateUnitHost>[0]["standing"]) => gateUnitHost({ host, unitName: "acme", clusterFqdn: "s1.example", standing });
+
+  it("passes a free host and a host already at the target's address", () => {
+    expect(on({ kind: "free" })).toMatchObject({ id: "G27", severity: "hard", status: "pass", detail: "host is free" });
+    expect(on({ kind: "ours" })).toMatchObject({ status: "pass", detail: "host already ours" });
+  });
+
+  it("passes a leftover of a gone installation AND says it will be replaced, the standing address as evidence", () => {
+    // What the abandoned installation's onboarding had left at its old slave's address: the one
+    // obstacle that stopped a real run at its thirteenth step after twelve writes.
+    const g = on({ kind: "leftover", standing: "157.90.201.150" });
+    expect(g.status).toBe("pass");
+    expect(g.found).toContain("157.90.201.150");
+    expect(g.found).toContain("provision-dns replaces it");
+    expect(g.evidence).toEqual([{ source: "manager", name: host, fieldPath: "standing", value: "157.90.201.150" }]);
+  });
+
+  it("fails a host another cluster of THIS installation serves, naming that cluster — one stage of a unit has one host", () => {
+    const g = on({ kind: "collision", standing: "203.0.113.20", cluster: "s2.example" });
+    expect(g.status).toBe("fail");
+    expect(g.found).toContain("s2.example");
+    expect(g.found).toContain("203.0.113.20");
+    expect(g.reason).toContain("offboard the unit there first");
+    expect(hardGatesPass([g])).toBe(false);
+  });
+
+  it("fails on a manager with no DNS provider — before the run writes anything", () => {
+    const g = on(null);
+    expect(g.status).toBe("fail");
+    expect(g.found).toContain("no DNS provider");
+    expect(g.reason).toContain("CLOUDFLARE_DNS_API_TOKEN");
   });
 });

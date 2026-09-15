@@ -15,8 +15,14 @@
 // between two clusters in one zone — and under a shared apex two stages of one unit are two records
 // in two zones, so both may stand in one installation and on one cluster. What the name does NOT separate
 // is two CLUSTERS claiming the same stage of one unit: the host can answer for exactly one cluster,
-// so provisionUnitDns REFUSES a host that already answers with another cluster's address. A standing
-// record at another address is a takeover, whatever put it there.
+// so provisionUnitDns REFUSES a host that already answers with the address of ANOTHER CLUSTER OF THIS
+// INSTALLATION. A standing record at an address none of this installation's clusters has is a
+// different thing: only this installation's token writes the zone, so such a record is what an
+// installation that is gone left behind (its machines restored bare, its units never offboarded —
+// measured on 2026-09-15, post.digitacloud.app still at the abandoned apps4 when apps7 onboarded the
+// same unit), and it is REPLACED, with the log saying what stood there. readStandingHost is the one
+// reading of that difference; gate G27 (gates/compose.ts) takes it BEFORE the run writes anything, and
+// provision-dns takes it again at its own step (hostyour-manager#151).
 //
 // The record's CONTENT is the target cluster's address, READ off the cluster's own A record (its
 // FQDN resolves to the machine that serves it) — never computed. A move is then a content update of
@@ -29,6 +35,8 @@
 // run kind that runs after failed offboards, exactly where the leftovers would appear. Absent records
 // are the idempotent no-op (delete-by-(name,type) resolves 0).
 import type { StepCtx } from "../../executor/types.ts";
+import type { Db } from "../../db/client.ts";
+import { clusters } from "../../db/schema/inventory.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
@@ -71,6 +79,49 @@ async function resolveClusterAddress(dns: DnsProvider, clusterFqdn: string, sign
   return content;
 }
 
+/** What a unit's host answers with now, read against this installation's own clusters. */
+export type StandingHost =
+  /** No record stands under the host. */
+  | { kind: "free" }
+  /** The record already carries the target cluster's address — a re-run, never a takeover. */
+  | { kind: "ours" }
+  /** The record carries the address of ANOTHER cluster of this installation: one stage of a unit has
+   *  one host, and that cluster serves it. Refused wherever it is read. */
+  | { kind: "collision"; standing: string; cluster: string }
+  /** The record carries an address none of this installation's clusters has — what an installation
+   *  that is gone left in the zone. Replaced by provision-dns, and said so. */
+  | { kind: "leftover"; standing: string };
+
+/** The unit's host as the DNS provider answers it now, judged against the installation's own
+ *  clusters — every cluster row's domain resolved to its address at the same provider. The target
+ *  cluster's own address is read the way provision-dns reads it, and a target without one is refused
+ *  here for the same reason. The one reading gate G27 and the provision-dns step both take. */
+export async function readStandingHost(
+  dns: DnsProvider,
+  db: Db,
+  opts: { recordName: string; clusterFqdn: string; signal: AbortSignal },
+): Promise<StandingHost> {
+  const address = await resolveClusterAddress(dns, opts.clusterFqdn, opts.signal);
+  const standing = await dns.readRecordContent({ name: opts.recordName, type: "A", signal: opts.signal });
+  if (standing === null) return { kind: "free" };
+  if (standing === address) return { kind: "ours" };
+  for (const row of db.select({ domain: clusters.domain }).from(clusters).all()) {
+    if (row.domain === opts.clusterFqdn) continue;
+    const theirs = await dns.readRecordContent({ name: row.domain, type: "A", signal: opts.signal });
+    if (theirs === standing) return { kind: "collision", standing, cluster: row.domain };
+  }
+  return { kind: "leftover", standing };
+}
+
+/** The sentence a collision is refused with, the same at the gate and at the step. */
+export function standingHostRefusal(recordName: string, unit: string, judged: { standing: string; cluster: string }): string {
+  return (
+    `the host ${recordName} already answers with ${judged.standing}, the address of ${judged.cluster} of this installation — ` +
+    `refusing to point "${unit}" at a second cluster: one stage of a unit has ONE host, and that cluster serves it. ` +
+    `Offboard the unit there first, or give the two clusters different unit_apex answers.`
+  );
+}
+
 /** Create (or move onto the current cluster address) the unit's ONE record. Shared by the consumer
  *  onboard and create-tenant provision-dns steps AND by the relocation switch-dns (a move IS a
  *  content update of exactly this record) — the caller composes the record name per kind and names
@@ -97,14 +148,16 @@ export async function provisionUnitDns(
   const address = await resolveClusterAddress(dns, opts.clusterFqdn, ctx.signal);
   if (!opts.overwriteAddress) {
     // Read before write, because upsertRecord overwrites the first match in place and reports it as
-    // the benign "updated in place": the takeover would leave no trace anywhere in the run.
-    const standing = await dns.readRecordContent({ name: opts.recordName, type: "A", signal: ctx.signal });
-    if (standing !== null && standing !== address) {
-      throw errValidation(
-        `the host ${opts.recordName} already answers with ${standing}, and ${opts.clusterFqdn} is at ${address} — refusing to point "${opts.unit}" at a cluster the address does not serve. ` +
-          `The record name carries the unit's stage, and a cluster's unitApex is global.unitApex in its own installation/profile.yaml, stamped from the unit_apex answer when its install branch is generated — so two clusters in one zone give one stage of a unit ONE host, not two. ` +
-          `Overwriting it would move whatever serves ${opts.recordName} today onto this cluster without deploying it there: a standing record at another address is a takeover. ` +
-          `Remove the standing record if nothing serves it any more, or give the two clusters different unit_apex answers.`,
+    // the benign "updated in place": a takeover would leave no trace anywhere in the run, and a
+    // leftover replaced without a word would leave none either.
+    const judged = await readStandingHost(dns, ctx.db, { recordName: opts.recordName, clusterFqdn: opts.clusterFqdn, signal: ctx.signal });
+    if (judged.kind === "collision") {
+      throw errValidation(standingHostRefusal(opts.recordName, opts.unit, judged));
+    }
+    if (judged.kind === "leftover") {
+      ctx.log(
+        "meta",
+        `the host ${opts.recordName} stood at ${judged.standing}, an address no cluster of this installation has — what an installation that is gone left in the zone; replaced with ${address}`,
       );
     }
   }
