@@ -5,8 +5,10 @@
 // TENANT_CRYPTO_KEYS in relocation-jobs.ts): the key is the axis that differs, the Secret is not.
 
 /** The Secret every tenant member kit materializes from the tenant's Vault entry — the crypto
- *  material, and in the auth member's own namespace <guid>-auth the one-shot bootstrap token
- *  example-auth accepts as `X-Bootstrap-Token`. */
+ *  material, and in the auth member's own namespace <guid>-auth the one-shot bootstrap token the
+ *  identity provider accepts as `X-Bootstrap-Token`. THE NAMES HERE ARE THE PLATFORM'S CONTRACT:
+ *  the product's charts materialize exactly these (its kit's appSecretName and the two literals
+ *  beside it), and TENANT_ENGINE_KEY in relocation-jobs.ts spells the third. */
 export const TENANT_SECRET = "hostyour-app-secrets";
 
 /** The bucket-scoped key Secret only app members (the engine) carry. */

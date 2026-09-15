@@ -71,12 +71,12 @@ export const TENANT_CRYPTO_KEYS = [
 
 /** The fifth property of the same Vault entry, and the fifth file under vault/: the trusted-service
  *  key the tenant's jobs presents and its engine verifies. It lives in a DIFFERENT Kubernetes Secret
- *  (example-engine-api-key, rendered by the kit for exactly the two members that read it), so it is
+ *  (hostyour-engine-api-key, rendered by the kit for exactly the two members that read it), so it is
  *  dumped by its own job in an app member's namespace — see tenantDumpJobs.
  *
  *  Without it a hand recovery from the box restores a tenant whose jobs and engine no longer agree on
  *  a bearer, and the failure reads as an auth error rather than as a missing backup. */
-export const TENANT_ENGINE_KEY = { env: "ENGINE_API_KEY", property: "engine-api-key", secret: "example-engine-api-key", secretKey: "engine-api-key" } as const;
+export const TENANT_ENGINE_KEY = { env: "ENGINE_API_KEY", property: "engine-api-key", secret: "hostyour-engine-api-key", secretKey: "engine-api-key" } as const;
 
 /** The per-consumer PostgreSQL instance coordinates (service-provisioner naming:
  *  `<claim>-<service>` with the claim named after the unit). */
@@ -231,7 +231,7 @@ done
     });
     // The fifth crypto file, beside the other four under vault/. It runs HERE and not with them
     // because it is in a different Kubernetes Secret in a different namespace: the kit renders
-    // example-engine-api-key only where it is read, which is the engine and jobs members, and a dump
+    // hostyour-engine-api-key only where it is read, which is the engine and jobs members, and a dump
     // job reads only its own namespace. An app member's namespace is where the engine is, so the same
     // namespace the bucket dump already runs in is the one that can see it.
     //

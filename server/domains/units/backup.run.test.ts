@@ -113,7 +113,7 @@ describe("tenant-backup", () => {
     expect(names).toContain(`reloc-dump-crypto-${GUID}`);
     expect(names).toContain(`reloc-dump-bucket-${GUID}`);
     // The fifth crypto property. Its own job because it is in its own Secret in its own namespace —
-    // the kit renders example-engine-api-key only where it is read, which is not the IdP member.
+    // the kit renders hostyour-engine-api-key only where it is read, which is not the IdP member.
     expect(names).toContain(`reloc-dump-engine-key-${GUID}`);
     expect(names).toContain(`reloc-verify-dump-${GUID}`);
     // Each job ran where its Secrets are: mongo beside the root credential, the four app-Secret crypto
@@ -128,7 +128,7 @@ describe("tenant-backup", () => {
     // whole identity in one place rather than four files in one folder and a fifth somewhere else.
     const engineKeyJob = f.source.reader.jobs.find((j) => j.spec.name === `reloc-dump-engine-key-${GUID}`);
     expect(engineKeyJob?.spec.script).toContain(`box:${GUID}/vault/engine-api-key`);
-    expect(engineKeyJob?.spec.env?.some((e) => e.secretKeyRef?.name === "example-engine-api-key")).toBe(true);
+    expect(engineKeyJob?.spec.env?.some((e) => e.secretKeyRef?.name === "hostyour-engine-api-key")).toBe(true);
   });
 
   it("verify-dump fails LOUD when the folder is incomplete", async () => {
