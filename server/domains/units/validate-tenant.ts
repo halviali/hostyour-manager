@@ -183,12 +183,15 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           subdomain: req.subdomain,
           stage: req.stage,
           zone: tenantZone(req.subdomain, req.stage, unitApex),
+          // The four tenant flags, under tenant: where every member chart reads them (the off
+          // rendering, the identity provider's per-app roles and user seed, the engine's seed tiers)
+          // and where the tenants ApplicationSet delivers them.
+          suspended: false,
+          quiesced: false,
+          seedUsers: req.seedUsers ?? false,
+          apps: req.apps,
         },
         global: { stageApex: stageApex(unitApex, req.stage) },
-        suspended: false,
-        quiesced: false,
-        seedUsers: req.seedUsers ?? false,
-        apps: req.apps,
       });
       const renders: MemberRender[] = [];
       const docsByMember: MemberDocs[] = [];

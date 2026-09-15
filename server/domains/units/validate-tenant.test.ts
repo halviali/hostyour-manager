@@ -425,12 +425,14 @@ describe("validateTenant — what every member is rendered with", () => {
     const auth = helm.requests.find((r) => r.namespace === memberNamespace(PROBE, "auth", "dev"));
     expect(auth?.valuesObject).toMatchObject({
       global: { env: "prod", stageApex: "dev.example.com" }, // the chain's own keys stay; the delivered zone joins them
-      tenant: { guid: PROBE, member: "auth", appName: "auth", subdomain: "acme", stage: "dev", zone: "acme.dev.example.com" },
-      suspended: false,
-      quiesced: false,
-      seedUsers: true,
-      apps: [{ name: "erp" }],
+      tenant: {
+        guid: PROBE, member: "auth", appName: "auth", subdomain: "acme", stage: "dev", zone: "acme.dev.example.com",
+        // The four flags under tenant:, where the charts read them — a top-level copy reaches no chart.
+        suspended: false, quiesced: false, seedUsers: true, apps: [{ name: "erp" }],
+      },
     });
+    expect(auth?.valuesObject).not.toHaveProperty("apps");
+    expect(auth?.valuesObject).not.toHaveProperty("seedUsers");
     // prod stands directly under the unit apex — the same law the DNS step and the activation use.
     helm.requests.length = 0;
     await validateTenant(req(), deps(repo, helm));
