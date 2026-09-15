@@ -217,7 +217,7 @@ function serviceAccountValidation(input: { namespace: string; guid: string }): A
  *  claim a workload makes about whose Vault entry it reads. Every name comes from tenant-fanout
  *  (never hand-composed), so the policy, the AppProject and the generated Application agree on the
  *  member's identity by construction. */
-export function renderTenantMemberAdmissionPolicy(input: { guid: string; member: string; stage: Stage; namespaceLabels?: Readonly<Record<string, string>> }): { policy: AdmissionPolicyManifest; binding: AdmissionPolicyBindingManifest } {
+export function renderTenantMemberAdmissionPolicy(input: { guid: string; member: string; stage: Stage; namespaceLabels?: Readonly<Record<string, string>> | undefined }): { policy: AdmissionPolicyManifest; binding: AdmissionPolicyBindingManifest } {
   const policyName = tenantMemberAdmissionPolicyName(input.guid, input.member, input.stage);
   const namespace = memberNamespace(input.guid, input.member, input.stage);
   // The generated member Application's name — the prefix of every tracking id this member owns,

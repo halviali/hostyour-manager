@@ -418,7 +418,12 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
             cluster: p.cluster,
           });
           await projectWriter.applyAppProject(argoNamespace, project);
-          const { policy, binding } = renderTenantMemberAdmissionPolicy({ guid: p.guid, member, stage: p.stage });
+          // The member's own namespace labels, as the product declares them and the tenants
+          // ApplicationSet stamps them (the identity provider's redis-consumer, say): a policy that
+          // did not grant them refused the Namespace the appset creates, and the fan-out never converged.
+          const { policy, binding } = renderTenantMemberAdmissionPolicy({
+            guid: p.guid, member, stage: p.stage, namespaceLabels: p.members.find((m) => m.name === member)?.namespaceLabels,
+          });
           await clusterReader.applyAdmissionPolicy(policy, binding);
         }
         ctx.checkpoint({ appProjects: namespaces, admissionPolicies: members.map((m) => tenantMemberAdmissionPolicyName(p.guid, m, p.stage)) });

@@ -7,6 +7,7 @@ import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventor
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberAppProject, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
+import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
@@ -260,10 +261,11 @@ describe("create-tenant run definition", () => {
     expect(logs.some((l) => l.includes("Synced + Healthy"))).toBe(true);
   });
 
-  it("apply-appprojects writes ONE isolation AppProject per member (Namespace-only whitelist, destination name-pinned) before the pointer", async () => {
+  it("apply-appprojects writes ONE isolation AppProject per member (Namespace-only whitelist, destination name-pinned) and grants each policy the member's own labels", async () => {
     seedClusters();
     const projects = new FakeMasterProjectWriter();
-    await runAll(params(), ports({ projects }), []);
+    const records = testMembers(APPS).map((m) => (m.name === "auth" ? { ...m, namespaceLabels: { "platform/redis-consumer": "true" } } : m)); // the IdP's label, as the manifest declares it
+    const prt = ports({ projects }); await runAll(params({ members: records }), prt, []);
     // The trio always, plus one per app — never a bare <guid> project, never a "base" member.
     const members = [...TEST_MEMBERS, ...APPS.map((a) => a.name)];
     expect(members).toEqual(["auth", "jobs", "report", "erp"]);
@@ -276,6 +278,9 @@ describe("create-tenant run definition", () => {
       // The destination pins the tenant's OWN slave by ArgoCD cluster name — never server "*" — and
       // confines this member to its own namespace, never a sibling's.
       expect(project?.spec.destinations).toEqual([{ name: "s1", namespace: `${GUID}-${member}-prod` }]);
+      // The member's admission policy grants the labels the appset stamps on its Namespace — the IdP's redis-consumer, nobody else's.
+      const policy = JSON.stringify(((await prt.resolver.resolve("cls_1")).clusterReader as FakeClusterReader).admissionPolicies.get(tenantMemberAdmissionPolicyName(GUID, member, "prod"))?.policy);
+      expect(policy.includes("platform/redis-consumer")).toBe(member === "auth");
     }
   });
 

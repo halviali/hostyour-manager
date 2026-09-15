@@ -81,14 +81,20 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       if (!until(byName)) throw errValidation(`tenant ${tc.guid} fan-out did not converge on the ${intent} render — ${describeUnsynced(names, byName)}`);
       c.log("meta", `tenant ${tc.guid} fan-out is Synced + Healthy (${names.length} Application(s)) — the render is ${intent}`);
     };
-    const applyIsolation = async (c: StepCtx, target: TargetCluster, memberNames: string[], applications: string[]): Promise<void> => {
+    const applyIsolation = async (
+      c: StepCtx,
+      target: TargetCluster,
+      memberNames: string[],
+      applications: string[],
+      namespaceLabels: ReadonlyMap<string, Readonly<Record<string, string>>>,
+    ): Promise<void> => {
       const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
       for (const member of memberNames) {
         await projectWriter.applyAppProject(argoNamespace, renderTenantAppProject({ guid: tc.guid, member, stage: tc.stage, argoNamespace, catalogRepoUrl: ports.catalogRepoUrl, platformRepoURL: ports.platformRepoURL, cluster: target.cluster }));
         // The member's admission boundary moves WITH the member, exactly as the consumer world
         // carries its policy: the target's ApplicationSet stamps the same labels off the same
         // registration, so the target policy admits the same managed namespace the source's did.
-        const { policy, binding } = renderTenantMemberAdmissionPolicy({ guid: tc.guid, member, stage: tc.stage });
+        const { policy, binding } = renderTenantMemberAdmissionPolicy({ guid: tc.guid, member, stage: tc.stage, namespaceLabels: namespaceLabels.get(member) });
         await clusterReader.applyAdmissionPolicy(policy, binding);
       }
       if (!ports.buildRbac) throw errValidation(`provision-target for tenant ${tc.guid} requires the build RBAC writer but none is wired`);
@@ -124,7 +130,8 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // The DUMPED registration's apps, not this run's: a restore reconstructs the tenant the box
         // holds, whose app set may differ from whatever the inventory still says.
         const members = [...tc.members, ...entry.apps.map((a) => a.name)];
-        await applyIsolation(c, target, members, tenantApplicationSet(members, tc.guid, tc.stage));
+        // The standing members' namespace labels ride the registration; an app member carries none.
+        await applyIsolation(c, target, members, tenantApplicationSet(members, tc.guid, tc.stage), new Map(entry.members.map((m) => [m.name, m.namespaceLabels])));
         const { clusterReader } = await ports.resolver.resolve(target.clusterId);
         // The claim mark is set on DEPARTURE (see repoint), so a member namespace still standing on
         // this cluster can carry one from an earlier move away from it — and a mark left behind would
