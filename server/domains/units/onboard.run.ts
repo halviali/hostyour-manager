@@ -373,7 +373,8 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
   return p.activation ? [...steps, activateStep(ports, p, runtime)] : steps;
 }
 
-function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] {
+/** Exported for the tenant onboarding, which runs this very chain per build unit it lacks (tenant-builds.ts). */
+export function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] {
   const release: ReleaseCycleRuntime = {};
   return [
     // No attest-target: there is no target cluster whose deploy-state could be attested — the run kind

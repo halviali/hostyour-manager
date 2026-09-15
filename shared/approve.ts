@@ -17,6 +17,15 @@
  *  spelled twice is a key that can disagree with itself. */
 export const MACHINE_PASSWORD_SECRET = "ansiwise-elevation";
 
+/** The approve-time PAT of one build unit a tenant onboarding registers on the way (hostyour-manager#165):
+ *  `build-repo-pat:<unit>`, one per repository the installation has not registered yet. Asked once —
+ *  the run seals it, registers the unit and seeds it into the build plane; the next tenant asks for
+ *  nothing. Shared by the plan that demands it and the approve card that labels it. */
+export const BUILD_REPO_PAT_PREFIX = "build-repo-pat:";
+export function buildRepoPatSecret(unit: string): string {
+  return `${BUILD_REPO_PAT_PREFIX}${unit}`;
+}
+
 export interface OperatorInput {
   /** The name the program declares the answer under. */
   field: string;

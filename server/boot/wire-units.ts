@@ -42,6 +42,7 @@ import { makeRestartWorkloadsDef, makeTenantRestartWorkloadsDef } from "../domai
 import { makeSetSizeDef, makeTenantSetSizeDef } from "../domains/units/set-size.run.ts";
 import type { LifecyclePorts, TenantLifecyclePorts } from "../domains/units/lifecycle.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/create-tenant.run.ts";
+import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
@@ -192,6 +193,8 @@ interface Family {
    *  Undefined when the family is not configured. */
   repoReader?: RepoReader;
   github?: GitHubConsumer;
+  /** The consumer onboarding's ports, so the tenant family can run the build-only chain per build unit (tenant-builds.ts). */
+  onboardPorts?: OnboardPorts;
   platformGitHub?: { owner: string; repo: string };
   /** Present only for the tenant family — bring the catalog's books branch into being and to the
    *  catalog's trunk, so the tenant ApplicationSet's git generator has a revision to resolve before
@@ -297,8 +300,19 @@ export function buildUnits(
       ? { self: { addr: config.vault.addr, k8sAuthMount: config.vault.k8sAuthMount, k8sRole: config.vault.k8sRole, saTokenPath: config.vault.saTokenPath } }
       : {},
   );
-  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube);
+  // THE TENANT FAMILY IS WIRED FIRST (the consumer family needs its registrations) AND YET RUNS THE
+  // CONSUMER'S BUILD CHAIN per build unit it lacks (tenant-builds.ts) — so the consumer ports reach it
+  // through a holder filled once both stand. The tenant defs read it at run time, never at wiring.
+  const lateBuild: { deps?: TenantBuildDeps } = {};
+  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps);
   const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube);
+  if (consumer.onboardPorts) {
+    lateBuild.deps = {
+      ports: consumer.onboardPorts,
+      ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),
+      ...(platformRepo ? { platformRepo } : {}),
+    };
+  }
   // The sanctioned type-erasure (registrations.ts): each typed RunDefinition<P> is stored executor-facing
   // as AnyRunDefinition; the executor parses params via paramsSchema before plan()/steps(). Both
   // families share one flat defs[] — the run kinds are disjoint, so buildRunDefinitions keys them apart.
@@ -544,7 +558,7 @@ function buildConsumerOnboarding(
   // access at request time (the same resolver the runs already resolve through); the registrations rides
   // out so the detected scan (GET /api/consumers/detected) diffs the very pointers the runs commit;
   // the repository reader rides out so the wizard's prefill clones with the reader the run clones with.
-  return { defs, enabled: true, resolver, registrations, repoReader: repo, github, platformGitHub: { owner: config.github.owner, repo: config.github.repo } };
+  return { defs, enabled: true, resolver, registrations, repoReader: repo, github, onboardPorts, platformGitHub: { owner: config.github.owner, repo: config.github.repo } };
 }
 
 // ---- Tenant (multi-app) onboarding: catalog + the manager-side HelmRenderer ----
@@ -567,6 +581,9 @@ function buildTenantOnboarding(
   objectStore: ObjectStore | undefined,
   /** The master-local clients and the one resolver over them, built in the composition root. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
+  /** The consumer onboarding's ports, handed late: the tenant defs run its build-only chain per build
+   *  unit a tenant lacks (tenant-builds.ts), and that family is wired after this one. */
+  onboard: () => TenantBuildDeps | undefined,
 ): Family {
   // The platform repo coordinates are required: every member AppProject must allow the `$values`
   // source its Application pulls from, and a project written without it would fail every sync.
@@ -690,6 +707,18 @@ function buildTenantOnboarding(
     // Makes the bucket that entry's three storage properties address, and mints the key that reaches
     // it and no other bucket of this account.
     ...(objectStore ? { objectStore } : {}),
+    onboard,
+    // A unit the installation registered: build-only under registrations/<unit>/build.yaml, deployable
+    // under a stage file; the stored credential rides the entry either way.
+    buildUnitRegistration: async (unit) => {
+      const build = await registrations.readBuildRegistration(unit);
+      if (build) return { form: "build-only", ...(build.entry.repoCredentialId ? { repoCredentialId: build.entry.repoCredentialId } : {}) };
+      for (const stage of STAGE) {
+        const deployed = await registrations.readRegistration(stage, unit);
+        if (deployed) return { form: "deployable", ...(deployed.entry.repoCredentialId ? { repoCredentialId: deployed.entry.repoCredentialId } : {}) };
+      }
+      return null;
+    },
   };
   // remove-app + tenant-suspend/-resume/-offboard only flip/drop the pointer + watch the fan-out — no
   // clone/render, so they take the narrower lifecycle port set (registrations + resolver).

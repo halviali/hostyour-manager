@@ -25,6 +25,7 @@ import { stageApex, tenantZone } from "../../../shared/unit-host.ts";
 import { catalogPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
+import type { TenantSpec } from "../../../shared/consumer.ts";
 import { collectContainerImages } from "./ensure-images.ts";
 import {
   TENANT_MANIFEST_PATH,
@@ -89,6 +90,8 @@ export interface TenantValidationOutcome {
    *  verdict is already a fail. */
   memberRecords: TenantMemberRecord[];
   identityProvider: string;
+  /** The fan-out spec T1 parsed — what the plan reads `buildRepos` off; null where T1 could not read one. */
+  spec: TenantSpec | null;
 }
 
 const abortError = (): Error => Object.assign(new Error("aborted"), { name: "AbortError" });
@@ -252,7 +255,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       manifest: t1.manifest,
       gates,
     });
-    return { verdict: report.verdict, resolvedSha: cloned.resolvedSha, report, images, memberRecords, identityProvider };
+    return { verdict: report.verdict, resolvedSha: cloned.resolvedSha, report, images, memberRecords, identityProvider, spec: t1.spec ?? null };
   } finally {
     await deps.repo.dispose(cloned.workdir);
   }

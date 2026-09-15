@@ -15,7 +15,7 @@
 // deployed slave stands in, the password-login and tailnet kinds only raise their own commands — so
 // the sentence common to all of them is here, and the rest is in each plan's summary, which the card
 // renders above these fields.
-import { MACHINE_PASSWORD_SECRET } from "../../shared/approve.ts";
+import { MACHINE_PASSWORD_SECRET, BUILD_REPO_PAT_PREFIX } from "../../shared/approve.ts";
 
 /** The prefix a consumer's own declared secret rides under. Stripped, because the name that follows
  *  it is the one the consumer's manifest declares and the one its author knows the value by. */
@@ -25,6 +25,9 @@ const CONSUMER_SECRET_PREFIX = "consumer-secret:";
  *  it is, which is a name the plan chose rather than a word invented here. */
 export function secretFieldLabel(key: string): string {
   if (key === MACHINE_PASSWORD_SECRET) return "The password of the machine account this manager logs in as";
+  if (key.startsWith(BUILD_REPO_PAT_PREFIX)) {
+    return `A classic GitHub PAT for the repository of build unit "${key.slice(BUILD_REPO_PAT_PREFIX.length)}" (repo + workflow + admin:repo_hook + read:packages)`;
+  }
   return key.startsWith(CONSUMER_SECRET_PREFIX) ? key.slice(CONSUMER_SECRET_PREFIX.length) : key;
 }
 
@@ -32,7 +35,7 @@ export function secretFieldLabel(key: string): string {
  *  the credential is used for and nothing about how long it lives: both forms already carry that
  *  sentence once, under the fields, for every credential on the card at once. */
 export function secretFieldHint(key: string): string | null {
-  return key === MACHINE_PASSWORD_SECRET
-    ? "Every command this run sends to root is raised with it, and the run stops rather than going on without it."
-    : null;
+  if (key === MACHINE_PASSWORD_SECRET) return "Every command this run sends to root is raised with it, and the run stops rather than going on without it.";
+  if (key.startsWith(BUILD_REPO_PAT_PREFIX)) return "Asked once: this run registers the unit and seeds the PAT into the build plane, and the next tenant asks for nothing.";
+  return null;
 }

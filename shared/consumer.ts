@@ -115,6 +115,15 @@ export const TenantSpecSchema = z.object({
       override: z.record(z.string(), TenantSourceSchema).optional(),
     }),
   }),
+  /** WHICH REPOSITORY BUILDS WHICH IMAGE the member charts pull (`builds[].image` in their values),
+   *  so the tenant onboarding can release the images its fan-out lacks the way a consumer onboarding
+   *  releases its own (hostyour-manager#165). One entry per repository, every image name once; the
+   *  unit a repository names is its basename (unitNameFromRepoURL), the identity every registration
+   *  holds. */
+  buildRepos: z.array(z.object({
+    repo: z.string().regex(/^https:\/\/[^ ]+\.git$/),
+    builds: z.array(z.string().regex(/^[a-z0-9-]+$/)).min(1),
+  })).default([]),
 }).superRefine((spec, ctx) => {
   // Two invariants the list form has to carry that a keyed map would carry for free.
   const names = spec.members.map((m) => m.name);
@@ -131,8 +140,24 @@ export const TenantSpecSchema = z.object({
       ? `no member declares identityProvider: true — a tenant's activation and its relocations resolve the IdP through that flag and have nothing to reach without it`
       : `${idps.length} members declare identityProvider: true (${idps.join(", ")}) — exactly one is the tenant's IdP` });
   }
+  const repos = spec.buildRepos.map((b) => b.repo);
+  const dupRepo = repos.find((r, i) => repos.indexOf(r) !== i);
+  if (dupRepo !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["buildRepos"], message: `buildRepos names ${dupRepo} twice — one entry per repository carries every image it builds` });
+  }
+  const images = spec.buildRepos.flatMap((b) => b.builds);
+  const dupImage = images.find((n, i) => images.indexOf(n) !== i);
+  if (dupImage !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["buildRepos"], message: `the image "${dupImage}" is named by two buildRepos entries — one repository builds one image` });
+  }
 });
 export type TenantSpec = z.infer<typeof TenantSpecSchema>;
+
+/** The unit a repository names — its basename without `.git` — the identity law every registration
+ *  holds (`name == basename(repoURL)` below) and the name a tenant's build unit is registered under. */
+export function unitNameFromRepoURL(repoURL: string): string {
+  return repoURL.slice(repoURL.lastIndexOf("/") + 1).replace(/\.git$/, "");
+}
 
 /** One manifest secrets[] declaration (contract v1.3). `generate` marks a key the MANAGER
  *  mints at seed time (the operator is NEVER asked for it); a required key WITHOUT `generate` is

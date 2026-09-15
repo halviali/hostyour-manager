@@ -11,12 +11,13 @@ import { guid as guidSchema, memberName, TenantAppSchema, TenantMemberRecordSche
 import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
-import { RequiredImageSchema, requiredImagesFrom, ensureImagesStep } from "./ensure-images.ts";
+import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
+import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { assertDeployState } from "./lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
-import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
+import { tenantSyncUnits } from "./build-rbac.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
@@ -125,6 +126,14 @@ export interface TenantOnboardPorts {
    *  credential is a real state (a dev process, the checks); absent ⇒ the seed step fails loud,
    *  never silently produces a tenant whose engine refuses to boot for want of a bucket. */
   objectStore?: ObjectStore;
+  /** The consumer onboarding's ports, handed LATE (the consumer family is wired after this one), for
+   *  the build units a tenant onboards on the way (tenant-builds.ts). Absent ⇒ a tenant whose images
+   *  are missing is refused at the build step, naming the wiring. */
+  onboard?: () => TenantBuildDeps | undefined;
+  /** What the installation already registered under a unit name — the form and the stored credential —
+   *  so the plan re-releases a registered build unit and asks a PAT only for one it has never seen.
+   *  Absent ⇒ every build unit reads as unregistered. */
+  buildUnitRegistration?: (unit: string) => Promise<RegisteredUnit | null>;
 }
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
@@ -188,6 +197,7 @@ export const CreateTenantParams = z.object({
   // name one of requiredImages carries (tenantSyncUnits), resolved at plan time from the SAME frozen
   // image set, so the grant and the images it follows can never be computed from two different trees.
   syncUnits: z.array(z.string()).default([]),
+  buildUnits: z.array(BuildUnitSchema).default([]), // the units this run onboards or re-releases before it fans out
   catalogRepoUrl: z.string().min(1),
   // The operator's OPTIONAL first-admin email (the create-tenant wizard field). Threaded ONLY so the
   // final `activate` step can invite the tenant's first admin; deliberately NOT written to the
@@ -278,6 +288,9 @@ function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase: Tenan
 }
 
 function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[] {
+  // What the build units hand the steps after them: the image set and the sync units as they stand
+  // once the builds wrote their pins. In-run memory of this closure, like the release cycle's own.
+  const runtime: TenantBuildRuntime = {};
   // Every member of this tenant, standing ones first then one per app. One namespace and one
   // AppProject per entry — the tenant owns several of each, never one shared pair. Read defensively
   // because the armed check evaluates def.steps({}) with NO params at all.
@@ -339,6 +352,9 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
       },
     },
     ...replaceSteps,
+    // The build units BEFORE the tenant's own writes: a build that fails leaves a provisioning row and
+    // nothing else — no Vault entry, no bucket, no key, no AppProject (the first-write law of #151).
+    ...(p.buildUnits ?? []).map((unit) => buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit)),
     {
       name: "seed-tenant-crypto",
       title: "Seed the tenant's crypto entry in Vault (create-only)",
@@ -389,7 +405,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     // fan-out pulls from the target cluster's registrations must EXIST before the pointer lands, or the
     // appset fans out straight into ImagePullBackOff. A probe — a missing image fails the run naming
     // every absent tag, and nothing is built here.
-    ensureImagesStep(ports, p),
+    ...tenantImageSteps(ports, p, runtime),
     {
       name: "apply-appprojects",
       title: "Apply the per-member isolation AppProjects and admission policies",
@@ -433,28 +449,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         );
       },
     },
-    {
-      name: "provision-argo-sync",
-      title: "Provision the tenant's scoped argo-sync grant",
-      run: async (ctx) => {
-        // Beside the AppProjects and before the registration, in the same ArgoCD namespace: the grant
-        // is what lets a release of a platform unit sync the pin it just bumped into this tenant,
-        // instead of leaving the new image to ArgoCD's next poll. resourceNames name THIS tenant's
-        // member Applications and no others, so a release syncing one tenant cannot touch a sibling.
-        // No registerCleanup — the shared teardown armed at record-provisional deletes it beside the
-        // member AppProjects. Idempotent on resume (the writer replaces both objects in place).
-        const { argoNamespace } = await ports.resolver.resolve(p.clusterId);
-        const syncGrant = renderTenantArgoSync({ guid: p.guid, applications: p.expectedApps, argoNamespace, units: p.syncUnits });
-        const { created } = await ports.buildRbac.applyBuildRbac([syncGrant]);
-        ctx.checkpoint({ argoSync: `${argoNamespace}/${syncGrant.role.metadata.name}`, units: p.syncUnits, created });
-        ctx.log(
-          "meta",
-          p.syncUnits.length > 0
-            ? `argo-sync grant ${syncGrant.role.metadata.name} applied in ${argoNamespace} over ${p.expectedApps.length} Application(s) — the release pipelines of ${p.syncUnits.join(", ")} may sync this tenant and no other`
-            : `argo-sync grant ${syncGrant.role.metadata.name} applied in ${argoNamespace} over ${p.expectedApps.length} Application(s) with NO subject — no registered unit attests a build this tenant pins, so every bump reaches it on ArgoCD's own poll`,
-        );
-      },
-    },
+    provisionArgoSyncStep(ports, p, runtime),
     {
       name: "provision-dns",
       title: "Provision the tenant's public DNS record",
@@ -657,8 +652,18 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // images, filtered to the target cluster's registry host. The validated revision is frozen
       // into chartsRef as well, so the set cannot move between plan + execute.
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
+      // THE IMAGES THE FAN-OUT LACKS ARE BUILT BY THIS RUN, the way a consumer onboarding builds its
+      // own (hostyour-manager#165, tenant-builds.ts): each missing image's repository becomes a build
+      // unit the run onboards before the tenant's own writes; a PAT per unregistered unit at approve.
+      const planned = await planBuildUnits({
+        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], probe: ports.registryProbe,
+        registration: ports.buildUnitRegistration ?? (async () => null), stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
+      });
+      if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
+      const built = planned.builds;
       // The argo-sync grant's subjects, from the same frozen image set: which units BUILD what this
       // tenant pulls is read off the registration branch, so no list of components is kept anywhere.
+      // Refreshed after the builds (refresh-images) where a build unit ran.
       const syncUnits = tenantSyncUnits(requiredImages, await ports.attestedBuilds());
       const params: CreateTenantParams = {
         guid,
@@ -679,6 +684,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         expectedApps,
         requiredImages,
         syncUnits,
+        buildUnits: built.units,
         catalogRepoUrl: ports.catalogRepoUrl,
         replaces, // the existing same-subdomain tenants create-tenant prepends offboard steps for
         // Thread the operator's optional admin email into params so the `activate` step can invite the
@@ -697,14 +703,14 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: tenantLocks(ports.registrations),
-        warnings: [],
+        warnings: built.warnings,
         // NOTHING IS ASKED OF THE OPERATOR. It used to be three values here — the two halves of a
         // bucket key and the endpoint — because a bucket and a key scoped to it are made with an
         // ACCOUNT-scoped credential and this tier held none. It holds one now, so seed-tenant-crypto
         // makes the bucket and mints the key itself (simetrixch/hostyour-cloud#197). Stated EMPTY
         // rather than left out: the approve ceremony renders one input per entry, and the field is
         // what says this run needs no ceremony at all.
-        requiredSecrets: [],
+        requiredSecrets: built.requiredSecrets, // one PAT per build unit the installation has not registered
       };
       return { outcome: "planned", params, plan };
     },
