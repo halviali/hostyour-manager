@@ -418,6 +418,16 @@ describe("validateTenant", () => {
 });
 
 describe("validateTenant — what every member is rendered with", () => {
+  it("layers the installation's pins-<stage>.yaml over a chart that has one on the books branch, and nothing over one that has none", async () => {
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, "charts/example-auth/pins-prod.yaml": "builds: []\n" } });
+    await validateTenant(req({ apps: [] }), deps(repo, helm));
+    const filesOf = (member: string): string[] | undefined => helm.requests.find((r) => r.namespace === memberNamespace(PROBE, member, "prod"))?.valueFiles;
+    // The pin last, so the tag this installation built wins over the trunk's product default.
+    expect(filesOf("auth")).toEqual(["values.yaml", "values-prod.yaml", "pins-prod.yaml"]);
+    expect(filesOf("jobs")).toEqual(["values.yaml", "values-prod.yaml"]);
+  });
+
   it("layers the values the tenants ApplicationSet delivers over the folded chain: the tenant's facts and its zone", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } });

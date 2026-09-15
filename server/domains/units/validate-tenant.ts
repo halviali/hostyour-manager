@@ -22,6 +22,7 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { identityProviderMember, memberNamespace, resolveFanout, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
 import { stageApex, tenantZone } from "../../../shared/unit-host.ts";
+import { catalogPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 import { collectContainerImages } from "./ensure-images.ts";
@@ -198,10 +199,19 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       for (const member of members) {
         if (deps.signal.aborted) throw abortError();
         const namespace = memberNamespace(req.probeGuid, member.member, req.stage);
+        // THE INSTALLATION'S OWN PIN OVER THE CHART, exactly as the tenants ApplicationSet layers
+        // `$pins/<chart>/pins-<stage>.yaml` off the books branch this clone is (hostyour-cloud
+        // clusters/argocd/files/tenants-appset.yaml): the tag the cluster pulls, never the trunk's
+        // product default — so the images this render yields, which ensure-images probes and the
+        // run freezes, are the ones the fan-out deploys. Absent while no release of this
+        // installation has built the chart's images (the appset's ignoreMissingValueFiles); the
+        // trunk default then stands and the image gate names it as missing (#154).
+        const pin = catalogPinFile(req.stage);
+        const pinned = (await deps.repo.readFile(cloned.workdir, `${member.chart}/${pin}`)) !== null;
         const result = await deps.helm.template({
           workdir: cloned.workdir,
           chartPath: member.chart,
-          valueFiles: member.valueFiles,
+          valueFiles: pinned ? [...member.valueFiles, pin] : member.valueFiles,
           valuesObject: mergeDeep(chainValues, deliveredTo(member)),
           releaseName: `${req.probeGuid}-${member.name}`,
           namespace,

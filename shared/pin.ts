@@ -90,8 +90,15 @@ export function stagePinFiles(): PinFile[] {
  *
  *  Both are floor: the default is what a fresh installation deploys, the per-stage file what a
  *  running one does, and retention may delete neither. */
+/** The catalogue's per-installation pin for one stage, `charts/<chart>/pins-<stage>.yaml` on the
+ *  books branch — what the release pipeline writes and the tenants ApplicationSet layers over the
+ *  chart at deploy. */
+export function catalogPinFile(stage: Stage): string {
+  return `pins-${stage}.yaml`;
+}
+
 export function catalogPinFiles(): PinFile[] {
-  return [{ file: "values.yaml", stage: null }, ...STAGE.map((stage) => ({ file: `pins-${stage}.yaml`, stage }))];
+  return [{ file: "values.yaml", stage: null }, ...STAGE.map((stage) => ({ file: catalogPinFile(stage), stage }))];
 }
 
 /**
