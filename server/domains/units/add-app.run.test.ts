@@ -19,7 +19,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
-import { testMembers } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
@@ -84,7 +84,7 @@ function syncedStatuses(names: readonly string[], ref: string): Map<string, Argo
 }
 
 function repoWithManifest(resolvedSha = SHA): FakeRepoReader {
-  return new FakeRepoReader({ resolvedSha, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } });
+  return new FakeRepoReader({ resolvedSha, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } });
 }
 
 /** A FakePlatformRepo pre-seeded with a live tenant carrying one app ("erp") — the registration file a
@@ -213,8 +213,8 @@ describe("add-app run definition", () => {
     const read = await prt.registrations.readTenant("prod", GUID);
     // The pre-seeded "erp" keeps its default-false tiers; the appended "crm" carries both tiers true.
     expect(read?.entry.apps).toEqual([
-      { name: "erp", seedReference: false, seedDemo: false },
-      { name: "crm", seedReference: true, seedDemo: true },
+      { name: "erp", seedReference: false, seedDemo: false, selections: {} },
+      { name: "crm", seedReference: true, seedDemo: true, selections: {} },
     ]);
   });
 
@@ -303,6 +303,18 @@ describe("add-app streaming planner", () => {
     const plain = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
     expect(plain.outcome === "planned" && plain.params.seedReference).toBe(false);
     expect(plain.outcome === "planned" && plain.params.seedDemo).toBe(false);
+  });
+
+  it("freezes every further selection into params, and T4 refuses one the app catalog does not declare", async () => {
+    seedClusters();
+    const def = makeAddAppDef(ports());
+    // The fixture catalog is the overlay stand-in (no apps.yaml), which declares the two seed
+    // selections and nothing else — so a further selection is exactly what T4 refuses here.
+    const refused = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP, selections: { seedPrices: true } }, planCtx());
+    expect(refused.outcome).toBe("rejected");
+    expect(refused.outcome === "rejected" && refused.summary).toMatch(/T4/);
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP, seedReference: true, selections: {} }, planCtx());
+    expect(planned.outcome === "planned" && planned.params.selections).toEqual({});
   });
 
   it("freezes the full report as a rejection when the new app escapes the namespace fence (T3)", async () => {

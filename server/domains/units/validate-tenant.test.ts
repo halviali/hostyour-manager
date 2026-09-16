@@ -9,13 +9,11 @@ import {
   gateT1Manifest,
   gateT2Render,
   gateT3Isolation,
-  gateT4Apps,
   composeTenantReport,
   type MemberDocs,
   type MemberRender,
 } from "./gates/tenant-gates.ts";
-import { resolveFanout, type AppRef } from "./tenant-fanout.ts";
-import { TenantSpecSchema } from "../../../shared/consumer.ts";
+import type { AppRef } from "./tenant-fanout.ts";
 import { TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
@@ -50,14 +48,6 @@ tenant:
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
 `;
 
-const SPEC = TenantSpecSchema.parse({
-  members: [
-    { name: "auth", chart: "charts/example-auth", identityProvider: true, namespaceLabels: { "platform/redis-consumer": "true" } },
-    { name: "jobs", chart: "charts/example-jobs" },
-    { name: "report", chart: "charts/example-report" },
-  ],
-  perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui", override: { web: { chart: "charts/example-web" } } } },
-});
 
 const doc = (kind: string, over: Partial<RenderedDoc> = {}): RenderedDoc => ({
   apiVersion: "v1", kind, name: `${kind.toLowerCase()}-x`, namespace: `${PROBE}`, raw: { kind }, ...over,
@@ -65,6 +55,9 @@ const doc = (kind: string, over: Partial<RenderedDoc> = {}): RenderedDoc => ({
 const NS_DOC = doc("Namespace", { namespace: "", raw: { kind: "Namespace" } });
 const TENANT_DOC = doc("Tenant", { apiVersion: "operator.hostyour.cloud/v1", namespace: "", raw: { apiVersion: "operator.hostyour.cloud/v1", kind: "Tenant" } });
 const app = (name: string): AppRef => ({ name });
+/** The engine chart's per-app overlays — what the app catalog lists while no apps repository
+ *  carries an apps.yaml (app-catalog.ts), so a fixture that names an app carries its overlay. */
+const OVERLAYS = { "charts/example-engine/values-erp.yaml": "databases: {}\n", "charts/example-engine/values-crm.yaml": "" };
 
 /** The target cluster's chain as a plan hands it over — profile states the registry host the member
  *  charts require (example-lib.image), so a real render is possible with exactly this request. */
@@ -73,15 +66,16 @@ const CHAIN = [
   { path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n" },
 ];
 
+const REPO_OF_REQ = "https://github.com/acme/acme-catalog.git";
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {
-  return { repoURL: "https://github.com/acme/acme-catalog.git", ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, ...over };
+  return { repoURL: REPO_OF_REQ, ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, ...over };
 }
 
 function deps(repo: RepoReader, helm: FakeHelmRenderer, log: (l: string) => void = () => {}): ValidateTenantDeps {
   return { repo, helm, log, signal: new AbortController().signal, now: () => 1000 };
 }
 
-function repoWithManifest(files: Record<string, string> = { [TENANT_MANIFEST_PATH]: MANIFEST_YAML }): FakeRepoReader {
+function repoWithManifest(files: Record<string, string> = { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...OVERLAYS }): FakeRepoReader {
   return new FakeRepoReader({ resolvedSha: SHA, files });
 }
 
@@ -250,46 +244,6 @@ describe("gateT3Isolation", () => {
   });
 });
 
-// ── gateT4Apps ───────────────────────────────────────────────────────────────────────────────────
-
-describe("gateT4Apps", () => {
-  const membersFor = (apps: AppRef[]) => resolveFanout(SPEC, apps, "prod");
-  const renderedNames = (apps: AppRef[]) => membersFor(apps).map((m) => m.name);
-
-  it("passes when every app resolves to its rendered engine+front members", () => {
-    const apps = [app("erp"), app("crm")];
-    const g = gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: ["auth", "jobs", "report"] });
-    expect(g.status).toBe("pass");
-    expect(g.reason).toBeNull();
-  });
-
-  it("rejects a reserved app name", () => {
-    const apps = [app("erp")];
-    // an apps[] entry named after a STANDING member of this tenant (the schema would also refuse it)
-    const g = gateT4Apps({ apps: [{ name: "auth" }], members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: ["auth", "jobs", "report"] });
-    expect(g.status).toBe("fail");
-    expect(g.reason).toMatch(/standing member/);
-  });
-
-  it("rejects a duplicate app name", () => {
-    const apps = [app("erp"), app("erp")];
-    const g = gateT4Apps({ apps, members: membersFor([app("erp")]), renderedMembers: renderedNames([app("erp")]), standingMembers: ["auth", "jobs", "report"] });
-    expect(g.status).toBe("fail");
-    expect(g.reason).toMatch(/more than once|collide/);
-  });
-
-  it("rejects an app whose member did not render", () => {
-    const apps = [app("erp")];
-    const g = gateT4Apps({ apps, members: membersFor(apps), renderedMembers: ["erp-1"], standingMembers: ["auth", "jobs", "report"] }); // the app's second render missing
-    expect(g.status).toBe("fail");
-    expect(g.found).toMatch(/erp-2/);
-  });
-
-  it("passes trivially with no apps", () => {
-    expect(gateT4Apps({ apps: [], members: [], renderedMembers: [], standingMembers: ["auth", "jobs", "report"] }).status).toBe("pass");
-  });
-});
-
 // ── composeTenantReport ──────────────────────────────────────────────────────────────────────────
 
 describe("composeTenantReport", () => {
@@ -420,7 +374,7 @@ describe("validateTenant", () => {
 describe("validateTenant — what every member is rendered with", () => {
   it("layers the installation's pins-<stage>.yaml over a chart that has one on the books branch, and nothing over one that has none", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
-    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, "charts/example-auth/pins-prod.yaml": "builds: []\n" } });
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...OVERLAYS, "charts/example-auth/pins-prod.yaml": "builds: []\n" } });
     await validateTenant(req({ apps: [] }), deps(repo, helm));
     const filesOf = (member: string): string[] | undefined => helm.requests.find((r) => r.namespace === memberNamespace(PROBE, member, "prod"))?.valueFiles;
     // The pin last, so the tag this installation built wins over the trunk's product default.
@@ -430,7 +384,7 @@ describe("validateTenant — what every member is rendered with", () => {
 
   it("layers the values the tenants ApplicationSet delivers over the folded chain: the tenant's facts and its zone", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
-    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } });
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...OVERLAYS } });
     await validateTenant(req({ stage: "dev", seedUsers: true }), deps(repo, helm));
     const auth = helm.requests.find((r) => r.namespace === memberNamespace(PROBE, "auth", "dev"));
     expect(auth?.valuesObject).toMatchObject({

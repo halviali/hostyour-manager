@@ -21,7 +21,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import type { VaultSeeder, TenantCryptoSeedInput } from "../../adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { TENANT_CRYPTO_PROPERTIES, TENANT_STORAGE_PROPERTIES } from "./tenant-crypto-mint.ts";
@@ -94,7 +94,7 @@ function syncedStatuses(names: readonly string[], ref: string): Map<string, Argo
 const OPERATOR_LIVE: ArgoAppStatus = { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" };
 
 function repoWithManifest(resolvedSha = SHA): FakeRepoReader {
-  return new FakeRepoReader({ resolvedSha, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } });
+  return new FakeRepoReader({ resolvedSha, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } });
 }
 
 // The kube clients ride behind the resolver now: fold the per-test fakes (argo/cluster/
@@ -244,7 +244,7 @@ describe("create-tenant run definition", () => {
     // cluster field, which the appsets read off registrations/<guid>/<stage>.yaml
     const read = await prt.registrations.readTenant("prod", GUID);
     expect(read?.entry.subdomain).toBe("acme");
-    expect(read?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false }]); // default-absent seed tiers fold back false through the full run
+    expect(read?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]); // default-absent seed tiers fold back false through the full run
     expect(read?.entry.suspended).toBe(false);
     expect(read?.entry.cluster).toBe("s1");
 

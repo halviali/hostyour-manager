@@ -134,7 +134,16 @@ export const TenantSpecSchema = z.object({
    *  refused rather than creating a repository where the App has no rights. GitHub's own grammar for
    *  an account name: letters, digits and single hyphens between them, at most 39 characters. */
   appsOrg: z.string().regex(GITHUB_ACCOUNT_RE, "appsOrg must be a GitHub organisation name: letters, digits and single hyphens, at most 39 characters").optional(),
+  /** WHICH build is the APPS BUNDLE every engine mounts. The `buildRepos` entry that builds it is the
+   *  apps repository: its `apps.yaml` is the app catalog the wizard offers and T4 judges
+   *  (shared/apps-manifest.ts), and it is the template a tenant's own apps repository is created
+   *  from. Absent ⇒ the catalog is the engine chart's `values-<app>.yaml` overlays, as before the
+   *  manifest existed (server/domains/units/app-catalog.ts). */
+  appsBundle: z.string().regex(/^[a-z0-9-]+$/).optional(),
 }).superRefine((spec, ctx) => {
+  if (spec.appsBundle !== undefined && !spec.buildRepos.some((b) => b.builds.includes(spec.appsBundle!))) {
+    ctx.addIssue({ code: "custom", path: ["appsBundle"], message: `appsBundle "${spec.appsBundle}" is built by no buildRepos entry — the apps repository, whose apps.yaml is the app catalog, cannot be resolved` });
+  }
   // Two invariants the list form has to carry that a keyed map would carry for free.
   const names = spec.members.map((m) => m.name);
   const dup = names.find((n, i) => names.indexOf(n) !== i);

@@ -1,13 +1,14 @@
 // The tenant (multi-app fan-out) validation core. The
 // tenant analogue of validate.ts: it clones catalog@ref Manager-side, parses the fan-out
-// manifest, resolves the fan-out (the trio + the guid × apps[] matrix) at a THROWAWAY probe guid,
-// renders every member INTO ITS OWN member namespace with the Manager's own HelmRenderer (the tenant
-// charts are TRUSTED first-party charts, so there is no sandbox — the Manager renders them itself),
-// and runs the T1..T4 gates over the RenderedDocs. It composes one frozen
-// TenantValidationReport whose verdict is a pass IFF every hard gate passed.
+// manifest, reads the app catalog the apps repository declares (app-catalog.ts), resolves the fan-out
+// (the standing members + the guid × apps[] matrix) at a THROWAWAY probe guid, renders every member
+// INTO ITS OWN member namespace with the Manager's own HelmRenderer (the tenant charts are TRUSTED
+// first-party charts, so there is no sandbox — the Manager renders them itself), and runs the T1..T4
+// gates over the RenderedDocs. It composes one frozen TenantValidationReport whose verdict is a pass
+// IFF every hard gate passed.
 //
 // This is PURE orchestration over the ports (RepoReader + HelmRenderer) and the pure fan-out algebra
-// (resolveFanout / memberNamespace) — no db, no executor, no timers — so it is exercised end-to-end
+// (resolveMembers / fanoutOf / memberNamespace) — no db, no executor, no timers — so it is exercised end-to-end
 // against the fakes and is safe to call more than once for the same ref. It streams each gate to the
 // log sink as it lands, mirroring validate.ts.
 //
@@ -20,7 +21,9 @@ import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { identityProviderMember, memberNamespace, resolveFanout, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
+import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
+import { readAppCatalog, type UnitRepoAccess } from "./app-catalog.ts";
+import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import { stageApex, tenantWildcardHost, tenantZone } from "../../../shared/unit-host.ts";
 import { catalogPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -37,6 +40,7 @@ import {
   gateT3Isolation,
   gateT4Apps,
   composeTenantReport,
+  type AppChoice,
   type MemberRender,
   type MemberDocs,
 } from "./gates/tenant-gates.ts";
@@ -51,7 +55,8 @@ export interface ValidateTenantRequest {
   repoURL: string; // the catalog repo URL (a platform constant, supplied by the caller)
   ref: string; // the catalog branch/tag/sha to validate; resolved to the 40-char chartsRef pin
   stage: Stage;
-  apps: AppRef[];
+  /** The apps and the selections each chose — T4 holds both against the app catalog. */
+  apps: AppChoice[];
   probeGuid: string; // the throwaway guid the fan-out is rendered at
   /** The subdomain the tenant stands on — the members render at `<member>.<subdomain>.<stage apex>`
    *  (tenant.zone), so the validation holds the hosts the deploy will serve. */
@@ -83,6 +88,9 @@ export interface ValidateTenantDeps {
    *  then fails the plan, where provision-dns would have failed at step eight after the Vault entry,
    *  the bucket, the key, the AppProjects and the admission policies were written. */
   standingHost?: StandingHostReader;
+  /** How the apps repository is reached when it is a registered unit (app-catalog.ts). Absent ⇒ the
+   *  catalog's own read credential clones it, which is the stated fallback, not a skip. */
+  unitRepo?: UnitRepoAccess;
 }
 
 export interface TenantValidationOutcome {
@@ -139,6 +147,39 @@ function streamGate(deps: ValidateTenantDeps, g: GateResult): void {
   deps.log(`${g.id} ${g.status} — ${g.detail}`);
 }
 
+/** The requested apps as the fan-out needs them: each with the database list its catalog entry
+ *  declares, which fills the `{databases}` token. An app the catalog does not name gets none — T4
+ *  refuses it below, and until then it renders as the chart's own files say. */
+function withDatabases(apps: readonly AppChoice[], catalog: AppsManifest): AppRef[] {
+  const byName = new Map(catalog.apps.map((a) => [a.name, a]));
+  return apps.map((a) => {
+    const databases = byName.get(a.name)?.databases;
+    return databases ? { name: a.name, databases } : { name: a.name };
+  });
+}
+
+/** Every source's extra value files held against the checkout: a file the chart directory does not
+ *  carry is dropped, and said. ArgoCD's `ignoreMissingValueFiles: true` skips such a file at deploy
+ *  (hostyour-cloud tenants-appset.yaml) while `helm template -f` fails on it, so this is where the
+ *  render and the deploy are made to agree — and the registration then records only files that
+ *  stand, because the records returned here are what it carries. */
+async function layerExistingValueFiles(members: TenantMemberRecord[], deps: ValidateTenantDeps, workdir: string): Promise<TenantMemberRecord[]> {
+  const out: TenantMemberRecord[] = [];
+  for (const m of members) {
+    const sources: TenantMemberRecord["sources"] = [];
+    for (const s of m.sources) {
+      const valueFiles: string[] = [];
+      for (const file of s.valueFiles) {
+        if ((await deps.repo.readFile(workdir, `${s.chart}/${file}`)) !== null) valueFiles.push(file);
+        else deps.log(`${s.chart}/${file} is absent in the catalog checkout — not layered on ${m.name} (the deploy skips a missing value file the same way)`);
+      }
+      sources.push({ ...s, valueFiles });
+    }
+    out.push({ ...m, sources });
+  }
+  return out;
+}
+
 /** Clone catalog@ref -> parse the fan-out manifest -> resolve + render the fan-out at the probe
  *  guid -> run T1..T4 -> compose. Throws only on a clone/access failure (the caller records it as a
  *  preflight rejection); a gate failure returns verdict "fail" with the full composed report so the
@@ -172,9 +213,18 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // in — the platform composes none of them. What the appset adds at render time is the tenant's
       // own facts (guid, subdomain, stage, member, appName, apps, seedUsers, suspended, quiesced),
       // which every source gets and each chart uses what it needs.
-      memberRecords = resolveMembers(t1.spec, req.apps);
+      // The app catalog first: what the apps repository's manifest declares fills the fan-out
+      // (`{databases}`) and is what T4 holds the request against. A stand-in is said in the log.
+      const catalog = await readAppCatalog({
+        spec: t1.spec,
+        catalog: { repo: deps.repo, workdir: cloned.workdir, ...(req.credentialId ? { credentialId: req.credentialId } : {}) },
+        ...(deps.unitRepo ? { unit: deps.unitRepo } : {}),
+        warn: deps.log,
+        signal: deps.signal,
+      });
+      memberRecords = await layerExistingValueFiles(resolveMembers(t1.spec, withDatabases(req.apps, catalog)), deps, cloned.workdir);
       identityProvider = identityProviderMember(t1.spec);
-      const members = resolveFanout(t1.spec, req.apps, req.stage);
+      const members = fanoutOf(memberRecords, req.stage);
       resolvedMembers = members.map((m) => m.name);
 
       // Render each member at the probe guid, INTO ITS OWN member namespace. The guid reaches the
@@ -187,7 +237,10 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // facts and the zone it stands under, composed by the one host law (shared/unit-host.ts). The
       // charts switch their tenant mode on `tenant.guid` and require `tenant.zone` and
       // `global.stageApex` there, so a render without these proves a mode the cluster never deploys
-      // (hostyour-manager#137). A helm failure is DATA on the result, never a throw (helm port contract).
+      // (hostyour-manager#137). OVER ALL OF IT the source's own values, resolved off the product's
+      // manifest (`{app}` filled, `{databases}` filled) — the appset renders them last for the same
+      // member, so a product key it sets is judged here as it is deployed. A helm failure is DATA on
+      // the result, never a throw (helm port contract).
       const chainValues = foldChain(req.clusterValueFiles);
       const unitApex = unitApexFromChain(req.clusterValueFiles);
       const deliveredTo = (member: FanoutMember): Record<string, unknown> => ({
@@ -226,7 +279,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           workdir: cloned.workdir,
           chartPath: member.chart,
           valueFiles: pinned ? [...member.valueFiles, pin] : member.valueFiles,
-          valuesObject: mergeDeep(chainValues, deliveredTo(member)),
+          valuesObject: mergeDeep(mergeDeep(chainValues, deliveredTo(member)), member.values),
           releaseName: `${req.probeGuid}-${member.name}`,
           namespace,
           signal: deps.signal, // a DELETE/budget abort kills the in-flight helm child immediately
@@ -242,7 +295,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       images = collectContainerImages(docsByMember.flatMap((m) => m.docs));
       const t2 = gateT2Render(renders);
       const t3 = gateT3Isolation(docsByMember);
-      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: t1.spec.members.map((m) => m.name) });
+      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: t1.spec.members.map((m) => m.name), catalog });
       for (const g of [t2, t3, t4]) {
         gates.push(g);
         streamGate(deps, g);

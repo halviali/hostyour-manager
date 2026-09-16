@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  fanoutOf,
   memberAppProject,
   memberApplication,
   memberNamespace,
@@ -147,6 +148,30 @@ describe("resolveMembers — the ONE resolution the registration records and the
     expect(resolveMembers(withToken, []).find((x) => x.name === "idp")!.sources[0]!.values).toEqual({ note: "literal {app}" });
   });
 
+  it("fills {databases} with the app's list where it declares one, and drops the key — and every object left empty by it — where it does not", () => {
+    const withList = TenantSpecSchema.parse({
+      members: [{ name: "idp", chart: "charts/x", identityProvider: true, values: { note: "literal {databases}" } }],
+      perApp: {
+        engine: { chart: "charts/e", values: { fullnameOverride: "e-{app}", databases: { mongodb: { databases: "{databases}" } } } },
+        front: { chart: "charts/f", values: { databases: { mongodb: { databases: "{databases}", user: "app" } } } },
+      },
+    });
+    const declared = resolveMembers(withList, [{ name: "erp", databases: ["core", "logs"] }]).find((x) => x.name === "erp")!;
+    expect(declared.sources[0]!.values).toEqual({ fullnameOverride: "e-erp", databases: { mongodb: { databases: ["core", "logs"] } } });
+    const none = resolveMembers(withList, [app("crm")]).find((x) => x.name === "crm")!;
+    // The whole `databases` branch is gone, because nothing but the token stood under it.
+    expect(none.sources[0]!.values).toEqual({ fullnameOverride: "e-crm" });
+    // A sibling key keeps its branch; only the token's key goes.
+    expect(none.sources[1]!.values).toEqual({ databases: { mongodb: { user: "app" } } });
+    // A standing member has no app, so its token stays as written — the product's own mistake, loud.
+    expect(resolveMembers(withList, []).find((x) => x.name === "idp")!.sources[0]!.values).toEqual({ note: "literal {databases}" });
+    // The list is copied, never shared with the request's array.
+    const list = ["core"];
+    const copied = resolveMembers(withList, [{ name: "erp", databases: list }]).find((x) => x.name === "erp")!;
+    list.push("logs");
+    expect((copied.sources[0]!.values as { databases: { mongodb: { databases: string[] } } }).databases.mongodb.databases).toEqual(["core"]);
+  });
+
   it("swaps the WHOLE front source for an app the product's override map names", () => {
     const web = resolveMembers(SPEC, [app("web")]).find((x) => x.name === "web")!;
     expect(web.sources[1]!.chart).toBe("charts/example-web");
@@ -204,6 +229,14 @@ describe("resolveFanout — the flattening the validator renders", () => {
     const m = resolveFanout(SPEC, [app("erp")], "test").filter((x) => x.member === "erp");
     expect(m[0]!.valueFiles).toEqual(["values.yaml", "values-test.yaml", "values-erp.yaml"]);
     expect(m[1]!.valueFiles).toEqual(["values.yaml", "values-test.yaml"]);
+  });
+
+  it("carries each source's resolved values on its render, and fanoutOf renders members already resolved the same way", () => {
+    const members = resolveMembers(SPEC, [app("erp")]);
+    const direct = resolveFanout(SPEC, [app("erp")], "prod");
+    expect(fanoutOf(members, "prod")).toEqual(direct);
+    expect(direct.find((x) => x.name === "erp-1")?.values).toEqual({ fullnameOverride: "example-engine-erp" });
+    expect(direct.find((x) => x.name === "auth")?.values).toEqual({});
   });
 });
 

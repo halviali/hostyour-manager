@@ -68,7 +68,7 @@ export function tenantEntry(over: Partial<TenantRegistration> = {}): TenantRegis
     members: testMembers(TENANT_APPS),
     identityProvider: TENANT_IDP,
     subdomain: SUBDOMAIN,
-    apps: TENANT_APPS.map((a) => ({ ...a, seedReference: false, seedDemo: false })),
+    apps: TENANT_APPS.map((a) => ({ ...a, seedReference: false, seedDemo: false, selections: {} })),
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
     suspended: false,

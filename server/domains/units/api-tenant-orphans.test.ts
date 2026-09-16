@@ -29,7 +29,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { AppEnv } from "../../http/app-env.ts";
-import { testMembers } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -149,7 +149,7 @@ function onboardPorts(registrations: TenantRegistrations): TenantOnboardPorts {
     // irrecoverable by design (the Manager holds no read grant), so a test can only assert THAT the
     // entry was created, which the step log carries.
     seeder: fakeTenantSeeder(),
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations,
     resolver: tenantResolver(),
@@ -195,10 +195,10 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
   const { stage = "prod", ...regOver } = over;
   const registration: TenantRegistration = {
     cluster: "s2", // clusterShortName of cls_2's domain (s2.example)
-    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false }]),
+    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
     identityProvider: "auth",
     subdomain,
-    apps: [{ name: "erp", seedReference: false, seedDemo: false }],
+    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
     suspended: false,

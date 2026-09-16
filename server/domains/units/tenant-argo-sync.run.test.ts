@@ -19,7 +19,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
@@ -90,7 +90,7 @@ async function seededRegistrations(): Promise<TenantRegistrations> {
   const registrations = new TenantRegistrations(new FakePlatformRepo());
   const registration: TenantRegistration = {
     cluster: "s1", subdomain: "acme",
-    members: testMembers(APPS), identityProvider: "auth", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false })),
+    members: testMembers(APPS), identityProvider: "auth", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {} })),
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false,
   };
   await registrations.commitTenant({ stage: "prod", guid: GUID, registration, runId: "run_onb" });
@@ -106,7 +106,7 @@ function seededDns(): FakeDnsProvider {
 
 function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
   return {
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({

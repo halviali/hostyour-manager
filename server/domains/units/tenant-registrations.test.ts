@@ -11,10 +11,10 @@ const DIR = `registrations/${GUID}`;
 function registration(over: Partial<TenantRegistration> = {}): TenantRegistration {
   return {
     cluster: "s1",
-    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false }]),
+    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
     identityProvider: "auth",
     subdomain: "simetrix",
-    apps: [{ name: "erp", seedReference: false, seedDemo: false }],
+    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
     suspended: false,
@@ -30,7 +30,7 @@ describe("tenantRegistrationWrite (the ONE-file write the tenant appsets read)",
     expect(w.path).toBe(`${DIR}/dev.yaml`);
     expect(w.content).toContain('cluster: "s1"'); // the appset destination + AppProject pin
     expect(w.content).toContain('subdomain: "simetrix"');
-    expect(w.content).toContain('apps: [{"name":"erp","seedReference":false,"seedDemo":false}]'); // both tiers default false, round-trip in-file
+    expect(w.content).toContain('apps: [{"name":"erp","seedReference":false,"seedDemo":false,"selections":{}}]'); // both tiers default false, no further selection, round-trip in-file
     expect(w.content).toContain("seedUsers: false");
     expect(w.content).toContain('resetNonce: "1"');
     expect(w.content).toContain("suspended: false");
@@ -44,8 +44,8 @@ describe("tenantRegistrationWrite (the ONE-file write the tenant appsets read)",
     // seedReference + seedDemo are always emitted per app (JSON in the flat apps[] value) —
     // true when the operator toggled that tier, false by default. A mix round-trips so the appset can
     // read each tier per app.
-    const w = tenantRegistrationWrite("dev", GUID, registration({ apps: [{ name: "erp", seedReference: true, seedDemo: false }, { name: "web", seedReference: false, seedDemo: true }], members: testMembers(["erp", "web"]) }));
-    expect(w.content).toContain('apps: [{"name":"erp","seedReference":true,"seedDemo":false},{"name":"web","seedReference":false,"seedDemo":true}]');
+    const w = tenantRegistrationWrite("dev", GUID, registration({ apps: [{ name: "erp", seedReference: true, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: true, selections: {} }], members: testMembers(["erp", "web"]) }));
+    expect(w.content).toContain('apps: [{"name":"erp","seedReference":true,"seedDemo":false,"selections":{}},{"name":"web","seedReference":false,"seedDemo":true,"selections":{}}]');
   });
 });
 
@@ -76,7 +76,7 @@ describe("TenantRegistrations", () => {
     const t = await reg.readTenant("dev", GUID);
     expect(t?.entry.cluster).toBe("s1");
     expect(t?.entry.subdomain).toBe("simetrix");
-    expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false }]);
+    expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]);
     expect(t?.entry.seedUsers).toBe(false);
     expect(t?.entry.resetNonce).toBe("1");
     expect(t?.entry.suspended).toBe(false);
@@ -88,8 +88,8 @@ describe("TenantRegistrations", () => {
     const reg = new TenantRegistrations(repo);
     const full = registration({
       cluster: "s1", subdomain: "simetrix",
-      members: testMembers([{ name: "erp", seedReference: true, seedDemo: false }]), identityProvider: "auth",
-      apps: [{ name: "erp", seedReference: true, seedDemo: false }],
+      members: testMembers([{ name: "erp", seedReference: true, seedDemo: false, selections: {} }]), identityProvider: "auth",
+      apps: [{ name: "erp", seedReference: true, seedDemo: false, selections: {} }],
       seedUsers: true, quota: seedQuota("small"), resetNonce: "7", suspended: true, quiesced: true,
     });
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: full, runId: "run_1" });
@@ -111,7 +111,7 @@ describe("TenantRegistrations", () => {
     expect(rewritten).toContain("quiesced: true");
     // ...and the fold agrees after the app change.
     const t = await reg.readTenant("dev", GUID);
-    expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false }, { name: "web", seedReference: false, seedDemo: false }]);
+    expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }]);
     expect(t?.entry.cluster).toBe("s1");
     expect(t?.entry.seedUsers).toBe(true);
     expect(t?.entry.resetNonce).toBe("3");
@@ -143,7 +143,7 @@ describe("TenantRegistrations", () => {
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     await reg.updateTenantApps("dev", GUID, { op: "append", app: "web", member: testMembers(["web"])[3]!, runId: "run_2" });
     const t = await reg.readTenant("dev", GUID);
-    expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false }, { name: "web", seedReference: false, seedDemo: false }]);
+    expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }]);
     expect(repo.commits[1]!.write?.map((w) => w.path)).toEqual([`${DIR}/dev.yaml`]);
     expect(repo.commits[1]!.message).toBe(`tenant-add-app(${GUID}): +web [run_2]`);
     await expect(reg.updateTenantApps("dev", GUID, { op: "append", app: "erp", member: testMembers(["erp"])[3]!, runId: "r" })).rejects.toMatchObject({ code: "VALIDATION" });
@@ -157,7 +157,7 @@ describe("TenantRegistrations", () => {
     await reg.updateTenantApps("dev", GUID, { op: "append", app: "web", member: testMembers(["web"])[3]!, seedReference: true, seedDemo: true, runId: "run_2" }); // seedable later-added app
     await reg.updateTenantApps("dev", GUID, { op: "append", app: "crm", member: testMembers(["crm"])[3]!, runId: "run_3" }); // no tiers ⇒ both false
     const t = await reg.readTenant("dev", GUID);
-    expect(t?.entry.apps).toEqual([{ name: "web", seedReference: true, seedDemo: true }, { name: "crm", seedReference: false, seedDemo: false }]);
+    expect(t?.entry.apps).toEqual([{ name: "web", seedReference: true, seedDemo: true, selections: {} }, { name: "crm", seedReference: false, seedDemo: false, selections: {} }]);
   });
 
   it("legacy pointers fold unchanged: a raw {name} and a legacy {name, seed:true} both fold to canonical seed tiers", async () => {
@@ -166,25 +166,25 @@ describe("TenantRegistrations", () => {
     // Seed a LEGACY registration carrying the two on-disk shapes the old formats wrote: a raw {name}
     // (from before the seed tiers) and a {name, seed:true} (the legacy demo alias). The read side folds BOTH — seed → seedDemo.
     const legacy = tenantRegistrationWrite("dev", GUID, registration({ members: testMembers(["erp", "web"]), apps: [
-      { name: "erp", seedReference: false, seedDemo: false }, { name: "web", seedReference: false, seedDemo: false },
+      { name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} },
     ] }));
-    const canonical = '[{"name":"erp","seedReference":false,"seedDemo":false},{"name":"web","seedReference":false,"seedDemo":false}]';
+    const canonical = '[{"name":"erp","seedReference":false,"seedDemo":false,"selections":{}},{"name":"web","seedReference":false,"seedDemo":false,"selections":{}}]';
     const onDisk = '[{"name":"erp"},{"name":"web","seed":true}]';
     repo.seed(repo.booksBranch, legacy.path, legacy.content.replace(canonical, onDisk));
     const t = await reg.readTenant("dev", GUID);
     // erp: bare {name} ⇒ both tiers false; web: legacy seed:true ⇒ seedDemo:true (seedReference stays false).
     expect(t?.entry.apps).toEqual([
-      { name: "erp", seedReference: false, seedDemo: false },
-      { name: "web", seedReference: false, seedDemo: true },
+      { name: "erp", seedReference: false, seedDemo: false, selections: {} },
+      { name: "web", seedReference: false, seedDemo: true, selections: {} },
     ]);
   });
 
   it("updateTenantApps drops an app and refuses dropping an absent one", async () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);
-    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [{ name: "erp", seedReference: false, seedDemo: false }, { name: "web", seedReference: false, seedDemo: false }], members: testMembers(["erp", "web"]) }), runId: "run_1" });
+    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }], members: testMembers(["erp", "web"]) }), runId: "run_1" });
     await reg.updateTenantApps("dev", GUID, { op: "drop", app: "erp", runId: "run_2" });
-    expect((await reg.readTenant("dev", GUID))?.entry.apps).toEqual([{ name: "web", seedReference: false, seedDemo: false }]);
+    expect((await reg.readTenant("dev", GUID))?.entry.apps).toEqual([{ name: "web", seedReference: false, seedDemo: false, selections: {} }]);
     expect(repo.commits[1]!.message).toBe(`tenant-remove-app(${GUID}): -erp [run_2]`);
     await expect(reg.updateTenantApps("dev", GUID, { op: "drop", app: "nope", runId: "r" })).rejects.toMatchObject({ code: "VALIDATION" });
   });
@@ -325,7 +325,7 @@ describe("the pointer scan reports what it could NOT read", () => {
       entry: {
         guid: GUID, subdomain: "simetrix", stage: "dev", cluster: "s1",
         members: ["auth", "jobs", "report", "erp"],
-        apps: [{ name: "erp", seedReference: false, seedDemo: false }],
+        apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
       },
     });
     expect(await reg.scanTenant("dev", OTHER)).toMatchObject({ status: "unreadable" });

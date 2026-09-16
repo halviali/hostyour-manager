@@ -32,6 +32,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
 
 /** The standing members the product under test declares — stated by the fixture, the way a real
  *  tenant's registration states its own. */
@@ -165,7 +166,7 @@ function fakeTenantSeeder(): VaultSeeder {
       // The object store the seed step makes the tenant's bucket in and mints its key from — the
       // platform's own, so no operator value stands behind it (hostyour-cloud#197).
       objectStore: new FakeObjectStore(),
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations,
     resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: argo, projectWriter: projects, argoNamespace: "argocd" }),

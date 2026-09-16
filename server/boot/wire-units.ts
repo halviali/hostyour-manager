@@ -46,7 +46,7 @@ import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/c
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
-import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
+import { makeAppCatalogProvider, unitRepoAccess, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
@@ -122,8 +122,8 @@ export interface UnitsWiring {
    *  catalog, the way the consumer read asks with the app row's own repoUrl. Undefined exactly
    *  when tenantResolver is — both come from config.catalog. */
   catalogRepoUrl?: string;
-  /** The tenant app-type catalog provider, threaded to registerTenantRoutes so GET
-   *  /api/tenants/app-catalog can offer the wizard the values-<app>.yaml overlays in catalog.
+  /** The tenant app catalog provider, threaded to registerTenantRoutes so GET
+   *  /api/tenants/app-catalog can offer the wizard the apps of the apps repository's apps.yaml.
    *  Undefined when tenant onboarding is not configured — the catalog route then serves { apps: [] }. */
   appCatalog?: AppCatalogProvider;
   /** The shared activation client (ONE HttpActivator for the whole manager), threaded to
@@ -614,19 +614,6 @@ function buildTenantOnboarding(
   // revision because ArgoCD's repo-server generates nothing for an Application naming one
   // repository twice at two commits.
   const books = platformRepo.booksBranch;
-  // The create-tenant wizard's app-type catalog: the SAME reader + read credential validateTenant clones
-  // with, pointed at charts/example-engine/values-<app>.yaml on the books branch, cached with a short
-  // TTL and fail-soft (a fetch error logs + serves []/stale, so the wizard never blank-screens). The
-  // branch and not the trunk, so the wizard offers the app types this installation can actually
-  // deploy: a chart that reached the catalog's trunk after the last carry is not on the branch the
-  // member Application would read it from.
-  const appCatalog = makeAppCatalogProvider({
-    repo,
-    repoURL,
-    ref: books,
-    credentialId: "catalog-read-pat",
-    warn: (fields, msg) => logger.warn(fields, msg),
-  });
   const helm = new HelmCliRenderer(); // trusted first-party charts render manager-side (no sandbox)
   // A SECOND GitPlatformRepo, bound to catalog, with a DISTINCT workRoot: worktreeDir keys only
   // on the branch, and the two repos' books branches carry the SAME name, so sharing the consumer
@@ -732,6 +719,21 @@ function buildTenantOnboarding(
     // kind that needs it refuses at the plan, naming the three config keys.
     ...(githubApp ? { githubApp } : {}),
   };
+  // The create-tenant wizard's app catalog: the SAME reader + read credential validateTenant clones
+  // the catalog with, on the books branch, and the SAME unit access the plan reaches the apps
+  // repository through (a registered unit's stored credential, else the catalog's), cached with a
+  // short TTL and fail-soft (a fetch error logs + serves no apps or the stale set, so the wizard
+  // never blank-screens). The branch and not the trunk, so the wizard offers what this
+  // installation can actually deploy: a chart that reached the catalog's trunk after the last carry
+  // is not on the branch the member Application would read it from.
+  const appCatalog = makeAppCatalogProvider({
+    repo,
+    repoURL,
+    ref: books,
+    ...(onboardPorts.catalogCredentialId ? { credentialId: onboardPorts.catalogCredentialId } : {}),
+    unit: unitRepoAccess(onboardPorts),
+    warn: (fields, msg) => logger.warn(fields, msg),
+  });
   // remove-app + tenant-suspend/-resume/-offboard only flip/drop the pointer + watch the fan-out — no
   // clone/render, so they take the narrower lifecycle port set (registrations + resolver).
   const lifecyclePorts: TenantLifecyclePorts = {

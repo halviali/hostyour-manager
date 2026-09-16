@@ -23,8 +23,9 @@
 //                   here against the rendered docs. The List/items expansion mirrors
 //                   gate-runner/src/render-docs.ts (the applier flattens ANY object with a top-level
 //                   items[], kind-agnostic), reimplemented here.
-//   T4 apps       — every apps[] entry resolved to its rendered engine+front render set, with no
-//                   reserved-name collision and no duplicate app name (a belt behind the schema refine).
+//   T4 apps       — every apps[] entry named by the app catalog with only the selections it declares
+//                   (app-catalog.ts), resolved to its rendered engine+front render set, with no
+//                   standing-member collision and no duplicate app name (a belt behind the schema refine).
 //
 // Boundary: a domain module. Imports only shared/ (isomorphic) + the helm port; node:crypto
 // is permitted here (the domain authors the whole report, so it — not a runner — hashes it).
@@ -33,6 +34,8 @@ import { createHash } from "node:crypto";
 import { hardGatesPass, reportHashPayload, type GateResult, type GateEvidence } from "../../../../shared/gates.ts";
 import { ConsumerManifestSchema, type ConsumerManifest, type TenantSpec } from "../../../../shared/consumer.ts";
 import { TenantValidationReportSchema, type TenantValidationReport } from "../../../../shared/tenant.ts";
+import { chosenSelections } from "../../../../shared/app-selections.ts";
+import { APPS_MANIFEST_PATH, type AppsManifest } from "../../../../shared/apps-manifest.ts";
 import type { RenderedDoc, HelmRenderResult } from "../../../adapters/helm/port.ts";
 import type { FanoutMember, AppRef } from "../tenant-fanout.ts";
 import { VAULT_ALIAS_TENANT_ANNOTATION } from "../admission-policy.ts";
@@ -349,17 +352,31 @@ export function gateT3Isolation(docsByMember: readonly MemberDocs[]): GateResult
 
 // ── T4 apps ──────────────────────────────────────────────────────────────────────────────────────
 
-/** What T4 checks: the requested apps[] against the resolved + rendered render set. */
+/** ONE requested app as T4 reads it: its name and the selections it chose — the two the request
+ *  carries as fields and the rest under `selections`. Structural: a parsed TenantAppSchema entry
+ *  satisfies it, and so does a bare { name }, which chose nothing. */
+export interface AppChoice extends AppRef {
+  seedReference?: boolean;
+  seedDemo?: boolean;
+  selections?: Record<string, boolean>;
+}
+
+/** What T4 checks: the requested apps[] against the app catalog and the resolved + rendered render set. */
 export interface AppsCheckInput {
-  apps: readonly AppRef[];
+  apps: readonly AppChoice[];
   members: readonly FanoutMember[];
   renderedMembers: readonly string[]; // render names that rendered ok (T2)
   standingMembers: readonly string[]; // the members the product declares for every tenant (TenantSpec.members)
+  /** The app catalog the apps and their selections are held against (app-catalog.ts): the apps
+   *  manifest of the apps repository, or the overlay stand-in where none stands. */
+  catalog: AppsManifest;
 }
 
 const T4_EXPECTED =
-  `every requested app resolves to its own member's engine+front renders and both render, with no ` +
-  `reserved-name collision and no duplicate app name (RESERVED_APP_NAMES).`;
+  `every requested app is named by the app catalog (the apps repository's ${APPS_MANIFEST_PATH}, or ` +
+  `the engine chart's values-<app>.yaml overlays where none stands) and chooses only selections that ` +
+  `catalog declares for it; it resolves to its own member's engine+front renders and both render, with ` +
+  `no standing-member collision and no duplicate app name.`;
 
 function t4Reject(found: string, reason: string): GateResult {
   return {
@@ -368,14 +385,31 @@ function t4Reject(found: string, reason: string): GateResult {
   };
 }
 
-/** T4 — every apps[] entry resolved to a rendered engine+front render set, reserved names never
- *  collide, and no app name repeats. A belt behind TenantRegistrationSchema's refine: validation renders
- *  exactly the guid × apps[] matrix the appset deploys, so a request that would collide or leave an
- *  app un-rendered is rejected before a registration is written. */
+/** T4 — every apps[] entry is named by the catalog with only the selections it declares, resolved
+ *  to a rendered engine+front render set, standing-member names never collide, and no app name
+ *  repeats. A belt behind TenantRegistrationSchema's refine: validation renders exactly the guid ×
+ *  apps[] matrix the appset deploys, so a request that would collide or leave an app un-rendered is
+ *  rejected before a registration is written. The catalog half is what makes the wizard's offer and
+ *  the plan's judgement one thing: a name or a selection typed past the wizard is refused here. */
 export function gateT4Apps(input: AppsCheckInput): GateResult {
   const rendered = new Set(input.renderedMembers);
+  const known = new Map(input.catalog.apps.map((a) => [a.name, a]));
   const seen = new Set<string>();
   for (const app of input.apps) {
+    const entry = known.get(app.name);
+    if (entry === undefined) {
+      return t4Reject(
+        `app "${cap(app.name)}" is not in the app catalog (${[...known.keys()].join(", ") || "which is empty"}).`,
+        `the catalog names every app the bundle carries; an app it does not name has no folder to mount and no selections to offer, so the plan is rejected.`,
+      );
+    }
+    const unknown = chosenSelections(app).filter((s) => !(s in entry.selections));
+    if (unknown.length > 0) {
+      return t4Reject(
+        `app "${cap(app.name)}" chooses ${unknown.map((s) => `"${cap(s)}"`).join(", ")}, which the catalog does not declare for it (declared: ${Object.keys(entry.selections).join(", ") || "none"}).`,
+        `a selection is read by the engine off the app's registration entry; one the catalog does not declare is read by nothing and would be recorded as chosen, so the plan is rejected.`,
+      );
+    }
     // Against the standing members THIS product declares, never a constant set of names.
     if (input.standingMembers.includes(app.name)) {
       return t4Reject(
@@ -408,7 +442,7 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
   }
   return {
     id: "T4", title: "apps", severity: "hard", status: "pass", expected: T4_EXPECTED,
-    found: `all ${input.apps.length} requested app(s) resolved to their rendered engine+front renders with no reserved-name collision and no duplicate.`,
+    found: `all ${input.apps.length} requested app(s) are in the app catalog with declared selections only, and resolved to their rendered engine+front renders with no standing-member collision and no duplicate.`,
     reason: null, detail: "apps resolved",
   };
 }

@@ -54,13 +54,25 @@ export interface FanoutMember {
   member: string;
   chart: string;
   valueFiles: string[];
+  /** The source's own values, resolved — what the tenants ApplicationSet renders LAST for this
+   *  member, so the validator layers them last too. */
+  values: Record<string, unknown>;
 }
 
 /** A tenant app reference — structural (a parsed TenantRegistration["apps"][number] or a request app
- *  both satisfy it) so this pure module stays decoupled from the registration schema. */
+ *  both satisfy it) so this pure module stays decoupled from the registration schema. `databases` is
+ *  what the app's manifest entry declares (shared/apps-manifest.ts), handed in by the validator that
+ *  read the catalog; it fills the `{databases}` token and nothing else. */
 export interface AppRef {
   name: string;
+  databases?: readonly string[];
 }
+
+/** The two tokens the manifest defines. `{app}` is replaced inside any string; `{databases}` is a
+ *  whole string value replaced by the app's database list, or DROPPED with its key when the app
+ *  declares none, so a chart's own value files decide then. */
+export const APP_TOKEN = "{app}";
+export const DATABASES_TOKEN = "{databases}";
 
 /** The tenant's own identity provider — the member the whole tenant authenticates against, so a
  *  caller that needs THAT member rather than the set can name it: the bootstrap-token Secret lives in
@@ -108,31 +120,43 @@ export function tenantNamespaces(members: readonly string[], guid: string, stage
   return members.map((m) => memberNamespace(guid, m, stage));
 }
 
-/** Substitute the ONE token the manifest defines, `{app}`, throughout a source. It reaches every
+/** Substitute the two tokens the manifest defines throughout a source. `{app}` reaches every
  *  valueFiles entry and every STRING inside values, at any depth — `values-{app}.yaml`,
- *  `example-engine-{app}`, `{ ingress: { engineService: "example-engine-{app}" } }`.
+ *  `example-engine-{app}`, `{ ingress: { engineService: "example-engine-{app}" } }`. `{databases}`
+ *  stands as a whole string value inside values, where the product puts its database list key —
+ *  `{ databases: { mongodb: { databases: "{databases}" } } }` — and becomes the app's list.
  *
- *  The token exists because a per-app chart's file names and its resource names are the product's own
- *  convention, and the platform must not compose them: building `values-<app>.yaml` and
- *  `example-ui-<app>-tls` in the appsets composes them out of literals no schema could see. The
- *  product writes the whole string and the platform only fills in which app this is. */
-function substituteApp(source: TenantSource, app: string | undefined): TenantSourceRecord {
+ *  The tokens exist because a per-app chart's file names, its resource names and its value keys are
+ *  the product's own convention, and the platform must not compose them: building `values-<app>.yaml`
+ *  and `example-ui-<app>-tls` in the appsets, or writing a chart's database key here, composes them
+ *  out of literals no schema could see. The product writes the whole string and the platform only
+ *  fills in which app this is and what its manifest declares. */
+function substituteApp(source: TenantSource, app: AppRef | undefined): TenantSourceRecord {
   // A standing member has no app, so nothing is substituted for it — a `{app}` left in a standing
   // member's source is the product's own mistake and reaches the chart as written, where it fails
   // loudly, rather than silently becoming the empty string.
-  const text = app === undefined ? (s: string) => s : (s: string): string => s.split("{app}").join(app);
+  const text = app === undefined ? (s: string) => s : (s: string): string => s.split(APP_TOKEN).join(app.name);
+  // DROPPED marks the list token of an app that declares no list: the key goes, and so does every
+  // object the drop leaves empty, so the chart's own value files (an overlay that still carries the
+  // list) decide, rather than an empty list or an empty map from here standing over them.
+  const DROPPED = Symbol("dropped");
   const walk = (v: unknown): unknown => {
+    if (app !== undefined && v === DATABASES_TOKEN) return app.databases === undefined ? DROPPED : [...app.databases];
     if (typeof v === "string") return text(v);
     if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    if (v && typeof v === "object") {
+      const entries = Object.entries(v).map(([k, x]) => [k, walk(x)] as const).filter(([, x]) => x !== DROPPED);
+      return entries.length === 0 && Object.keys(v).length > 0 ? DROPPED : Object.fromEntries(entries);
+    }
     return v;
   };
+  const values = walk(source.values ?? {});
   // Written whole, never spread-if-present: the registration always carries all three so the appset
   // can read them bare under missingkey=error.
   return {
     chart: text(source.chart),
     valueFiles: (source.valueFiles ?? []).map(text),
-    values: walk(source.values ?? {}) as Record<string, unknown>,
+    values: (values === DROPPED ? {} : values) as Record<string, unknown>,
   };
 }
 
@@ -142,8 +166,8 @@ function substituteApp(source: TenantSource, app: string | undefined): TenantSou
  *  The map is keyed by app name, so the lookup IS the selection. Testing `app === "web"`
  *  first and only then consulting the map would put a constant naming one app of one product in
  *  front of a map that already answers for it. */
-function appSources(spec: TenantSpec, app: string): TenantSourceRecord[] {
-  const front = spec.perApp.front.override?.[app] ?? spec.perApp.front;
+function appSources(spec: TenantSpec, app: AppRef): TenantSourceRecord[] {
+  const front = spec.perApp.front.override?.[app.name] ?? spec.perApp.front;
   return [substituteApp(spec.perApp.engine, app), substituteApp(front, app)];
 }
 
@@ -159,7 +183,7 @@ export function resolveMembers(spec: TenantSpec, apps: readonly AppRef[]): Tenan
   }));
   // An app member carries no extra namespace labels: every app gets the same namespace, and a label
   // one app needs and another does not is a per-member fact the product would state on a member.
-  return [...standing, ...apps.map((a) => ({ name: a.name, namespaceLabels: {}, sources: appSources(spec, a.name) }))];
+  return [...standing, ...apps.map((a) => ({ name: a.name, namespaceLabels: {}, sources: appSources(spec, a) }))];
 }
 
 /** The EXPECTED set of ArgoCD Application names for a tenant — the completeness gate the set-watch and
@@ -176,12 +200,20 @@ export function tenantApplicationSet(members: readonly string[], guid: string, s
  *  The value-file layering matches the appset exactly: the chart's own values.yaml, then
  *  values-<stage>.yaml, then whatever the source declares. */
 export function resolveFanout(spec: TenantSpec, apps: readonly AppRef[], stage: Stage): FanoutMember[] {
-  return resolveMembers(spec, apps).flatMap((m) =>
+  return fanoutOf(resolveMembers(spec, apps), stage);
+}
+
+/** The render set of members ALREADY resolved — what the validator renders after it has held each
+ *  source's value files against the catalog checkout, so the render and the registration carry the
+ *  same file list. */
+export function fanoutOf(members: readonly TenantMemberRecord[], stage: Stage): FanoutMember[] {
+  return members.flatMap((m) =>
     m.sources.map((s, i) => ({
       name: m.sources.length > 1 ? `${m.name}-${i + 1}` : m.name,
       member: m.name,
       chart: s.chart,
       valueFiles: ["values.yaml", `values-${stage}.yaml`, ...(s.valueFiles ?? [])],
+      values: s.values,
     })),
   );
 }

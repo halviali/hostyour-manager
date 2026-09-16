@@ -10,6 +10,7 @@ import { guid as guidSchema, memberName, subdomain as subdomainSchema, TenantApp
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
+import { unitRepoAccess } from "./app-catalog.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
 import { assertDeployState } from "./lifecycle.ts";
@@ -624,7 +625,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
-        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, ...standingHostFrom(ports.dns, ctx.db, ctx.signal) },
+        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, unitRepo: unitRepoAccess(ports), ...standingHostFrom(ports.dns, ctx.db, ctx.signal) },
       );
       if (outcome.verdict !== "pass") {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");

@@ -36,10 +36,10 @@ function entry(guid: string, subdomain: string, over: Partial<TenantRegistration
     stage: stage ?? "prod",
     registration: {
       cluster: "s1",
-      members: testMembers([{ name: "erp", seedReference: false, seedDemo: false }]),
+      members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
       identityProvider: "auth",
       subdomain,
-      apps: [{ name: "erp", seedReference: false, seedDemo: false }],
+      apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
       seedUsers: false, quota: seedQuota("small"),
       resetNonce: "1",
       suspended: false,

@@ -383,10 +383,11 @@ export function assertTenantProvisioned(t: { subdomain: string; status: TenantSt
   );
 }
 
-/** The tenant routes' deps: the consumer set + the OPTIONAL app-type catalog provider. The provider
- *  clones catalog to discover the create-tenant wizard's selectable app-types; it is absent when
- *  tenant onboarding is not wired (no catalog access), in which case the catalog route serves
- *  { apps: [] } and the wizard degrades — the SAME degrade-loud shape as the 501 mutating routes. */
+/** The tenant routes' deps: the consumer set + the OPTIONAL app catalog provider. The provider
+ *  clones the catalog and the apps repository it names to read the create-tenant wizard's apps; it
+ *  is absent when tenant onboarding is not wired (no catalog access), in which case the catalog
+ *  route serves { apps: [] } and the wizard degrades — the SAME degrade-loud shape as the 501
+ *  mutating routes. */
 export interface TenantApiDeps extends ConsumerApiDeps {
   appCatalog?: AppCatalogProvider;
   /** The per-cluster kube resolver — powers the per-tenant live reconciliation read
@@ -565,14 +566,15 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   // (resolveCluster), so this route is the UI convenience it always was.
   app.get("/api/tenants/targets", (c) => c.json(targetClusters(db)));
 
-  // The create-tenant wizard's app-type CATALOG: the app-types the picker can offer, DISCOVERED from
-  // catalog charts/example-engine/values-<app>.yaml (app-catalog.ts) — never a hardcoded list —
-  // so a selected name is always one the T4 "apps resolved" gate will accept. A READ route: always
-  // live, registered BEFORE /:id so the static path is not captured by the param route. FAIL-SOFT — the
-  // provider caches with a short TTL and returns [] on any clone/read error, and no provider (tenant
-  // onboarding not wired) is likewise { apps: [] }; the request's abort signal cancels an in-flight clone.
+  // The create-tenant wizard's app CATALOG: the apps the picker can offer with their titles,
+  // descriptions and selections, read off the apps repository's apps.yaml (app-catalog.ts) — never a
+  // hardcoded list — so a selected name and selection is always one gate T4 will accept. A READ
+  // route: always live, registered BEFORE /:id so the static path is not captured by the param
+  // route. FAIL-SOFT — the provider caches with a short TTL and answers no apps on any clone/read
+  // error, and no provider (tenant onboarding not wired) is likewise { apps: [] }; the request's
+  // abort signal cancels an in-flight clone.
   app.get("/api/tenants/app-catalog", async (c) =>
-    c.json({ apps: appCatalog ? await appCatalog.list(c.req.raw.signal) : [] }),
+    c.json(appCatalog ? await appCatalog.list(c.req.raw.signal) : { apps: [] }),
   );
 
   // The ORPHAN SCAN: every tenant the GitOps pointers know and the inventory does

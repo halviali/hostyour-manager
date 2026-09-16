@@ -24,7 +24,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
-import { testMembers } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // ABORT-WITH-CLEANUP on an add-app run, driven through the REAL executor — the member-scoped sibling
@@ -94,7 +94,7 @@ function harness(): Harness {
   const registrations = new TenantRegistrations(seededPlatformRepo());
   const argo = new FakeMasterArgoReader({});
   const ports: TenantOnboardPorts = {
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations,
     resolver: new FakeClusterKubeResolver({

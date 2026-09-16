@@ -25,7 +25,6 @@ import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
-import { makeAppCatalogProvider, type AppCatalogProvider } from "./app-catalog.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
@@ -40,24 +39,7 @@ import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "./unit-size.ts";
-
-/** The tenant product's manifest — the catalog reads it to learn which chart's values-<app>.yaml
- *  overlays are the app types. A repo without one is a repo the catalog cannot read. */
-const TENANT_MANIFEST = `apiVersion: hostyour.cloud/v1
-kind: ConsumerManifest
-name: catalog
-owner: platform
-envs: [dev, test, prod]
-builds:
-  - { name: example-engine, containerfile: Dockerfile }
-tenant:
-  members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true }
-  perApp:
-    engine: { chart: charts/example-engine }
-    front: { chart: charts/example-ui }
-`;
-
+import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
 
 const SHA = "a".repeat(40);
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
@@ -336,7 +318,7 @@ function tenantResolver(): FakeClusterKubeResolver {
 
 function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
   return {
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: reg,
     resolver: tenantResolver(),
@@ -357,7 +339,7 @@ function tenantLifecyclePorts(reg: TenantRegistrations): TenantLifecyclePorts {
   return { registrations: reg, resolver: tenantResolver(), catalogRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com" };
 }
 
-async function makeTenant(enabled: boolean, appCatalog?: AppCatalogProvider): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string }> {
+async function makeTenant(enabled: boolean): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string }> {
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
   const reg = new TenantRegistrations(new FakePlatformRepo());
@@ -376,7 +358,7 @@ async function makeTenant(enabled: boolean, appCatalog?: AppCatalogProvider): Pr
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
     registerAuth: () => undefined,
-    registerProtected: (a) => registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: enabled, ...(appCatalog ? { appCatalog } : {}) }),
+    registerProtected: (a) => registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: enabled }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, executor, cookie };
@@ -481,15 +463,6 @@ describe("tenant API", () => {
     const { app, cookie } = await makeTenant(true);
     const res = await app.request("/api/tenants/tnt_1/apps", { method: "POST", ...authed(cookie), body: JSON.stringify({ app: "Not A Name!" }) });
     expect(res.status).toBe(400);
-  });
-
-  it("app-catalog: serves the app-types discovered from charts/example-engine (route→provider→listDir→parse)", async () => {
-    // End-to-end over HTTP: the wired provider clones a fake catalog, lists the engine dir, and
-    // filters values-<app>.yaml to the app-types (values.yaml + the values-prod stage overlay drop). With
-    // no provider (tenant onboarding not wired) the route degrades to { apps: [] } — covered by the falsy
-    // branch of `appCatalog ? … : []`; the provider's own fail-soft/caching is unit-tested in app-catalog.test.ts.
-    const { app, cookie } = await makeTenant(true, makeAppCatalogProvider({ repo: new FakeRepoReader({ files: { "deploy/platform.yaml": TENANT_MANIFEST, "charts/example-engine/values.yaml": "x", "charts/example-engine/values-prod.yaml": "x", "charts/example-engine/values-web.yaml": "x", "charts/example-engine/values-erp.yaml": "x" } }), repoURL: DEPLOY_URL, ref: "master", warn: () => {} }));
-    expect(await (await app.request("/api/tenants/app-catalog", authed(cookie))).json()).toEqual({ apps: ["erp", "web"] });
   });
 });
 

@@ -8,7 +8,7 @@ import { buildRepoPatSecret } from "../../../shared/approve.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
-import { resolveBuildUnits, buildUnitSecrets, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { resolveBuildUnits, buildUnitSecrets, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildDeps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -25,7 +25,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
@@ -115,7 +115,7 @@ function seededDns(): FakeDnsProvider {
 function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
   return {
     seeder: fakeTenantSeeder(),
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: TRUNK_DOCS } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
@@ -221,6 +221,24 @@ describe("create-tenant planStream — the build units and the PATs it asks for"
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits[0]).toMatchObject({ unit: "example-platform", registered: true, repoCredentialId: "cred_platform" });
     expect(result.plan.requiredSecrets).toEqual([]);
+  });
+  it("reads the app catalog off a REGISTERED apps repository with its stored credential, through the consumer family's reader — the two ports the build units use", async () => {
+    seedClusters();
+    // The catalog names the platform repository as the apps bundle's builder, and the apps
+    // repository carries an apps.yaml naming erp with one selection.
+    const withBundle = MANIFEST_YAML.replace("tenant:\n", "tenant:\n  appsBundle: example-engine\n");
+    const appsRepo = new FakeRepoReader({ resolvedSha: SHA, files: { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n    selections:\n      seedDemo: { title: Demo data }\n" } });
+    const prt = ports({
+      repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: withBundle } }),
+      buildUnitRegistration: async (unit) => (unit === "example-platform" ? { form: "build-only", repoCredentialId: "cred_platform" } : null),
+      onboard: () => ({ ports: { repo: appsRepo } as unknown as TenantBuildDeps["ports"] }),
+    });
+    const refused = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp", seedReference: true }] }, planCtx());
+    expect(refused.outcome).toBe("rejected");
+    expect(refused.outcome === "rejected" && refused.summary).toMatch(/T4/);
+    expect(appsRepo.clones).toEqual([{ repoURL: PLATFORM_REPO, ref: "HEAD", credentialId: "cred_platform" }]);
+    const planned = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp", seedDemo: true }] }, planCtx());
+    expect(planned.outcome).toBe("planned");
   });
   it("no image missing ⇒ no build unit, no secret, no refresh step — the plan of today", async () => {
     seedClusters();

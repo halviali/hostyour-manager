@@ -9,6 +9,7 @@ import { guid as guidSchema, appName, TenantMemberRecordSchema, TenantValidation
 import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
+import { unitRepoAccess } from "./app-catalog.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { RequiredImageSchema, requiredImagesFrom, ensureImagesStep } from "./ensure-images.ts";
 import { assertDeployState, loadTenantCluster } from "./lifecycle.ts";
@@ -57,9 +58,11 @@ export const AddAppParams = z.object({
   // no member would be recorded as owned and never deployed; frozen here so the append writes what
   // was approved rather than what the manifest says when the step runs.
   member: TenantMemberRecordSchema,
-  // Per-app seed tiers — written into the registration's apps[] entry.
+  // The app's selections — written into the registration's apps[] entry the way create-tenant
+  // writes them: the two seed tiers as fields, every further one under selections.
   seedReference: z.boolean().default(false), // reference tier → SEED_APP_DATA_ON_BOOT
   seedDemo: z.boolean().default(false), // demo tier → SEED_DEMO_DATA_ON_BOOT
+  selections: z.record(z.string(), z.boolean()).default({}),
   report: TenantValidationReportSchema, // the fresh subset validation report (audit; not re-committed)
   expectedApps: z.array(z.string()), // ONLY the new member's Application: memberApplication(guid,app,stage)
   // The registrations images the NEW app's subset render pulls (filtered to registryHost above) —
@@ -77,10 +80,12 @@ export type AddAppParams = z.infer<typeof AddAppParams>;
 export const AddAppRequest = z.object({
   tenantId: z.string().startsWith("tnt_"),
   app: appName,
-  // Per-app seed tiers for the app being added; default off. Reference = roles/nav (operator
-  // apps need it), Demo = sample records.
+  // The app's selections, in the shape of one create-tenant apps[] entry (TenantAppSchema): the
+  // two seed tiers as fields, every further selection the catalog declares under selections. T4
+  // holds all of them against the app's catalog entry.
   seedReference: z.boolean().default(false),
   seedDemo: z.boolean().default(false),
+  selections: z.record(z.string(), z.boolean()).default({}),
 });
 export type AddAppRequest = z.infer<typeof AddAppRequest>;
 
@@ -231,7 +236,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
           ctx.log("meta", `app "${p.app}" already present in tenant ${p.guid} — append already committed, skipping`);
           return;
         }
-        const { commit } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, member: p.member, seedReference: p.seedReference, seedDemo: p.seedDemo, runId: ctx.runId });
+        const { commit } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, member: p.member, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, runId: ctx.runId });
         ctx.checkpoint({ commit, app: p.app });
         ctx.log("meta", `app "${p.app}" appended to tenant ${p.guid} (${commit}) — the master ArgoCD will now generate the new Application`);
       },
@@ -324,14 +329,14 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           // worth rendering the gates over (tenant-registrations.ts, the `branch` getter).
           ref: ports.registrations.branch,
           stage: tc.stage,
-          apps: [{ name: req.app }],
+          apps: [{ name: req.app, seedReference: req.seedReference, seedDemo: req.seedDemo, selections: req.selections }],
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,
           clusterValueFiles,
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
-        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal },
+        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, unitRepo: unitRepoAccess(ports) },
       );
       if (outcome.verdict !== "pass") {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");
@@ -366,6 +371,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         member: newMember,
         seedReference: req.seedReference, // reference tier for the appended apps[] entry
         seedDemo: req.seedDemo, // demo tier for the appended apps[] entry
+        selections: req.selections, // every further selection, as T4 held it against the catalog
         report: outcome.report,
         expectedApps,
         requiredImages,

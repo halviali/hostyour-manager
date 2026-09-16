@@ -23,7 +23,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { testMembers } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedQuota } from "../../../shared/unit-size.ts";
 
@@ -81,7 +81,7 @@ function seeder(): VaultSeeder {
 function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()): TenantOnboardPorts {
   return {
     seeder: seeder(), objectStore: store,
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({ clusterReader: new FakeClusterReader({}), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" }),
@@ -114,7 +114,7 @@ describe("G27 over the tenant's wildcard — validateTenant reads the zone where
     repoURL: "https://github.com/acme/acme-catalog.git", ref: "master", stage: "prod", apps: [], probeGuid: GUID, subdomain: SUB, clusterValueFiles: CHAIN, clusterFqdn: "s1.example", ...over,
   });
   const deps = (over: Partial<ValidateTenantDeps> = {}): ValidateTenantDeps => ({
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
+    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }), log: () => {}, signal: new AbortController().signal, ...over,
   });
 

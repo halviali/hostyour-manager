@@ -9,6 +9,7 @@ import {
   subdomain,
   GUID_ALPHABET,
 } from "./tenant.ts";
+import { SEED_SELECTIONS, chosenSelections, appSelectionsToRequest } from "./app-selections.ts";
 import { RESERVED_HOST_LABELS } from "./unit-host.ts";
 import { ConsumerManifestSchema } from "./consumer.ts";
 
@@ -153,11 +154,31 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
     ];
     const parsed = TenantRegistrationSchema.parse(registration({ apps, members: testMembers(apps) }));
     expect(parsed.apps).toEqual([
-      { name: "erp", seedReference: false, seedDemo: false },
-      { name: "web", seedReference: true, seedDemo: false },
-      { name: "crm", seedReference: false, seedDemo: true },
-      { name: "shop", seedReference: false, seedDemo: true },
+      { name: "erp", seedReference: false, seedDemo: false, selections: {} },
+      { name: "web", seedReference: true, seedDemo: false, selections: {} },
+      { name: "crm", seedReference: false, seedDemo: true, selections: {} },
+      { name: "shop", seedReference: false, seedDemo: true, selections: {} },
     ]);
+  });
+
+  it("carries every further selection under selections, and refuses the two seed selections there — one selection has one place", () => {
+    const apps = [{ name: "erp", seedReference: true, selections: { seedPrices: true, seedFixtures: false } }];
+    const parsed = TenantRegistrationSchema.parse(registration({ apps, members: testMembers(apps) }));
+    expect(parsed.apps).toEqual([{ name: "erp", seedReference: true, seedDemo: false, selections: { seedPrices: true, seedFixtures: false } }]);
+    for (const k of SEED_SELECTIONS) {
+      const dup = [{ name: "erp", selections: { [k]: true } }];
+      const r = TenantRegistrationSchema.safeParse(registration({ apps: dup, members: testMembers(dup) }));
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toMatch(/never keys of selections/);
+    }
+  });
+
+  it("chosenSelections names what an entry chose: the two fields where true, every selections key; appSelectionsToRequest is its inverse", () => {
+    expect(chosenSelections({})).toEqual([]);
+    expect(chosenSelections({ seedReference: true, seedDemo: false, selections: { seedPrices: false } })).toEqual(["seedReference", "seedPrices"]);
+    const entry = appSelectionsToRequest("erp", { seedReference: true, seedDemo: false, seedPrices: false });
+    expect(entry).toEqual({ name: "erp", seedReference: true, seedDemo: false, selections: { seedPrices: false } });
+    expect(chosenSelections(entry)).toEqual(["seedReference", "seedPrices"]);
   });
 
   it("requires cluster as a DNS-1123 label (the ArgoCD destination name pin)", () => {
@@ -255,6 +276,17 @@ describe("ConsumerManifest tenant: fan-out block", () => {
     const bad = deployManifest() as { tenant: { members: { name: string; chart: string }[] } };
     bad.tenant.members[0]!.chart = "/charts/example-auth";
     expect(ConsumerManifestSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("appsBundle names a build some buildRepos entry builds — the apps repository the catalog is read from", () => {
+    const tenant = (deployManifest() as { tenant: Record<string, unknown> }).tenant;
+    const withBundle = (bundle: string, builds: string[]) => deployManifest({ tenant: { ...tenant, appsBundle: bundle, buildRepos: [{ repo: "https://github.com/acme/acme-apps.git", builds }] } });
+    expect(ConsumerManifestSchema.parse(withBundle("acme-apps", ["acme-apps"])).tenant?.appsBundle).toBe("acme-apps");
+    const r = ConsumerManifestSchema.safeParse(withBundle("acme-apps", ["acme-engine"]));
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.message).join("; ")).toMatch(/appsBundle "acme-apps" is built by no buildRepos entry/);
+    // Absent is a valid manifest: the catalog then falls back to the engine chart's overlays.
+    expect(ConsumerManifestSchema.parse(deployManifest()).tenant?.appsBundle).toBeUndefined();
   });
 });
 

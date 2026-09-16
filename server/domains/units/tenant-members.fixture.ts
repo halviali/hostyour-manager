@@ -43,6 +43,12 @@ export function testMembers(apps: readonly ({ name: string; [k: string]: unknown
   ];
 }
 
+/** The engine chart's per-app overlays of the test product, as the files a fake catalog checkout
+ *  carries. While no apps repository carries an apps.yaml, the app catalog IS these overlays
+ *  (app-catalog.ts fallbackCatalog), so a fixture that requests an app carries the app's overlay,
+ *  the way the real catalog does. The names are the ones the run tests request. */
+export const APP_OVERLAYS: Record<string, string> = Object.fromEntries(["erp", "web", "crm"].map((app) => [`charts/example-engine/values-${app}.yaml`, ""]));
+
 /** The ceiling a test tenant's member namespaces are bounded by — the shipped `small` figures. Lives
  *  here beside the member set for the same reason that does: every tenant registration a test builds
  *  needs one, and a literal repeated per file is a literal free to drift from what the seed says. */

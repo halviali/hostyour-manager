@@ -45,6 +45,7 @@ import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
 import { validateTenant, type ValidateTenantRequest } from "./validate-tenant.ts";
+import { unitRepoAccess } from "./app-catalog.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
@@ -301,6 +302,10 @@ export interface RefreshImagesPorts {
   catalogCredentialId?: string;
   resolveClusterValueFiles: (domain: string, stage: Stage) => Promise<ClusterValueFile[]>;
   attestedBuilds: () => Promise<{ unit: string; build: string }[]>;
+  /** The two the re-render reaches the apps repository through when it is a registered unit
+   *  (app-catalog.ts unitRepoAccess) — the same two the plan's validation used. */
+  buildUnitRegistration?: (unit: string) => Promise<RegisteredUnit | null>;
+  onboard?: () => TenantBuildDeps | undefined;
 }
 
 export interface RefreshImagesParams {
@@ -336,7 +341,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           clusterValueFiles,
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
-        { repo: ports.repo, helm: ports.helm, log: (l) => ctx.log("meta", l), signal: ctx.signal },
+        { repo: ports.repo, helm: ports.helm, log: (l) => ctx.log("meta", l), signal: ctx.signal, unitRepo: unitRepoAccess(ports) },
       );
       if (outcome.verdict !== "pass") {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass").map((g) => g.id);

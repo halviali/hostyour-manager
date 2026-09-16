@@ -13,6 +13,7 @@ import { z } from "zod";
 import { GateResultSchema } from "./gates.ts";
 import { ConsumerManifestSchema } from "./consumer.ts";
 import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
+import { SEED_SELECTIONS } from "./app-selections.ts";
 
 /** GUID_ALPHABET — Crockford base32 (minus i/l/o/u): 32 symbols = 10 digits + 22 lower-case
  *  letters. mintTenantGuid() (server/kernel/ids.ts) draws 12 chars from this set; the `guid`
@@ -78,23 +79,30 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
 
 /** ONE tenant apps[] element — the single source of the per-app seed model + its legacy read-compat.
  *  Two INDEPENDENT seed tiers (engine app.ts): `seedReference` → SEED_APP_DATA_ON_BOOT (reference tier
- *  `seeds/`: roles, navigation, mandatory singles = an operator app's structural data, so buildproject/
- *  erp are USABLE) and `seedDemo` → SEED_DEMO_DATA_ON_BOOT (demo tier `seeds-demo/`: showcase records,
- *  e.g. the web home page). `seed` is the LEGACY demo alias — READ-ONLY: a pre-existing pointer
+ *  `seeds/`: roles, navigation, mandatory singles = an operator app's structural data, so an
+ *  operator app is USABLE) and `seedDemo` → SEED_DEMO_DATA_ON_BOOT (demo tier `seeds-demo/`: showcase
+ *  records). `seed` is the LEGACY demo alias — READ-ONLY: a pre-existing pointer
  *  carrying {name, seed} folds seed → seedDemo here and is NEVER re-emitted (the writer always
- *  serializes the canonical {name, seedReference, seedDemo}). Both default false, so a bare {name}
- *  from before the tiers parses unchanged and seeds nothing. Imported everywhere the apps element is validated. */
+ *  serializes the canonical {name, seedReference, seedDemo, selections}). Both default false, so a bare
+ *  {name} from before the tiers parses unchanged and seeds nothing. `selections` carries every
+ *  further selection the app's manifest declares; the two above are refused there, so one selection
+ *  has one place. Imported everywhere the apps element is validated. */
 export const TenantAppSchema = z
   .object({
     name: appName,
     seedReference: z.boolean().default(false),
     seedDemo: z.boolean().default(false),
     seed: z.boolean().optional(),
+    selections: z
+      .record(z.string(), z.boolean())
+      .default({})
+      .refine((s) => !SEED_SELECTIONS.some((k) => k in s), { message: `${SEED_SELECTIONS.join(" and ")} are fields of the app entry, never keys of selections` }),
   })
-  .transform(({ name, seedReference, seedDemo, seed }) => ({
+  .transform(({ name, seedReference, seedDemo, seed, selections }) => ({
     name,
     seedReference,
     seedDemo: seedDemo || (seed ?? false),
+    selections,
   }));
 
 /** subdomain — ONE DNS label (zero PII). The tenant's zone is `<subdomain>.<stage apex>` and its

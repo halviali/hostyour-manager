@@ -30,7 +30,7 @@ import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-mem
 /** The standing members the product under test declares — stated by the fixture, the way a real
  *  tenant's registration states its own. The registration carries the records, since it is what the
  *  charts read; the fan-out helpers reason over the names alone. */
-const TEST_MEMBER_RECORDS = testMembers([{ name: "erp", seedReference: false, seedDemo: false }]);
+const TEST_MEMBER_RECORDS = testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]);
 
 // The SERVER-SIDE live-tenant refusal on tenant-purge, at BOTH of its ends — the mirror image of the
 // refusals in api-tenant-provisional.test.ts. Those keep the LIVE-tenant run kinds off a tenant that is not
@@ -91,7 +91,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
   return {
     cluster: "s1", subdomain: SUB,
     members: TEST_MEMBER_RECORDS, identityProvider: "auth",
-    apps: [{ name: "erp", seedReference: false, seedDemo: false }],
+    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false,
     ...over,
   };
