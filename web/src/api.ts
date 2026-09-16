@@ -170,8 +170,18 @@ export const getDnsInventory = (): Promise<DnsInventoryView> => req("/api/dns");
 export const getDnsWrites = (): Promise<DnsWritesView> => req("/api/dns/writes");
 /** Take the listed records back in ONE run. The run refuses the whole list on any name the
  *  inventory does not carry as removable, so what this sends is always rows the page listed. */
-export const removeDnsRecords = (input: DnsRemoveInput): Promise<{ runId: string }> =>
-  planRun("dns-remove", input as unknown as Record<string, unknown>);
+/** Plans the dns-remove run AND approves it in one call: the confirm on the DNS page — every record,
+ *  what stands at it, whose it is — IS the reading of the plan, so a second Approve on the run page
+ *  asked the same question twice (#181). A rejected plan throws out of planRun before any approve.
+ *  Injectable for the test; the page calls it with the real client. */
+export async function removeDnsRecords(
+  input: DnsRemoveInput,
+  client: { planRun: typeof planRun; approveRun: typeof approveRun } = { planRun, approveRun },
+): Promise<{ runId: string }> {
+  const { runId } = await client.planRun("dns-remove", input as unknown as Record<string, unknown>);
+  await client.approveRun(runId);
+  return { runId };
+}
 /** Take a slave OUT of the installation: the master's whole per-slave management plane, the
  *  cluster's map, then the rows. It takes ONLY the server for the same reason redeploy does. Every
  *  act runs on the MASTER and the slave is not reached at all, which is what makes it the run kind
