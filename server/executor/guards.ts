@@ -45,6 +45,7 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   "tenant-create": [],
   "tenant-add-app": [],
   "tenant-remove-app": [],
+  "tenant-apps-repo": [],
   "tenant-suspend": [],
   "tenant-resume": [],
   "tenant-restart-workloads": [],

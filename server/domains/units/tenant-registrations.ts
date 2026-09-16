@@ -292,6 +292,15 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, quota }, `size(${guid}) ${trailer(runId)}`);
   }
 
+  /** Write the tenant's own apps repository and the image it builds — the two fields the fan-out
+   *  mounts the tenant's bundle from. One field pair of one file, like the flips above; writing the
+   *  same values commits nothing. tenant-apps-repo. */
+  async setTenantAppsRepo(stage: Stage, guid: string, apps: { appsRepo: string; appsImage: string }, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    return this.write(stage, guid, { ...current.entry, ...apps }, `tenant-apps-repo(${guid}): ${apps.appsImage} ${trailer(runId)}`);
+  }
+
   /** Repoint the tenant's `cluster` field — the whole bracket moves at once: every member appset
    *  selects on this one field, so the source slave stops generating the fan-out and the target
    *  starts. The file keeps its path, so a tenant moves within its stage, never across one. */

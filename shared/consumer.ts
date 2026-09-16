@@ -19,8 +19,9 @@ export const GITHUB_ACCOUNT_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0
 
 /** DNS-1123 label, <= 40 chars. The identity law (G1) requires
  *  manifest name == chart name == repo name == unit, and the namespace is `<unit>-<stage>`
- *  (consumerNamespace below). */
-const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);
+ *  (consumerNamespace below). Exported for the run kind that composes a unit name from a tenant's
+ *  subdomain (tenant-apps-repo) and refuses one this grammar does not admit. */
+export const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/);
 
 /** The unit's public host LABEL — one DNS label the unit stands on under its stage's zone,
  *  `<label>.<stage apex>` (shared/unit-host.ts). Not the name: `digita-auth` is the identity, `auth` is

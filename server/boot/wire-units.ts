@@ -48,6 +48,7 @@ import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
+import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
 import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
@@ -772,6 +773,11 @@ function buildTenantOnboarding(
       health: new HttpTenantHealthReader(),
     }),
     makeAddAppDef(onboardPorts),
+    // The tenant's own apps repository, created from the catalog's apps bundle through the GitHub App
+    // and onboarded build-only through the consumer family's chain (the same late-handed ports the
+    // build units ride) — the SAME port set, because it reads the catalog and the template the way
+    // create-tenant does.
+    makeTenantAppsRepoDef(onboardPorts),
     makeRemoveAppDef(lifecyclePorts),
     makeSuspendTenantDef(lifecyclePorts),
     makeResumeTenantDef(lifecyclePorts),
