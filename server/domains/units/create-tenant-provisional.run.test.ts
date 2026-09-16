@@ -170,7 +170,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
 
 function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
   return CreateTenantParams.parse({
-    guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1", domain: "s1.example",
+    guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
@@ -239,7 +239,7 @@ describe("record-provisional — the row exists BEFORE anything is deployed", ()
 
     const row = tenantRow();
     expect(row?.status).toBe("provisioning");
-    expect(row?.subdomain).toBe("acme.example");
+    expect(row?.subdomain).toBe("acme");
     expect(row?.lastRunId).toBe("run_tnt");
     expect(appRows(row!.id).map((a) => [a.name, a.status])).toEqual([["erp", "provisioning"]]);
     // The whole point: the row is the ONLY thing that exists at this moment.
@@ -444,7 +444,7 @@ describe("the guid mint probes with the TOLERANT scan", () => {
     const registrations = new TenantRegistrations(new FakePlatformRepo());
     registrations.readTenant = () => Promise.reject(new AppError("INTERNAL", `tenant file tenants/prod/${GUID}/reset.yaml failed its schema: nonce Invalid input`));
     const result = await makeCreateTenantDef(ports({ registrations })).planStream!(
-      { clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS, trio: { jobs: false } },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, trio: { jobs: false } },
       { db: db.db, log: () => undefined, signal: new AbortController().signal },
     );
     expect(result.outcome).toBe("planned");

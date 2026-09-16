@@ -6,7 +6,7 @@ import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
 import { STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
-import { guid as guidSchema, memberName, TenantAppSchema, TenantMemberRecordSchema, TenantRegistrationSchema, TenantValidationReportSchema, type TenantRegistration } from "../../../shared/tenant.ts";
+import { guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantRegistrationSchema, TenantValidationReportSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -143,14 +143,6 @@ const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is
  *  reconciler serving it, so a data reset has no mechanism. The field stays because it is a mandatory
  *  part of the registration schema and whatever answers "what is a data reset" will key on it. */
 const INITIAL_RESET_NONCE = "1";
-
-// Mirror of shared/tenant.ts:subdomain (not exported) — a bounded, zero-PII public DNS-subdomain
-// label. TenantRegistrationSchema re-validates it at write-registration, so this is only the early
-// wizard guard.
-const subdomainSchema = z
-  .string()
-  .max(253)
-  .regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/);
 
 /** The frozen create-tenant params: the operator's fields + everything the streaming plan resolved
  *  (the minted guid, the pinned chartsRef, the approved report, the frozen expected-Application set). */

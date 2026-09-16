@@ -209,26 +209,26 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
 }
 
 // The tenant lands on cls_2 here; placement is free, so this is a fixture choice, not a rule.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: [{ name: "erp" }] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }] };
 
 describe("GET /api/tenants/orphans (the pointer scan)", () => {
   it("lists a live pointer with no inventory row, resolved to its cluster row", async () => {
     seedCluster();
     seedSlaveCluster();
     const { app, cookie, registrations } = await makeTenant(true);
-    await seedPointer(registrations, ORPHAN_GUID, "ghost.example");
+    await seedPointer(registrations, ORPHAN_GUID, "ghost");
     const body = (await (await app.request("/api/tenants/orphans", authed(cookie))).json()) as { orphans: Array<Record<string, unknown>>; skipped: unknown[] };
     // Everything the operator needs to recognise it (subdomain/stage/slave) AND to aim a purge (clusterId).
-    expect(body.orphans).toEqual([{ guid: ORPHAN_GUID, subdomain: "ghost.example", stage: "prod", cluster: "s2", clusterId: "cls_2" }]);
+    expect(body.orphans).toEqual([{ guid: ORPHAN_GUID, subdomain: "ghost", stage: "prod", cluster: "s2", clusterId: "cls_2" }]);
     expect(body.skipped).toEqual([]); // every pointer was read — the list is a complete answer
   });
 
   it("a pointer whose tenant IS recorded is not an orphan", async () => {
     seedCluster();
     seedSlaveCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_2", guid: ORPHAN_GUID, subdomain: "ghost.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_2", guid: ORPHAN_GUID, subdomain: "ghost", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const { app, cookie, registrations } = await makeTenant(true);
-    await seedPointer(registrations, ORPHAN_GUID, "ghost.example");
+    await seedPointer(registrations, ORPHAN_GUID, "ghost");
     expect(await (await app.request("/api/tenants/orphans", authed(cookie))).json()).toEqual({ orphans: [], skipped: [] });
   });
 
@@ -239,7 +239,7 @@ describe("GET /api/tenants/orphans (the pointer scan)", () => {
     seedCluster();
     seedSlaveCluster();
     const { app, cookie, registrations, repo } = await makeTenant(true);
-    await seedPointer(registrations, ORPHAN_GUID, "ghost.example");
+    await seedPointer(registrations, ORPHAN_GUID, "ghost");
     // A hand-written pointer no writer of ours would produce, planted straight into the fake repo.
     repo.seed(repo.booksBranch, `registrations/${BROKEN_GUID}/prod.yaml`, "guid: not-a-guid\n");
     const body = (await (await app.request("/api/tenants/orphans", authed(cookie))).json()) as {
@@ -301,7 +301,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     pastPrecondition(runId);
     const body = (await (await app.request(`/api/tenants/runs/${runId}/tenant-state`, authed(cookie))).json()) as { state: string; target: Record<string, unknown> };
     expect(body.state).toBe("orphan");
-    expect(body.target).toMatchObject({ subdomain: "acme.example", stage: "prod", clusterId: "cls_2" });
+    expect(body.target).toMatchObject({ subdomain: "acme", stage: "prod", clusterId: "cls_2" });
     expect(body.target["guid"]).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/); // minted by the plan, never supplied
     // The frozen params also carry the whole approved plan and the operator's adminEmail (PII), so the
     // route PROJECTS: nothing beyond these four fields can reach the browser.
@@ -350,7 +350,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     seedSlaveCluster();
     const { app, executor, cookie } = await makeTenant(true);
     const { runId, guid } = await planned(app, executor, cookie);
-    db.db.insert(tenants).values({ id: "tnt_live", clusterId: "cls_2", guid, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_live", clusterId: "cls_2", guid, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const body = (await (await app.request(`/api/tenants/runs/${runId}/tenant-state`, authed(cookie))).json()) as { state: string; row: Record<string, unknown> };
     expect(body.state).toBe("live");
     // The row rides along so the screen can badge the tenant exactly as the Tenants list does and link
@@ -363,7 +363,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     seedSlaveCluster();
     const { app, executor, cookie } = await makeTenant(true);
     const { runId, guid } = await planned(app, executor, cookie);
-    db.db.insert(tenants).values({ id: "tnt_half", clusterId: "cls_2", guid, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_half", clusterId: "cls_2", guid, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "provisioning" }).run();
     const body = (await (await app.request(`/api/tenants/runs/${runId}/tenant-state`, authed(cookie))).json()) as { state: string; row: Record<string, unknown> };
     expect(body.state).toBe("unfinished");
     expect(body.row).toMatchObject({ tenantId: "tnt_half", status: "provisioning" });
@@ -374,7 +374,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     seedSlaveCluster();
     const { app, executor, cookie } = await makeTenant(true);
     const { runId, guid } = await planned(app, executor, cookie);
-    db.db.insert(tenants).values({ id: "tnt_gone", clusterId: "cls_2", guid, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "offboarded" }).run();
+    db.db.insert(tenants).values({ id: "tnt_gone", clusterId: "cls_2", guid, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "offboarded" }).run();
     const body = (await (await app.request(`/api/tenants/runs/${runId}/tenant-state`, authed(cookie))).json()) as { state: string };
     expect(body.state).toBe("offboarded");
   });
@@ -394,7 +394,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
 
   it("404 for an unknown run, 400 for a run of another kind", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: ORPHAN_GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: ORPHAN_GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const { app, cookie } = await makeTenant(true);
     expect((await app.request("/api/tenants/runs/run_missing/tenant-state", authed(cookie))).status).toBe(404);
     const { runId } = (await (await app.request("/api/tenants/tnt_1/suspend", { method: "POST", ...authed(cookie), body: "{}" })).json()) as { runId: string };
@@ -425,7 +425,7 @@ describe("POST /api/tenants/purge (the force-offboard trigger)", () => {
     seedCluster();
     seedSlaveCluster();
     const { app, executor, cookie, registrations } = await makeTenant(true);
-    await seedPointer(registrations, ORPHAN_GUID, "ghost.example");
+    await seedPointer(registrations, ORPHAN_GUID, "ghost");
     const { runId } = (await (await app.request("/api/tenants/purge", { method: "POST", ...authed(cookie), body: JSON.stringify({ guid: ORPHAN_GUID, stage: "prod", clusterId: "cls_2" }) })).json()) as { runId: string };
     await executor.settle(runId);
     const run = getRun(db.db, runId);

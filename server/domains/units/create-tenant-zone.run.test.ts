@@ -176,7 +176,7 @@ describe("create-tenant plans the zone before the first write", () => {
     expect(result.params.report.gates.find((g) => g.id === "G27")?.evidence?.[0]?.value).toBe("157.90.201.150");
   });
 
-  it("provision-dns replaces the leftover and says what stood there", async () => {
+  it("provision-dns writes the ONE wildcard at the cluster's own address, replacing a leftover and saying what stood there", async () => {
     const dns = new FakeDnsProvider();
     seedClusters(dns);
     dns.seed(WILDCARD, "A", "157.90.201.150");
@@ -188,7 +188,10 @@ describe("create-tenant plans the zone before the first write", () => {
     });
     const logs: string[] = [];
     await makeCreateTenantDef(prt).steps(p).find((s) => s.name === "provision-dns")!.run(ctx(p, logs));
+    // ONE wildcard covers every member host `<member>.<subdomain>.<stage apex>` — members added later
+    // included — and its content is the cluster's own A record, read, never computed.
     expect(dns.record(WILDCARD, "A")).toBe(S1_ADDRESS);
     expect(logs.some((l) => l.includes("stood at 157.90.201.150") && l.includes(`replaced with ${S1_ADDRESS}`))).toBe(true);
+    expect(logs.some((l) => l.includes("a move is a content update of exactly this record"))).toBe(true);
   });
 });

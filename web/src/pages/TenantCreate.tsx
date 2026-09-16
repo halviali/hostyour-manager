@@ -1,6 +1,7 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import type { Stage } from "../../../shared/enums.ts";
+import { HOST_LABEL_RE } from "../../../shared/unit-host.ts";
 import { listTenantTargets, listTenantAppCatalog, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
@@ -143,11 +144,14 @@ export function TenantCreate() {
             <input
               value={form.subdomain}
               onChange={set("subdomain")}
-              placeholder="acme.dev"
-              pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
+              placeholder="acme"
+              pattern={HOST_LABEL_RE.source}
               required
             />
-            <span className="field__hint">A public DNS-subdomain label (zero PII) — the tenant's public address.</span>
+            <span className="field__hint">
+              One DNS label (zero PII): the tenant&apos;s zone is <code>&lt;subdomain&gt;.&lt;stage apex&gt;</code> and every member
+              stands one level below it. Never a stage word — those are the zones themselves.
+            </span>
           </label>
           <label className="field">
             <span className="field__label">Target cluster</span>

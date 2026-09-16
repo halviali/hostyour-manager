@@ -136,7 +136,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
 
 function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
   return CreateTenantParams.parse({
-    guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1", domain: "s1.example",
+    guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
@@ -236,7 +236,7 @@ describe("create-tenant planStream resolves the registry host", () => {
         return [{ path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.build1.example\n" }];
       },
     });
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.registryHost).toBe("zot.build1.example");
@@ -247,7 +247,7 @@ describe("create-tenant planStream resolves the registry host", () => {
     seedClusters();
     // A chain that states no registry host — registryHostFromChain itself must reject the plan loud.
     const prt = ports({ resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n" }] });
-    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "a.example", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
+    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "a", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
   });
 });
 
@@ -268,7 +268,7 @@ describe("create-tenant planStream freezes requiredImages", () => {
     ];
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: docsWithImages } });
     const def = makeCreateTenantDef(ports({ helm }));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.requiredImages).toEqual([

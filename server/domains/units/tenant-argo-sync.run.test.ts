@@ -89,7 +89,7 @@ function passReport(): TenantValidationReport {
 async function seededRegistrations(): Promise<TenantRegistrations> {
   const registrations = new TenantRegistrations(new FakePlatformRepo());
   const registration: TenantRegistration = {
-    cluster: "s1", subdomain: "acme.example",
+    cluster: "s1", subdomain: "acme",
     members: testMembers(APPS), identityProvider: "auth", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false })),
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false,
   };
@@ -131,7 +131,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
 
 function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
   return CreateTenantParams.parse({
-    guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1", domain: "s1.example",
+    guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
@@ -231,7 +231,7 @@ describe("planStream derives the subjects from the tenant's own images", () => {
     ];
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: docsWithImages } });
     const def = makeCreateTenantDef(ports({ helm }));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // example-platform builds example-engine, which this tenant pulls; swissbookai builds nothing it

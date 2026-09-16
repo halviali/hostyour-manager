@@ -78,7 +78,7 @@ describe("inventory tenants + tenant_apps", () => {
     seedCluster(db);
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
-    const base = { clusterId: "cls_1", guid: "e2e8ymj86dk8", subdomain: "acme.example", stage: "prod" as const, members: ["auth", "jobs", "report"], identityProvider: "auth" };
+    const base = { clusterId: "cls_1", guid: "e2e8ymj86dk8", subdomain: "acme", stage: "prod" as const, members: ["auth", "jobs", "report"], identityProvider: "auth" };
     const first = tenantId();
     db.db.insert(tenants).values({ id: first, ...base }).run();
     // Same (guid, stage) -> unique-index violation, on this cluster and on any other: one tenant

@@ -6,8 +6,10 @@ import {
   guid,
   appName,
   memberName,
+  subdomain,
   GUID_ALPHABET,
 } from "./tenant.ts";
+import { RESERVED_HOST_LABELS } from "./unit-host.ts";
 import { ConsumerManifestSchema } from "./consumer.ts";
 
 /** The members a tenant of the test product has: three standing services, then one per app carrying
@@ -28,7 +30,7 @@ function registration(over: Record<string, unknown> = {}): unknown {
     members: testMembers([{ name: "erp" }]),
     identityProvider: "auth",
     cluster: "s1",
-    subdomain: "simetrix.dev",
+    subdomain: "simetrix",
     apps: [{ name: "erp" }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
@@ -101,6 +103,25 @@ describe("appName + memberName", () => {
   });
 });
 
+describe("subdomain — one DNS label, never a stage word", () => {
+  it("accepts a label and refuses a dotted name, naming why", () => {
+    expect(subdomain.safeParse("acme").success).toBe(true);
+    expect(subdomain.safeParse("acme-2").success).toBe(true);
+    const dotted = subdomain.safeParse("acme.dev");
+    expect(dotted.success).toBe(false);
+    expect(dotted.error?.issues[0]?.message).toMatch(/one DNS label/);
+  });
+
+  it("refuses every stage word — a prod tenant named `dev` would take the dev zone itself", () => {
+    for (const word of RESERVED_HOST_LABELS) {
+      const refused = subdomain.safeParse(word);
+      expect(refused.success).toBe(false);
+      expect(refused.error?.issues[0]?.message).toMatch(/stage word cannot be a subdomain/);
+    }
+    expect(RESERVED_HOST_LABELS).toEqual(["dev", "test", "prod"]);
+  });
+});
+
 describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml body", () => {
   it("parses a full valid registration", () => {
     expect(TenantRegistrationSchema.safeParse(registration()).success).toBe(true);
@@ -113,7 +134,7 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
   });
 
   it("applies defaults for apps/seedUsers/resetNonce/suspended/quiesced when omitted", () => {
-    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "simetrix.prod", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
+    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "simetrix", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
     expect(parsed.apps).toEqual([]);
     expect(parsed.seedUsers).toBe(false);
     expect(parsed.resetNonce).toBe("1");

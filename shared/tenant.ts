@@ -12,6 +12,7 @@ import { UnitQuotaSchema } from "./unit-size.ts";
 import { z } from "zod";
 import { GateResultSchema } from "./gates.ts";
 import { ConsumerManifestSchema } from "./consumer.ts";
+import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
 
 /** GUID_ALPHABET — Crockford base32 (minus i/l/o/u): 32 symbols = 10 digits + 22 lower-case
  *  letters. mintTenantGuid() (server/kernel/ids.ts) draws 12 chars from this set; the `guid`
@@ -96,13 +97,15 @@ export const TenantAppSchema = z
     seedDemo: seedDemo || (seed ?? false),
   }));
 
-/** subdomain — a public FQDN label (zero PII). A bounded DNS-subdomain form (not z.string().min(1))
- *  per the synthesis decision to anonymize + read as a public label, while still accepting the two
- *  live tenant subdomains (e.g. "simetrix.dev"). */
-const subdomain = z
+/** subdomain — ONE DNS label (zero PII). The tenant's zone is `<subdomain>.<stage apex>` and its
+ *  wildcard `*.<subdomain>.<stage apex>` (unit-host.ts), so a dotted subdomain has no reading under
+ *  it, and a stage word would make the zone another stage's apex: a prod tenant named `dev` gets
+ *  `*.dev.<apex>`, the dev zone itself, and its identity provider scopes its cookies to that whole
+ *  zone. Held here for the registration and, through the same export, at the wizard's request. */
+export const subdomain = z
   .string()
-  .max(253)
-  .regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/);
+  .regex(HOST_LABEL_RE, "a subdomain is one DNS label: lower-case letters, digits and hyphens, at most 63 characters, no dot")
+  .refine((s) => !RESERVED_HOST_LABELS.includes(s), { message: "a stage word cannot be a subdomain — the stage words are the zones, so the tenant would take a whole stage's zone" });
 
 /** registrations/<guid>/<stage>.yaml — THE tenant registration, ONE flat file per tenant per stage.
  *  The guid is the DIRECTORY and the stage is the FILE NAME, so neither appears in the body: the path

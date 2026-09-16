@@ -28,7 +28,7 @@ import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./t
 // deprovision cascade) and the namespace, and it is idempotent (a re-run is a no-op).
 
 const GUID = "zsjs023ctne0";
-const SUB = "acme.example";
+const SUB = "acme";
 const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
 const APPS = [{ name: "erp" }];
 const WATCH = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod");

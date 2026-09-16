@@ -81,25 +81,25 @@ async function deployedWithRaw(raw: Record<string, string>, ...entries: TenantFi
 
 describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
   it("returns only the pointers inventory does not know, resolved to their cluster row", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
-    const registrations = await deployed(entry(GUID, "acme.example"), entry(ORPHAN, "ghost.example"));
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    const registrations = await deployed(entry(GUID, "acme"), entry(ORPHAN, "ghost"));
     expect(await scanOrphanTenants({ db: db.db, registrations })).toEqual({
-      orphans: [{ guid: ORPHAN, subdomain: "ghost.example", stage: "prod", cluster: "s1", clusterId: "cls_1" }],
+      orphans: [{ guid: ORPHAN, subdomain: "ghost", stage: "prod", cluster: "s1", clusterId: "cls_1" }],
       skipped: [],
     });
   });
 
   it("finds nothing when every deployed pointer has a row, and nothing when nothing is deployed", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
-    expect(await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) })).toEqual({ orphans: [], skipped: [] });
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    expect(await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme")) })).toEqual({ orphans: [], skipped: [] });
     expect(await scanOrphanTenants({ db: db.db, registrations: await deployed() })).toEqual({ orphans: [], skipped: [] });
   });
 
   it("treats an OFFBOARDED row as absent — a live pointer beside it is leftover state, not a healthy tenant", async () => {
     // The row is kept for audit; the pointer should have gone with the offboard. Same rule as
     // resolveTeardownTarget (tenant-replace.ts), so the two can never disagree about what an orphan is.
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "offboarded" }).run();
-    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) });
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "offboarded" }).run();
+    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme")) });
     expect(found.orphans.map((o) => o.guid)).toEqual([GUID]);
   });
 
@@ -110,21 +110,21 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
     // "purged" row is GitOps pointing at a tenant that no longer exists — and reading that row as "known"
     // would hide it from the only surface that can see it (every removal git-rm's the pointer first, so
     // nothing else looks). Written as the shared TENANT_SETTLED_STATUS set, never `!== "offboarded"`.
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "purged" }).run();
-    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) });
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "purged" }).run();
+    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme")) });
     expect(found.orphans.map((o) => o.guid)).toEqual([GUID]);
   });
 
   it("is stage-scoped on BOTH sides: a row at another stage never covers a pointer at this one", async () => {
     // The same guid recorded at dev must not mask the prod pointer — guid+stage is the identity the
     // pointer path itself is keyed on (registrations/<guid>/<stage>.yaml).
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "dev", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
-    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme.example")) });
-    expect(found.orphans).toEqual([{ guid: GUID, subdomain: "acme.example", stage: "prod", cluster: "s1", clusterId: "cls_1" }]);
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "dev", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme")) });
+    expect(found.orphans).toEqual([{ guid: GUID, subdomain: "acme", stage: "prod", cluster: "s1", clusterId: "cls_1" }]);
   });
 
   it("scans every stage in one pass — an orphan is found wherever it was left", async () => {
-    const registrations = await deployed(entry(ORPHAN, "ghost.example"), entry(GUID, "dev-ghost.example", { stage: "dev", cluster: "s1dev" }));
+    const registrations = await deployed(entry(ORPHAN, "ghost"), entry(GUID, "dev-ghost", { stage: "dev", cluster: "s1dev" }));
     const found = await scanOrphanTenants({ db: db.db, registrations });
     // dev has no registered cluster here, so that one is reported unaimable — but it IS reported.
     expect(found.orphans.map((o) => `${o.stage}/${o.guid}`).sort()).toEqual(["dev/" + GUID, "prod/" + ORPHAN].sort());
@@ -133,9 +133,9 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
   it("reports an orphan whose slave is not a registered cluster with clusterId null instead of dropping it", async () => {
     // A purge is keyed on a clusterId, so this one cannot be aimed from here — but hiding it would hide
     // exactly the leftover the operator is scanning for. The UI says why it offers no action.
-    const registrations = await deployed(entry(STRANDED, "stranded.example", { cluster: "s9" }));
+    const registrations = await deployed(entry(STRANDED, "stranded", { cluster: "s9" }));
     expect(await scanOrphanTenants({ db: db.db, registrations })).toEqual({
-      orphans: [{ guid: STRANDED, subdomain: "stranded.example", stage: "prod", cluster: "s9", clusterId: null }],
+      orphans: [{ guid: STRANDED, subdomain: "stranded", stage: "prod", cluster: "s9", clusterId: null }],
       skipped: [],
     });
   });
@@ -145,7 +145,7 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
     // swallowing it makes the UI say "every deployed tenant pointer has a matching inventory row" for a
     // tenant nobody can see — and the operator can never act on it, because the purge dialog only offers
     // a guid something HANDED them. The directory guid + the reason are what make it actionable.
-    const registrations = await deployedWithRaw({ [`registrations/${BROKEN}/prod.yaml`]: "subdomain: \"ghost.example\"\n" }, entry(ORPHAN, "ghost.example"));
+    const registrations = await deployedWithRaw({ [`registrations/${BROKEN}/prod.yaml`]: "subdomain: \"ghost\"\n" }, entry(ORPHAN, "ghost"));
     const found = await scanOrphanTenants({ db: db.db, registrations });
     expect(found.orphans.map((o) => o.guid)).toEqual([ORPHAN]); // the readable orphan is still found
     expect(found.skipped).toHaveLength(1);
@@ -166,14 +166,14 @@ describe("CreateTenantPurgeTarget (the target frozen in a create-tenant run's pa
     // A superset of the purge request: extra params (owner, chartsRef, the PII adminEmail) are dropped,
     // so only the four fields the dialog needs can ever reach the browser.
     const parsed = CreateTenantPurgeTarget.parse({
-      guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1",
+      guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1",
       owner: "team-acme", chartsRef: SHA, adminEmail: "admin@acme.example",
     });
-    expect(parsed).toEqual({ guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1" });
+    expect(parsed).toEqual({ guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" });
   });
 
   it("refuses the RAW params of a run that failed while still planning — no guid was frozen, so nothing was deployed", () => {
-    expect(CreateTenantPurgeTarget.safeParse({ clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme" }).success).toBe(false);
+    expect(CreateTenantPurgeTarget.safeParse({ clusterId: "cls_1", subdomain: "acme", owner: "team-acme" }).success).toBe(false);
   });
 });
 
@@ -188,11 +188,11 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
   const PURGEABLE = ["orphan", "unfinished"];
   const RUN = "run_ct";
   const frozen = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-    guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1",
+    guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1",
     owner: "team-acme", chartsRef: SHA, adminEmail: "admin@acme.example", ...over,
   });
   const seedRow = (over: Record<string, unknown> = {}): void => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active", ...over }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active", ...over }).run();
   };
   /** The failed create-tenant run itself: its row plus its attest-target step at the status the executor
    *  would have left it — "ok" once the precondition held (every step after it mutates), "failed" when it
@@ -239,7 +239,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
     seedRun();
     const state = resolveRunTenantState(db.db, RUN, frozen());
     expect(state.state).toBe("unfinished");
-    expect(state).toMatchObject({ target: { guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1" } });
+    expect(state).toMatchObject({ target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" } });
   });
 
   it("NO row, and the run got PAST attest-target: ORPHAN — nothing else can name it, so purge is offered", () => {
@@ -249,7 +249,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
     seedRun("ok");
     const state = resolveRunTenantState(db.db, RUN, frozen());
     expect(state.state).toBe("orphan");
-    expect(state).toEqual({ state: "orphan", target: { guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1" } });
+    expect(state).toEqual({ state: "orphan", target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" } });
   });
 
   it("NO row because attest-target REFUSED: NOT-DEPLOYED — the run never mutated, so nothing is claimed", () => {
@@ -264,7 +264,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
     expect(PURGEABLE).not.toContain(state.state);
     // The tenant is still NAMED — the guid was minted and frozen, and the screen says which tenant was
     // never created — it is simply not offered as something to remove.
-    expect(state).toEqual({ state: "not-deployed", target: { guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1" } });
+    expect(state).toEqual({ state: "not-deployed", target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" } });
   });
 
   it("a run that never reached its precondition at all is NOT-DEPLOYED too", () => {
@@ -318,7 +318,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
   });
 
   it("a run that never froze a guid is NONE — it created nothing, so no state is claimed about a tenant", () => {
-    const state = resolveRunTenantState(db.db, RUN, { clusterId: "cls_1", subdomain: "acme.example", owner: "team-acme" });
+    const state = resolveRunTenantState(db.db, RUN, { clusterId: "cls_1", subdomain: "acme", owner: "team-acme" });
     expect(state.state).toBe("none");
     expect(state).toMatchObject({ reason: expect.stringContaining("created nothing to purge") });
   });

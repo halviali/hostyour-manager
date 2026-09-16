@@ -9,7 +9,7 @@ import { buildCreateTenantBody, type TenantCreateForm } from "./api.ts";
 const base: TenantCreateForm = {
   clusterId: "cls_abc",
   stage: "prod",
-  subdomain: "acme.dev",
+  subdomain: "acme",
   owner: "team-acme",
   apps: [],
   seedUsers: false,
@@ -17,8 +17,8 @@ const base: TenantCreateForm = {
 
 describe("buildCreateTenantBody", () => {
   it("trims text fields and defaults an empty apps[] to []", () => {
-    const body = buildCreateTenantBody({ ...base, subdomain: "  acme.dev ", owner: " team-acme " });
-    expect(body.subdomain).toBe("acme.dev");
+    const body = buildCreateTenantBody({ ...base, subdomain: "  acme ", owner: " team-acme " });
+    expect(body.subdomain).toBe("acme");
     expect(body.owner).toBe("team-acme");
     expect(body.clusterId).toBe("cls_abc");
     expect(body.apps).toEqual([]);

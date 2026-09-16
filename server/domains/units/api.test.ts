@@ -386,13 +386,13 @@ async function makeTenant(enabled: boolean, appCatalog?: AppCatalogProvider): Pr
 // routes). Reuses seedCluster (srv_1 + cls_1 @ s1.example/prod, tier rehearsal).
 function seedTenant(): void {
   seedCluster();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
   db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp" }).run();
 }
 
 // The request targets the seeded slave cls_2. resolveCluster is role-agnostic — it requires only
 // an ACTIVE cluster — so the slave here is test topology, not an enforced law.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: [{ name: "erp" }] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }] };
 
 describe("tenant API", () => {
   it("501 NOT_CONFIGURED on create-tenant when tenant onboarding is not wired", async () => {
@@ -414,7 +414,7 @@ describe("tenant API", () => {
 
   it("400 on an invalid create-tenant body", async () => {
     const { app, cookie } = await makeTenant(true);
-    const res = await app.request("/api/tenants", { method: "POST", ...authed(cookie), body: JSON.stringify({ subdomain: "acme.example" }) });
+    const res = await app.request("/api/tenants", { method: "POST", ...authed(cookie), body: JSON.stringify({ subdomain: "acme" }) });
     expect(res.status).toBe(400);
   });
 

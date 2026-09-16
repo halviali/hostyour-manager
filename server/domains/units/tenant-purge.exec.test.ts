@@ -37,7 +37,7 @@ import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
-const SUB = "acme.example";
+const SUB = "acme";
 const DEPLOY_REPO = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];

@@ -92,7 +92,7 @@ function repoWithManifest(resolvedSha = SHA): FakeRepoReader {
 function seededPlatformRepo(): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
-    cluster: "s1", subdomain: "acme.example",
+    cluster: "s1", subdomain: "acme",
     members: testMembers([{ name: "erp" }]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
   });
   const w = tenantRegistrationWrite("prod", GUID, registration);
@@ -167,7 +167,7 @@ function planCtx(): PlanStreamCtx {
 function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme.example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth" }).run();
   db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp" }).run();
 }
 

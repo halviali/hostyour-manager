@@ -63,7 +63,7 @@ const TEST_MEMBERS = ["auth", "jobs", "report"];
 // inside the 400-line budget.
 
 const SHA = "a".repeat(40);
-const SUB = "acme.example";
+const SUB = "acme";
 const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: [{ name: "erp" }] };

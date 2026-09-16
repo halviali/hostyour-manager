@@ -112,7 +112,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
 
 function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
   return CreateTenantParams.parse({
-    guid: GUID, subdomain: "acme.example", stage: "prod", clusterId: "cls_1", domain: "s1.example",
+    guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
@@ -145,7 +145,7 @@ function seedSlave(): void {
 
 describe("create-tenant first-admin invite (activate step)", () => {
   const TOKEN_PATH = `${memberNamespace(GUID, "auth", "prod")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
-  const AUTH_URL = "https://auth.acme.example.example.com/api/v1/bootstrap/invite-admin";
+  const AUTH_URL = "https://auth.acme.example.com/api/v1/bootstrap/invite-admin";
 
   const activateStep = (prt: TenantOnboardPorts, p: CreateTenantParams) =>
     makeCreateTenantDef(prt).steps(p).find((s) => s.name === "activate")!;
@@ -168,7 +168,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     const activator = new FakeActivator();
     const p = params({ adminEmail: "admin@acme.test" });
     await activateStep(ports({ activator, cluster: withToken(), resolveUnitApex: async () => "zone.example" }), p).run(ctx(p));
-    expect(activator.calls[0]?.url).toBe("https://auth.acme.example.zone.example/api/v1/bootstrap/invite-admin");
+    expect(activator.calls[0]?.url).toBe("https://auth.acme.zone.example/api/v1/bootstrap/invite-admin");
     expect(activator.calls[0]?.url).not.toContain("s1.example"); // the cluster is reached there; the tenant does not serve there
   });
 
@@ -243,7 +243,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     seedSlave();
     const planCtx: PlanStreamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
     const result = await makeCreateTenantDef(ports()).planStream!(
-      { clusterId: "cls_1", stage: "prod", subdomain: "acme.example", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test" },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test" },
       planCtx,
     );
     expect(result.outcome).toBe("planned");

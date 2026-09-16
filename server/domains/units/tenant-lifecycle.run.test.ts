@@ -39,7 +39,7 @@ function entry(over: Partial<TenantRegistration> = {}): TenantRegistration {
     cluster: "s1",
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false }]),
     identityProvider: "auth",
-    subdomain: "simetrix.dev",
+    subdomain: "simetrix",
     apps: [{ name: "erp", seedReference: false, seedDemo: false }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
@@ -87,7 +87,7 @@ function seedTenant(opts: { status?: TenantStatus; appStatus?: TenantStatus; sus
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
   db.db.insert(tenants).values({
-    id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "simetrix.dev", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth",
+    id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "simetrix", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth",
     suspended: opts.suspended ?? false, status: opts.status ?? "active",
   }).run();
   for (const name of opts.apps ?? ["erp"]) db.db.insert(tenantApps).values({ id: `tna_${name}`, tenantId: "tnt_1", name, status: opts.appStatus ?? "active" }).run();
