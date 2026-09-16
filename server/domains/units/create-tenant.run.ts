@@ -3,17 +3,15 @@ import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts"
 import { resolveUnitQuota } from "./unit-size.ts";
 import { and, eq } from "drizzle-orm";
 import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts";
-import type { Db } from "../../db/client.ts";
-import { clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
+import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
 import { STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
 import { guid as guidSchema, memberName, TenantAppSchema, TenantMemberRecordSchema, TenantRegistrationSchema, TenantValidationReportSchema, type TenantRegistration } from "../../../shared/tenant.ts";
-import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
+import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { assertDeployState } from "./lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
@@ -25,7 +23,7 @@ import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint
 import { provisionTenantStorage } from "./tenant-storage.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { ObjectStore } from "../../adapters/object-store/port.ts";
-import { registryHostFromChain } from "./tenant-values.ts";
+import { registryHostFromChain, resolveTenantCluster } from "./tenant-values.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
@@ -44,10 +42,11 @@ import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 // onboard.run.ts. Instead of pinning one consumer chart it fans a single registration out to one
 // SELF-CONTAINED member per trio service and per app: each with its own namespace
 // <guid>-<member>-<stage>, its own AppProject and its own Application. The STAGE is the tenant's
-// own, an input of the request held against nothing but STAGE itself, and the cluster is any active
-// one. Everything not per-member — the tenant's Vault path, its databases, its crypto — is either
-// claimed by the member chart that needs it (ServiceClaims) or written by this run itself (the
-// tenant's crypto entry in Vault).
+// own, an input of the request, and it is the target cluster's stage: the tenant's Vault policies
+// and the tenant-eso role are bound to the platform's stage (resolveTenantCluster). Everything not
+// per-member — the tenant's Vault path, its databases, its crypto — is either claimed by the member
+// chart that needs it (ServiceClaims) or written by this run itself (the tenant's crypto entry in
+// Vault).
 // It shares onboard's streaming-plan skeleton: the plan phase runs the long fan-out validation
 // (validate-tenant.ts) gate-by-gate against the approve card, freezes the composed report + resolved
 // pin into params, and settles planned/failed — so plan() is a guard (see planStream).
@@ -161,7 +160,7 @@ export const CreateTenantParams = z.object({
   stage: z.enum(STAGE),
   clusterId: z.string().startsWith("cls_"), // which cluster the tenant runs on (crypto-gate keyed here)
   domain: z.string().min(1),
-  // The ArgoCD-registered slave NAME (resolveCluster; e.g. "s1") — the pointer's `cluster`
+  // The ArgoCD-registered slave NAME (resolveTenantCluster; e.g. "s1") — the pointer's `cluster`
   // field AND the AppProject destination `name:` pin, distinct from `domain` (the host zone).
   cluster: z.string().min(1),
   // The catalog revision this run VALIDATED at — a run fact, not a registration field: the
@@ -217,7 +216,8 @@ export type CreateTenantParams = z.infer<typeof CreateTenantParams>;
 export const CreateTenantRequest = z.object({
   clusterId: z.string().startsWith("cls_"),
   // The tenant's own stage — the registration path registrations/<guid>/<stage>.yaml, every member's
-  // namespace suffix and the Vault path <stage>/tenants/<guid>. Any active cluster takes any stage.
+  // namespace suffix and the Vault path <stage>/tenants/<guid>. It must be the target cluster's own
+  // stage, and the plan refuses any other (resolveTenantCluster, tenant-values.ts).
   stage: z.enum(STAGE),
   subdomain: subdomainSchema,
   owner: z.string().min(1),
@@ -558,31 +558,6 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
   ];
 }
 
-interface ResolvedCluster {
-  clusterId: string;
-  domain: string;
-  /** The cluster's SHORT NAME (clusterShortName of its domain, e.g. "s1") — populates the
-   *  pointer's `cluster` field and the AppProject destination pin. */
-  cluster: string;
-}
-
-/** Resolve the target cluster's context from its row — the domain is the cluster's, never trusted
- *  from wizard input, and the cluster's `stage` column is the platform's and is not read: the
- *  tenant's stage is the request's. Also surfaces the cluster's SHORT NAME — the ArgoCD destination
- *  identity the pointer and the AppProject pin against. A tenant is placed on ANY active cluster
- *  whatever role or stage it carries; the cluster must be ACTIVE, because a tenant that is not yet (or
- *  no longer) reachable cannot be created on it. */
-function resolveCluster(db: Db, clusterId: string): ResolvedCluster {
-  const row = db
-    .select({ id: clusters.id, domain: clusters.domain, status: clusters.status })
-    .from(clusters)
-    .where(eq(clusters.id, clusterId))
-    .get();
-  if (!row) throw errNotFound(`cluster ${clusterId}`);
-  if (row.status !== "active") throw errValidation(`cluster ${clusterId} is not active (status "${row.status}")`);
-  return { clusterId: row.id, domain: row.domain, cluster: clusterShortName(row.domain) };
-}
-
 /** Mint a guid the registrations tree does not already hold at this stage. The 32^12 CSPRNG space makes
  *  a first-try free guid overwhelmingly likely; exhausting the bounded retry is INTERNAL (never reuse). */
 async function mintFreeGuid(ports: TenantOnboardPorts, stage: Stage): Promise<string> {
@@ -614,7 +589,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
     //.
     planStream: async (rawParams, ctx) => {
       const req = CreateTenantRequest.parse(rawParams);
-      const rc = resolveCluster(ctx.db, req.clusterId);
+      const rc = resolveTenantCluster(ctx.db, req.clusterId, req.stage);
       // The chain is (the cluster's domain, the TENANT's stage): values-<stage>.yaml in it is the
       // tenant's, and every member chart renders with exactly the files its Application layers.
       const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, req.stage);

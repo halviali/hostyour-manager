@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
-import { resolveClusterNameById, resolveClusterIdByName, resolveMasterCluster, registryHostFromChain } from "./tenant-values.ts";
+import { resolveClusterNameById, resolveClusterIdByName, resolveMasterCluster, resolveTenantCluster, registryHostFromChain } from "./tenant-values.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 describe("the two cluster-name resolvers", () => {
@@ -64,5 +64,31 @@ describe("resolveMasterCluster", () => {
 
   it("fails loud (VALIDATION) when no master cluster is registered", () => {
     expect(() => resolveMasterCluster(db.db)).toThrow(/master/);
+  });
+});
+
+describe("resolveTenantCluster — the tenant's stage is the cluster's", () => {
+  let db: DbHandle;
+  beforeEach(() => {
+    db = openDb(":memory:");
+    db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example.com", status: "active" }).run();
+  });
+  afterEach(() => { db.sqlite.close(); });
+
+  it("resolves the domain, the short name and the stage of an active cluster at the tenant's stage", () => {
+    expect(resolveTenantCluster(db.db, "cls_1", "prod")).toEqual({ clusterId: "cls_1", domain: "s1.example.com", cluster: "s1", stage: "prod" });
+  });
+
+  it("refuses another stage than the cluster's, naming why the seed would die", () => {
+    // The Vault policies and the tenant-eso role are bound to the platform's stage: a dev tenant on
+    // a prod cluster seeds into a path no policy admits, and its SecretStore names a role that is not there.
+    expect(() => resolveTenantCluster(db.db, "cls_1", "dev")).toThrow(/tenant at dev cannot be created on s1\.example\.com, a prod cluster.*tenant-eso-prod.*create it at prod/);
+  });
+
+  it("refuses a cluster that is not active, and an unknown one", () => {
+    db.db.update(clusters).set({ status: "provisioning" }).run();
+    expect(() => resolveTenantCluster(db.db, "cls_1", "prod")).toThrow(/not active/);
+    expect(() => resolveTenantCluster(db.db, "cls_9", "prod")).toThrow(/cls_9/);
   });
 });

@@ -17,10 +17,11 @@ const targets: TenantPlacementTarget[] = [
 ];
 
 describe("tenantPlacement", () => {
-  // The stage is the TENANT's own, chosen by the operator; the cluster contributes its domain and
-  // nothing else. A test tenant on a prod-marked cluster is the ordinary case, so the read-out must
-  // follow the chosen stage and not the cluster's marking.
-  it("takes the stage from the operator's choice and the domain from the chosen cluster", () => {
+  // The derivation echoes the stage it is handed and reads the domain off the cluster row; it does
+  // not hold the two together itself. The wizard hands it the chosen cluster's own stage
+  // (TenantCreate.tsx chooseCluster) and the server refuses any other, so a read-out for a stage the
+  // row does not carry is a case only this pure function can be asked.
+  it("echoes the stage it is handed and takes the domain from the chosen cluster", () => {
     expect(tenantPlacement("test", "cl_s1", targets)).toEqual({
       stage: "test",
       domain: "s1.example.com",

@@ -459,7 +459,8 @@ export type TenantDetailView = TenantView & { apps: TenantAppView[] };
  *  mandatory members of every tenant. */
 export interface TenantCreateForm {
   clusterId: string;
-  /** The tenant's own stage — every member's namespace suffix and the registration path. */
+  /** The tenant's stage — the target cluster's, as the wizard read it off the chosen target row
+   *  (TenantTargetView.stage); every member's namespace suffix and the registration path. */
   stage: Stage;
   subdomain: string;
   owner: string;
@@ -472,7 +473,8 @@ export interface TenantCreateForm {
   adminEmail?: string;
 }
 /** The POST /api/tenants body == the server's CreateTenantRequest (the domain is derived from the
- *  target cluster row server-side, never sent; the stage is the tenant's own and IS sent). */
+ *  target cluster row server-side, never sent; the stage IS sent, and the server refuses one that is
+ *  not the target cluster's own). */
 export interface CreateTenantBody {
   clusterId: string;
   stage: Stage;

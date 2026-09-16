@@ -14,8 +14,8 @@ import { eq, inArray } from "drizzle-orm";
 import { parse as parseYaml } from "yaml";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
-import { errValidation } from "../../kernel/errors.ts";
-import { MASTER_ROLES } from "../../../shared/enums.ts";
+import { errNotFound, errValidation } from "../../kernel/errors.ts";
+import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 
@@ -42,6 +42,41 @@ export function resolveClusterIdByName(db: Db, cluster: string): { clusterId: st
     if (clusterShortName(r.domain) === cluster) return { clusterId: r.id, domain: r.domain };
   }
   return null;
+}
+
+/** The cluster a tenant is created on, from its row: the domain (never trusted from wizard input),
+ *  the SHORT NAME the pointer's `cluster` field and the AppProject destination pin carry, and the
+ *  cluster's stage. The cluster must be ACTIVE, because a tenant that is not yet (or no longer)
+ *  reachable cannot be created on it, and it must carry the TENANT'S STAGE: the `<cluster>-tenant-read`
+ *  policy names `secret/data/<stage>/tenants/…` for the installation's stage, the Manager's write
+ *  grant is `<stage>/tenants/+`, the auth role is the one `tenant-eso-<stage>` and the registry entry
+ *  is `<stage>/app/registry` (hostyour-deploy deploy-platform-services.yaml). A tenant at another
+ *  stage seeds into a path no policy admits (Vault 403), and had it got further its SecretStore
+ *  would log into a role that does not exist. */
+export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): ResolvedTenantCluster {
+  const row = db
+    .select({ id: clusters.id, domain: clusters.domain, status: clusters.status, stage: clusters.stage })
+    .from(clusters)
+    .where(eq(clusters.id, clusterId))
+    .get();
+  if (!row) throw errNotFound(`cluster ${clusterId}`);
+  if (row.status !== "active") throw errValidation(`cluster ${clusterId} is not active (status "${row.status}")`);
+  if (row.stage !== stage) {
+    throw errValidation(
+      `a tenant at ${stage} cannot be created on ${row.domain}, a ${row.stage} cluster — the tenant's Vault policies ` +
+      `(${row.stage}/tenants/<guid>, the tenant-eso-${row.stage} role) are bound to the platform's stage, so its crypto ` +
+      `entry would be refused with a 403 and its SecretStore would name a role that does not exist; create it at ${row.stage}`,
+    );
+  }
+  return { clusterId: row.id, domain: row.domain, cluster: clusterShortName(row.domain), stage: row.stage };
+}
+
+export interface ResolvedTenantCluster {
+  clusterId: string;
+  domain: string;
+  /** The cluster's SHORT NAME (clusterShortName of its domain, e.g. "s1"). */
+  cluster: string;
+  stage: Stage;
 }
 
 /** The master self-cluster's row (e.g. m1.example.com) — resolved from inventory via the

@@ -6,7 +6,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import { memberAppProject, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
+import { memberAppProject, tenantApplicationSet } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
@@ -343,15 +343,12 @@ describe("create-tenant streaming planner", () => {
     expect(result.plan.steps.map((s) => s.name)).toEqual(def.steps(result.params).map((s) => s.name));
   });
 
-  it("plans a tenant at test onto a cluster marked prod — the stage is the tenant's, and every member namespace carries it", async () => {
+  it("REFUSES a tenant at test on a cluster marked prod before anything is read — the Vault policies are bound to the platform's stage", async () => {
     seedClusters(); // cls_1 is marked prod
-    const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_1", stage: "test", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx());
-    expect(result.outcome).toBe("planned");
-    if (result.outcome !== "planned") return;
-    expect(result.params).toMatchObject({ stage: "test", clusterId: "cls_1", cluster: "s1", domain: "s1.example" });
-    expect(result.params.expectedApps).toEqual(tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], result.params.guid, "test"));
-    expect(memberNamespace(result.params.guid, "auth", "test")).toBe(`${result.params.guid}-auth-test`);
-    expect(result.plan.summary).toContain("at test on s1.example");
+    const reader = repoWithManifest();
+    await expect(makeCreateTenantDef(ports({ repo: reader })).planStream!({ clusterId: "cls_1", stage: "test", subdomain: "acme.example", owner: "team-acme", apps: APPS }, planCtx()))
+      .rejects.toThrow(/tenant at test cannot be created on s1\.example, a prod cluster/);
+    expect(reader.clones).toEqual([]); // refused before the catalog was even cloned
   });
 
   it("validates the member CHARTS at the same books branch the registration is locked on, and never at the trunk", async () => {
