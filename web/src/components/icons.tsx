@@ -11,12 +11,13 @@ const stroke = {
   strokeLinejoin: "round",
 } as const;
 
-export type NavIconName = "clusters" | "servers" | "runs" | "branches" | "reset" | "consumers" | "tenants" | "sizes" | "mail";
+export type NavIconName = "clusters" | "servers" | "runs" | "branches" | "reset" | "consumers" | "tenants" | "sizes" | "mail" | "dns";
 
 /** Nav glyphs, keyed by the NAV config's icon id (clusters = overview grid, servers = rack,
  *  runs = terminal prompt, branches = git-branch, reset = restore arrow, consumers = package box,
  *  sizes = a table of rows and columns — the three sizes and their figures,
- *  tenants = stacked layers — one pointer fanning out to a multi-app package). */
+ *  tenants = stacked layers — one pointer fanning out to a multi-app package,
+ *  dns = a globe with its meridians, the public name space every record of this installation stands in). */
 export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number }): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">
@@ -39,6 +40,13 @@ export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number 
         <>
           <rect x="3" y="5" width="18" height="14" rx="2" />
           <path d="m3 7 9 6 9-6" />
+        </>
+      )}
+      {name === "dns" && (
+        <>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18" />
+          <path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" />
         </>
       )}
       {name === "runs" && (

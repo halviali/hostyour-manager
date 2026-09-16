@@ -28,6 +28,8 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   "cluster-operator-key-remove": [],
   "cluster-authorized-keys-read": [],
   "mail-dns-publish": [],
+  "dns-remove": [],
+  "mail-dns-unpublish": [],
   "consumer-onboard": [],
   "consumer-suspend": [],
   "consumer-resume": [],

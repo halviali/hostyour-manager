@@ -24,6 +24,10 @@ import type {
   OperatorKeyView,
 } from "../../shared/api-types.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
+// The DNS inventory the /dns page renders and the one act it offers. Declared ONCE in shared/dns.ts
+// and answered in that shape by the server's own domain module, for the reason the block above
+// states: there is no browser-side twin left to fall behind a server change.
+import type { DnsInventoryView, DnsRemoveInput } from "../../shared/dns.ts";
 // The tenant reads project three server enums verbatim; importing them (rather than restating the
 // literals here) is what makes a rename in shared/enums.ts break THIS build — the same rule
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
@@ -157,6 +161,15 @@ export const getMailDns = (): Promise<MailDnsView> => req("/api/mail/dns");
 /** The mail DNS of ONE sender domain, published from the master (the Mail page offers one run per domain). */
 export const publishMailDns = (input: MailDnsPublishInput): Promise<{ runId: string }> =>
   planRun("mail-dns-publish", input as unknown as Record<string, unknown>);
+/** The inverse: the SPF, DKIM and DMARC of ONE sender domain, deleted at the DNS provider in one
+ *  act. The domain's address record and the reverse DNS of the egress are not touched. */
+export const unpublishMailDns = (domain: string): Promise<{ runId: string }> => planRun("mail-dns-unpublish", { domain });
+/** Every record this installation is responsible for at the DNS provider, read there now (the DNS page). */
+export const getDnsInventory = (): Promise<DnsInventoryView> => req("/api/dns");
+/** Take ONE of those records back. The run refuses any name the inventory does not carry as
+ *  removable, so what this sends is always a row the page listed. */
+export const removeDnsRecord = (input: DnsRemoveInput): Promise<{ runId: string }> =>
+  planRun("dns-remove", input as unknown as Record<string, unknown>);
 /** Take a slave OUT of the installation: the master's whole per-slave management plane, the
  *  cluster's map, then the rows. It takes ONLY the server for the same reason redeploy does. Every
  *  act runs on the MASTER and the slave is not reached at all, which is what makes it the run kind

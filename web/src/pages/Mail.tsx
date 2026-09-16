@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
 import { DMARC_POLICY, type DmarcPolicy } from "../../../shared/enums.ts";
 import type { MailDnsDomainView, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
-import { getMailDns, publishMailDns } from "../api.ts";
+import { getMailDns, publishMailDns, unpublishMailDns } from "../api.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -49,6 +49,23 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
     }
   }
 
+  /** The inverse act, for a domain that stops sending: the SPF, the DKIM key and the DMARC policy
+   *  go, the address record and the reverse DNS stay. It is a run like the publish, so what the
+   *  three records stand at is read on the Run screen before anything is approved. */
+  async function unpublish(): Promise<void> {
+    if (!window.confirm(`Unpublish the mail DNS of ${view.domain}? Mail sent as this domain fails the checks receivers make the moment the SPF, DKIM and DMARC records are gone.`)) return;
+    setBusy(true);
+    onError(null);
+    try {
+      const { runId } = await unpublishMailDns(view.domain);
+      nav(`/runs/${runId}`);
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="card">
       <h3 className="page__title">
@@ -83,6 +100,10 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
           <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void publish()}>
             {busy ? "Planning…" : `Publish the mail DNS of ${view.domain}`}
           </button>
+          <button type="button" className="btn btn--danger" disabled={busy} onClick={() => void unpublish()}>
+            {busy ? "Planning…" : `Unpublish ${view.domain}`}
+          </button>
+          <span className="field__hint">Unpublishing deletes this domain&apos;s SPF, DKIM and DMARC records at the DNS provider. Its address record stays and the reverse DNS is not in the zone.</span>
         </div>
       </div>
     </section>

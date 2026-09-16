@@ -1,0 +1,106 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { openDb, type DbHandle } from "../../db/client.ts";
+import { clusters, servers } from "../../db/schema/inventory.ts";
+import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
+import type { MailDnsView } from "../../../shared/mail.ts";
+import { readDnsInventory, type DnsInventoryDeps } from "./dns-inventory.ts";
+
+// The DNS inventory over scripted registrations and a scripted provider: what the page lists, whose
+// each record is, whether this Manager may take it back, and the three verdicts an operator reads a
+// tear-down by. The reading is the FakeDnsProvider's, so "standing", "absent" and "other content"
+// are asserted here exactly as the operator sees them.
+
+const M1 = "m1.example.com";
+const S1 = "s1.example.com";
+const M1_ADDRESS = "203.0.113.9";
+const S1_ADDRESS = "198.51.100.4";
+
+/** The five rows the Mail page measures for one sender domain, as that page composes them. */
+const mailView = (): MailDnsView => ({
+  master: { serverId: "srv_m", name: "m1", fqdn: M1, stage: "prod", egress: M1_ADDRESS },
+  domains: [
+    {
+      domain: "example.com",
+      role: "customer mail",
+      rows: [
+        { record: "spf", name: "example.com", expected: `one v=spf1 record naming ip4:${M1_ADDRESS}`, found: `v=spf1 ip4:${M1_ADDRESS} -all`, ok: true },
+        { record: "a", name: "example.com", expected: M1_ADDRESS, found: M1_ADDRESS, ok: true },
+        { record: "dkim", name: "prod._domainkey.example.com", expected: "one v=DKIM1 record carrying the relay's public key", found: "v=DKIM1; p=MIIB", ok: true },
+        { record: "dmarc", name: "_dmarc.example.com", expected: "one v=DMARC1 record with a policy and a report mailbox", found: null, ok: false, note: "publish" },
+        { record: "ptr", name: M1_ADDRESS, expected: "example.com", found: "example.com", ok: true },
+      ],
+    },
+  ],
+  measuredAt: new Date().toISOString(),
+});
+
+describe("readDnsInventory", () => {
+  let db: DbHandle;
+  let dns: FakeDnsProvider;
+
+  beforeEach(() => {
+    db = openDb(":memory:");
+    db.db.insert(servers).values({ id: "srv_m", name: "m1", host: M1, sshUser: "m1", role: "master", status: "healthy" }).run();
+    db.db.insert(servers).values({ id: "srv_s", name: "s1", host: S1, sshUser: "s1", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: M1, status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_s", serverId: "srv_s", stage: "prod", domain: S1, status: "active", slaveId: 1 }).run();
+    dns = new FakeDnsProvider();
+    dns.seed(M1, "A", M1_ADDRESS);
+    dns.seed(S1, "A", S1_ADDRESS);
+  });
+  afterEach(() => db.sqlite.close());
+
+  /** One consumer and one tenant per cluster, at prod alone — the shape a small installation has. */
+  const deps = (over: Partial<DnsInventoryDeps> = {}): DnsInventoryDeps => ({
+    db: db.db,
+    dns,
+    consumers: async (domain, stage) => (stage === "prod" && domain === M1 ? [{ name: "post", host: "post" }] : []),
+    tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", cluster: "m1" }, { subdomain: "beta", cluster: "s1" }] : []),
+    unitApex: async () => "example.net",
+    mail: async () => mailView(),
+    ...over,
+  });
+
+  it("derives one record per unit per stage and reads each at the provider, with the cluster's own address as what it must carry", async () => {
+    dns.seed("post.example.net", "A", M1_ADDRESS); // the consumer's host, standing where its cluster answers
+    dns.seed("*.beta.example.net", "A", M1_ADDRESS); // the slave's tenant, still pointing at the master's address
+    const view = await readDnsInventory(deps());
+    expect(view.skipped).toEqual([]);
+    expect(view.rows.filter((r) => r.owner.kind === "consumer" || r.owner.kind === "tenant").map((r) => `${r.name} ${r.verdict}`)).toEqual([
+      "post.example.net standing",
+      "*.acme.example.net absent", // never provisioned, or already taken back
+      "*.beta.example.net other", // the slave's own address is what this one must carry
+    ]);
+    const consumer = view.rows.find((r) => r.name === "post.example.net")!;
+    expect(consumer).toMatchObject({ owner: { kind: "consumer", name: "post", stage: "prod" }, type: "A", expected: M1_ADDRESS, removable: true });
+    expect(view.rows.find((r) => r.name === "*.beta.example.net")).toMatchObject({ owner: { kind: "tenant", name: "beta", stage: "prod" }, expected: S1_ADDRESS, found: M1_ADDRESS });
+  });
+
+  it("carries the mail rows verbatim and lets this Manager take back only the three it publishes", async () => {
+    const view = await readDnsInventory(deps());
+    expect(view.rows.filter((r) => r.owner.kind === "mail" || r.owner.kind === "installer").map((r) => `${r.owner.kind} ${r.type} ${r.name} ${r.removable}`)).toEqual([
+      "mail TXT example.com true",
+      "installer A example.com false", // the address record answers for the machine, not for the mail
+      "mail TXT prod._domainkey.example.com true",
+      "mail TXT _dmarc.example.com true",
+      `installer PTR ${M1_ADDRESS} false`, // set where the address is rented, not in this zone
+    ]);
+    expect(view.rows.find((r) => r.name === "_dmarc.example.com")).toMatchObject({ verdict: "absent", found: null });
+    expect(view.rows.find((r) => r.name === "example.com" && r.type === "TXT")?.verdict).toBe("standing");
+  });
+
+  it("names what it could not list instead of answering with a zone that looks empty", async () => {
+    const { dns: _provider, ...withoutProvider } = deps();
+    const noProvider = await readDnsInventory(withoutProvider);
+    expect(noProvider.skipped.join(" ")).toMatch(/consumer and tenant records are not listed/);
+    expect(noProvider.rows.every((r) => r.owner.kind === "mail" || r.owner.kind === "installer")).toBe(true); // the mail rows are measured elsewhere and still stand
+
+    const broken = await readDnsInventory(deps({
+      tenants: async (stage) => { throw new Error(`registrations/${stage} is not readable`); },
+      mail: async () => { throw new Error("no master server is registered"); },
+    }));
+    expect(broken.skipped.filter((s) => s.includes("is not readable"))).toHaveLength(3); // one sentence per stage
+    expect(broken.skipped.some((s) => s.includes("the mail records are not listed: no master server is registered"))).toBe(true);
+    expect(broken.rows.map((r) => r.name)).toEqual(["post.example.net"]); // the consumer scan still answered
+  });
+});

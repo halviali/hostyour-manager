@@ -6,6 +6,9 @@ import { makeDeploySlaveDef, type DeploySlavePorts } from "./defs/deploy-slave.t
 import type { AnsiwisePorts } from "./defs/ansiwise-run.kit.ts";
 import { makeRedeployDef } from "./defs/redeploy.ts";
 import { makeMailDnsPublishDef } from "./defs/mail-dns-publish.ts";
+import { makeDnsRemoveDef } from "./defs/dns-remove.ts";
+import { makeMailDnsUnpublishDef } from "./defs/mail-dns-unpublish.ts";
+import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { makeRemoveSlaveDef } from "./defs/remove-slave.ts";
 import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
@@ -27,10 +30,11 @@ export function register<P>(runDefinitions: RunDefinitions, def: RunDefinition<P
  *  `ansiwiseServeCommand` (ANSIWISE_SERVE_COMMAND): the redeploy master arm's program steps fail
  *  loud without it. `db` is NOT optional: redeploy reads the target's role to decide which of its
  *  two arms it runs, and a definition's steps() is handed the persisted params and no database. */
-export interface RunDefinitionsPorts extends DeploySlavePorts, AnsiwisePorts {
+export interface RunDefinitionsPorts extends DeploySlavePorts, AnsiwisePorts, DnsRecordPorts {
   db: Db;
-  /** The DNS provider mail-dns-publish reads the master's egress address from (its own A record).
-   *  Absent on a manager without a DNS provider: the run kind then refuses at its answers. */
+  /** The DNS provider mail-dns-publish reads the master's egress address from (its own A record),
+   *  and the two removal run kinds delete at. Absent on a manager without a DNS provider: each run
+   *  kind then refuses — mail-dns-publish at its answers, the removals at their plan. */
   dns?: DnsProvider;
 }
 
@@ -45,6 +49,13 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // The mail DNS of one sender domain, published by running the catalogue's publish-mail-dns on the
   // master — a master-side act like redeploy's master arm, so it takes the same ports.
   register(runDefinitions, makeMailDnsPublishDef(ports));
+  // The two run kinds that take a record BACK out of the zone: one record the DNS inventory names
+  // as this installation's, or the three mail records of one sender domain. Registered
+  // unconditionally like every other cluster run kind — a manager with no DNS provider and no
+  // inventory refuses them at the plan, which is a sentence the operator reads, where an
+  // unregistered run kind would answer "unknown run kind" after they had already asked for it.
+  register(runDefinitions, makeDnsRemoveDef(ports));
+  register(runDefinitions, makeMailDnsUnpublishDef(ports));
   // The inverse of the first: take a slave OUT of the installation. Every act is on the MASTER —
   // the remove-slave program, the books branch, the rows — so it takes the same ports the two
   // above do and reaches the slave not at all.

@@ -4,13 +4,21 @@
 // updated on a move, removed at offboard and purge. Kept a PORT so the run steps depend on the
 // abstraction; the Cloudflare impl is cloudflare-dns.ts, the fake is testing/fake.ts.
 //
-// Only A records: the record points at the target cluster's IP, and that IP is READ off the
-// cluster's own A record (readRecordContent) rather than computed — the cluster's address record is
-// the one authority for where the cluster is reachable.
+// A unit record is only ever an A record: it points at the target cluster's IP, and that IP is READ
+// off the cluster's own A record (readRecordContent) rather than computed — the cluster's address
+// record is the one authority for where the cluster is reachable.
+//
+// TXT rides the same three calls because the mail records of a sender domain (SPF, DKIM, DMARC) are
+// records of this installation too: the DNS inventory reads them and `dns-remove` and
+// `mail-dns-unpublish` take them back (server/domains/dns/dns-inventory.ts). Publishing them stays
+// the catalogue's publish-mail-dns program — one writer, as mail-dns-publish's header states — so
+// what enters through here for a TXT name is the READING and the REMOVAL, never a second writer of
+// the published content.
 
-/** The record types this port manages. The unit record and the cluster address it copies are both
- *  A records; nothing else is ever written through here. */
-export type DnsRecordType = "A";
+/** The record types this port manages, declared in shared/dns.ts because the inventory view the
+ *  browser renders is typed on the same set, and re-exported here for this port's own callers. */
+import type { DnsRecordType } from "../../../shared/dns.ts";
+export type { DnsRecordType };
 
 export interface DnsProvider {
   /** Idempotent upsert-by-(name, type): create the record, or overwrite the existing one's content

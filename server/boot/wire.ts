@@ -29,6 +29,9 @@ import { EmergencyStore, createEmergencyApp, serveAdminSocket } from "../domains
 import { registerRunRoutes } from "../domains/runs/api.ts";
 import { registerClustersRoutes, registerServerRoutes } from "../domains/inventory/api.ts";
 import { registerMailRoutes } from "../domains/mail/api.ts";
+import { readMailDns, type MailDnsDeps } from "../domains/mail/mail-dns.ts";
+import { registerDnsRoutes } from "../domains/dns/api.ts";
+import { readDnsInventory, type DnsInventoryDeps } from "../domains/dns/dns-inventory.ts";
 import { DohPublicDns } from "../adapters/dns/public-dns.ts";
 import { createGitHubPlatform } from "../adapters/github-platform/github-platform-http.ts";
 import { registerBranchRoutes } from "../domains/branches/api.ts";
@@ -42,6 +45,7 @@ import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
 import { readPullConfiguration, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
 import type { ReadyzView } from "../../shared/api-types.ts";
+import type { Stage } from "../../shared/enums.ts";
 
 export interface Wired {
   config: Config;
@@ -118,6 +122,34 @@ export async function wire(): Promise<Wired> {
     buildClusterReader: (input) => new KubeClusterReader(input),
   });
   const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver });
+  // The mail DNS of the installation, measured at public resolvers: the Mail page's deps, and the
+  // mail half of the DNS inventory below — one measurement, so the two pages can never disagree
+  // about one record. The units' DNS provider gives the master's egress address (its own A record)
+  // and the platform repo the two sender domains.
+  const mailDns: MailDnsDeps = {
+    db: db.db,
+    publicDns: new DohPublicDns(),
+    ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}),
+    ...(units.dns ? { dns: units.dns } : {}),
+  };
+  // EVERY RECORD THIS INSTALLATION IS RESPONSIBLE FOR at the DNS provider, derived from its own
+  // registrations and read there (domains/dns/dns-inventory.ts). That domain imports no other
+  // domain, so the registration scans, the tenant pointers and the per-stage apex arrive as the
+  // narrow functions it reads them through, bound here where both families are already built. A
+  // family that is not configured simply contributes no reader, and the inventory says which part
+  // of itself it could not list rather than answering with a zone that looks empty.
+  const registrations = units.registrations;
+  const tenantRegistrations = units.tenantRegistrations;
+  const dnsInventory: DnsInventoryDeps = {
+    db: db.db,
+    mail: () => readMailDns(mailDns),
+    ...(units.dns ? { dns: units.dns } : {}),
+    ...(registrations
+      ? { consumers: async (domain: string, stage: Stage) => (await registrations.listConsumerRegistrations(domain, stage)).registrations.map((r) => ({ name: r.name, host: r.entry.host })) }
+      : {}),
+    ...(tenantRegistrations ? { tenants: async (stage: Stage) => (await tenantRegistrations.listTenantPointers(stage)).pointers } : {}),
+    ...(units.resolveUnitApex ? { unitApex: units.resolveUnitApex } : {}),
+  };
   const runDefinitions = buildRunDefinitions({
     db: db.db,
     // WHAT THE CLUSTER RUN KINDS READ ARGOCD THROUGH. gitops-handoff, verify-slave and argocd-follow
@@ -138,6 +170,9 @@ export async function wire(): Promise<Wired> {
     // repository is public, so there is no pair to be half-configured.
     catalogueOrigin: { repoURL: config.deployProgramsRepoUrl },
     ...(units.dns ? { dns: units.dns } : {}),
+    // What dns-remove and mail-dns-unpublish are allowed to delete: a record is taken back only
+    // where the inventory names it as this installation's, never by the name an operator typed.
+    readDnsInventory: () => readDnsInventory(dnsInventory),
     // The mounted manager-registry-pull document, narrowed to one address — what a machine that
     // keeps no books is given so it pulls through the installation's own registry rather than
     // silently from docker.io. Unconditional: the path is where this manager's own chart mounts it,
@@ -242,9 +277,11 @@ export async function wire(): Promise<Wired> {
       registerRunRoutes(a, { executor, db: db.db, bus, config, logger });
       registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger });
       registerServerRoutes(a, { db: db.db, creds: store, actor: runActor });
-      // The mail DNS of the installation, measured at public resolvers; the units' DNS provider gives the
-      // master's egress address (its own A record) and the platform repo the two sender domains.
-      registerMailRoutes(a, { db: db.db, publicDns: new DohPublicDns(), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(units.dns ? { dns: units.dns } : {}) });
+      // The mail DNS of the installation, measured at public resolvers, and beside it every record
+      // this installation is responsible for at the DNS provider. Both read-only: publishing and
+      // removing are runs, so what a record costs is always planned and approved.
+      registerMailRoutes(a, mailDns);
+      registerDnsRoutes(a, dnsInventory);
       registerBranchRoutes(a, { db: db.db, config, ...(github ? { github } : {}) });
       // Which version each of an installation's platform apps runs, riding the pin search bound above.
       registerReleaseRoutes(a, { db: db.db, ...(readPlatformAppPins ? { readPlatformAppPins } : {}) });

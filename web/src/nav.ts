@@ -17,6 +17,7 @@ export const NAV: readonly NavItem[] = [
   { path: "/sizes", label: "Sizes", icon: "sizes" },
   { path: "/branches", label: "Branches", icon: "branches" },
   { path: "/mail", label: "Mail", icon: "mail" },
+  { path: "/dns", label: "DNS", icon: "dns" },
   { path: "/reset", label: "Reset", icon: "reset" },
 ];
 
