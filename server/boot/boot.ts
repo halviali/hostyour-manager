@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { wire } from "./wire.ts";
+import { scheduleCatalogCarry } from "./carry-catalog-schedule.ts";
 
 /**
  * Ordered boot. LAW 0: boots with the whole world down — the only hard
@@ -43,6 +44,9 @@ export async function boot(): Promise<void> {
   // The one slow act of boot runs behind the listening server, so /healthz answers from the first
   // second and the liveness probe has nothing to kill (#166).
   void wired.carryCatalogTrunk();
+  // ... and again every ten minutes, so a change on the catalog's trunk reaches a standing tenant
+  // without a boot or a plan (#169).
+  scheduleCatalogCarry(wired.carryCatalogTrunk, logger);
 
   const shutdown = (signal: string): void => {
     logger.info({ signal }, "shutting down");
