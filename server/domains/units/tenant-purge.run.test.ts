@@ -50,6 +50,7 @@ const STEP_ORDER = [
   `purge-${GUID}-delete-projects`,
   "delete-namespaces",
   "delete-tenant-crypto",
+  "withdraw-bucket-keys",
   "remove-dns",
   `purge-${GUID}-verify-prune`,
   `purge-${GUID}-record`,

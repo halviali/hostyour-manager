@@ -155,6 +155,22 @@ describe("withdrawing a key", () => {
     const { r2 } = store("default", [{ status: 404, body: { success: false, errors: [{ code: 1001, message: "not found" }] } }]);
     expect(await r2.withdrawBucketKey({ accessKeyId: "gone" })).toEqual({ deleted: 0 });
   });
+
+  it("withdraws EVERY key of a name across every page of the token list, and no other", async () => {
+    // A purge holds the name alone: the entry naming the live key is unreadable by design. The list
+    // has no name filter, so a full first page (the API's ceiling) is followed by a second read.
+    const page1 = Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, name: i === 7 ? "tenant-g-prod" : "other" }));
+    const { r2, calls } = store("default", [
+      { body: { success: true, result: page1 } },
+      { body: { success: true, result: [{ id: "t50", name: "tenant-g-prod" }] } },
+      { body: { success: true } },
+      { body: { success: true } },
+    ]);
+    expect(await r2.withdrawBucketKeys({ name: "tenant-g-prod" })).toEqual({ deleted: 2 });
+    expect(calls.map((c) => `${c.method} ${c.url.slice(c.url.indexOf("/tokens"))}`)).toEqual([
+      "GET /tokens?page=1&per_page=50", "GET /tokens?page=2&per_page=50", "DELETE /tokens/t7", "DELETE /tokens/t50",
+    ]);
+  });
 });
 
 describe("how a Cloudflare answer is judged", () => {

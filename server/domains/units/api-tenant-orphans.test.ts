@@ -134,8 +134,17 @@ function fakeTenantSeeder(): VaultSeeder {
   };
 }
 
+/** Both clusters' own A records — what G27 reads the tenant's wildcard against at the plan. */
+function tenantDns(): FakeDnsProvider {
+  const dns = new FakeDnsProvider();
+  dns.seed("s1.example", "A", "203.0.113.10");
+  dns.seed("s2.example", "A", "203.0.113.20");
+  return dns;
+}
+
 function onboardPorts(registrations: TenantRegistrations): TenantOnboardPorts {
   return {
+    dns: tenantDns(),
     // The Vault seeder the seed-tenant-crypto step writes through. Records nothing: what it wrote is
     // irrecoverable by design (the Manager holds no read grant), so a test can only assert THAT the
     // entry was created, which the step log carries.
@@ -433,6 +442,7 @@ describe("POST /api/tenants/purge (the force-offboard trigger)", () => {
       `purge-${ORPHAN_GUID}-delete-projects`,
       "delete-namespaces",
       "delete-tenant-crypto",
+      "withdraw-bucket-keys",
       "remove-dns",
       `purge-${ORPHAN_GUID}-verify-prune`,
       `purge-${ORPHAN_GUID}-record`,

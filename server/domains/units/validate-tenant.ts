@@ -21,9 +21,11 @@ import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { identityProviderMember, memberNamespace, resolveFanout, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
-import { stageApex, tenantZone } from "../../../shared/unit-host.ts";
+import { stageApex, tenantWildcardHost, tenantZone } from "../../../shared/unit-host.ts";
 import { catalogPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
+import { gateUnitHost } from "./gates/compose.ts";
+import type { StandingHostReader } from "./unit-dns.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 import type { TenantSpec } from "../../../shared/consumer.ts";
 import { collectContainerImages } from "./ensure-images.ts";
@@ -62,6 +64,11 @@ export interface ValidateTenantRequest {
    *  global.unitApex) — a render without it fails at T2 before any gate can judge the chart. */
   clusterValueFiles: readonly ClusterValueFile[];
   credentialId?: string; // the manager's first-party catalog read credential
+  /** The target cluster's FQDN, given by the one caller that will WRITE the tenant's wildcard
+   *  `*.<subdomain>.<stage apex>` (create-tenant's plan). Present ⇒ gate G27 reads the zone under
+   *  that wildcard against the installation's clusters before the run writes anything. Absent for
+   *  add-app and the post-build re-render, which write no record: the wildcard already stands. */
+  clusterFqdn?: string;
 }
 
 export interface ValidateTenantDeps {
@@ -72,6 +79,10 @@ export interface ValidateTenantDeps {
   signal: AbortSignal;
   /** Report timestamps; injected so tests are deterministic. Defaults to Date.now. */
   now?: () => number;
+  /** G27's input (unit-dns.ts standingHostFrom). Absent where the Manager has no DNS provider: G27
+   *  then fails the plan, where provision-dns would have failed at step eight after the Vault entry,
+   *  the bucket, the key, the AppProjects and the admission policies were written. */
+  standingHost?: StandingHostReader;
 }
 
 export interface TenantValidationOutcome {
@@ -237,6 +248,16 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
         streamGate(deps, g);
       }
       appsValidated = req.apps.map((a) => a.name);
+      // G27 reads the ZONE under the tenant's wildcard — the one obstacle the render gates cannot
+      // see, and the one that used to stop create-tenant at provision-dns with the crypto entry,
+      // the bucket and the key already written. Same gate, same four readings as the consumer's.
+      if (req.clusterFqdn !== undefined) {
+        const host = tenantWildcardHost(req.subdomain, req.stage, unitApex);
+        const standing = deps.standingHost ? await deps.standingHost(host, req.clusterFqdn) : null;
+        const g27 = gateUnitHost({ host, unitName: req.probeGuid, clusterFqdn: req.clusterFqdn, standing });
+        gates.push(g27);
+        streamGate(deps, g27);
+      }
     }
 
     // G9 pinned SHA — chartsRef pins an immutable 40-char catalog commit, never a moving branch,

@@ -16,6 +16,7 @@ import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
+import { tenantKeyName } from "./tenant-storage.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
 // purge.run.ts, and the ONLY run kind that can name an ORPHAN: a tenant that exists in GitOps + ArgoCD
@@ -80,6 +81,8 @@ import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 // only once all of that is gone would make deleting the CR the whole cascade, but no manager serves
 // that CR — so a step verifying a cascade nobody runs refuses every time and no tenant reaches
 // "purged".
+// withdraw-bucket-keys takes back every object-storage key minted under the tenant's name, because
+// the entry that named the live one is gone and the abort of a failed create withdraws none.
 // THE OBJECT-STORAGE BUCKET AND ITS DATA ARE DELIBERATELY KEPT — the plan SUMMARY says so plainly, and
 // so does the purge dialog the operator confirms in, because someone approving a "purge" must not
 // believe the tenant's stored objects went with it. It is deliberately NOT also stated as a
@@ -338,6 +341,25 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
       },
     },
     {
+      name: "withdraw-bucket-keys",
+      title: "Withdraw the tenant's object-storage keys (the bucket stays)",
+      run: async (ctx) => {
+        // The inverse of the mint in create-tenant's seed-tenant-crypto. The crypto entry that named
+        // the key is destroyed a step above and cannot be read back, so every key minted under the
+        // tenant's name goes — a create that died at provision-dns left one the abort never took
+        // back. The BUCKET and its objects are deliberately kept, as the plan summary says.
+        const c = loadPurgeCluster(ctx.db, p);
+        const name = tenantKeyName(c.guid, c.stage);
+        if (!ports.objectStore) {
+          ctx.log("meta", `no object storage is wired, so the key(s) named ${name} are NOT withdrawn — if this tenant was ever seeded, a live key on bucket ${c.guid} stands at the provider after this purge and must be withdrawn by hand`);
+          return;
+        }
+        const { deleted } = await ports.objectStore.withdrawBucketKeys({ name, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+        ctx.checkpoint({ bucketKeys: name, deleted });
+        ctx.log("meta", `${deleted} key(s) named ${name} withdrawn — nothing reaches bucket ${c.guid} any more; the bucket and its objects are kept`);
+      },
+    },
+    {
       name: "remove-dns",
       title: "Remove the tenant's public DNS record",
       run: async (ctx) => {
@@ -501,7 +523,7 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
           (target.tenantId ? "" : " (no inventory row — an orphaned partial create-tenant)") +
           ": remove its registration, best-effort wait for ArgoCD to prune the whole fan-out, delete every member's isolation AppProject, its admission policy and the argo-sync grant, " +
           `then delete every namespace labelled platform/tenant=${req.guid} as the backstop reap — which takes each member's ServiceClaim with it, and the service-provisioner drops that claim's databases together with its user — ` +
-          `then DESTROY the tenant's Vault crypto entry ${c.stage}/tenants/${req.guid} (its signing keypair, TOTP key, bootstrap token and engine key, every version), then remove the tenant's wildcard DNS record` +
+          `then DESTROY the tenant's Vault crypto entry ${c.stage}/tenants/${req.guid} (its signing keypair, TOTP key, bootstrap token and engine key, every version), withdraw every object-storage key named ${tenantKeyName(req.guid, c.stage)}, then remove the tenant's wildcard DNS record` +
           (target.tenantId
             ? ", and only THEN mark the tenant + its app rows PURGED — a distinct state from the \"offboarded\" an offboard leaves, so this tenant reads as deprovisioned rather than merely un-deployed: it drops off the Tenants list and offers no further removal, while its rows are kept as the trace. The rows are settled LAST, so a delete that fails leaves the tenant visible and purgeable"
             : "") +

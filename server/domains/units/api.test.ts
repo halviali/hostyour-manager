@@ -347,7 +347,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
-    consumerHostLabels: async () => [],
+    consumerHostLabels: async () => [], dns: seededDns(),
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
   };

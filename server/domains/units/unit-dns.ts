@@ -113,6 +113,18 @@ export async function readStandingHost(
   return { kind: "leftover", standing };
 }
 
+/** G27's input: the unit's host as the provider answers it now, judged against the installation's own
+ *  clusters. Bound by the caller to the provider and the inventory through standingHostFrom. */
+export type StandingHostReader = (host: string, clusterFqdn: string) => Promise<StandingHost>;
+
+/** G27's reader, bound to the DNS provider and the inventory — the same reading provision-dns takes
+ *  at its own step. Empty where the Manager has no provider, so the gate says so. Shared by the
+ *  consumer planner (validate.ts) and the tenant planner (validate-tenant.ts). */
+export function standingHostFrom(dns: DnsProvider | undefined, db: Db, signal: AbortSignal): { standingHost?: StandingHostReader } {
+  if (!dns) return {};
+  return { standingHost: (host, clusterFqdn) => readStandingHost(dns, db, { recordName: host, clusterFqdn, signal }) };
+}
+
 /** The sentence a collision is refused with, the same at the gate and at the step. */
 export function standingHostRefusal(recordName: string, unit: string, judged: { standing: string; cluster: string }): string {
   return (

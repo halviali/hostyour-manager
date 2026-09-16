@@ -46,4 +46,16 @@ export class FakeObjectStore implements ObjectStore {
     this.withdrawals.push({ accessKeyId: input.accessKeyId, deleted });
     return { deleted };
   }
+
+  async withdrawBucketKeys(input: { name: string }): Promise<{ deleted: number }> {
+    if (this.failWith) throw this.failWith;
+    let deleted = 0;
+    for (const minted of this.mints) {
+      if (minted.name === input.name && this.keys.delete(minted.accessKeyId)) {
+        deleted += 1;
+        this.withdrawals.push({ accessKeyId: minted.accessKeyId, deleted: 1 });
+      }
+    }
+    return { deleted };
+  }
 }

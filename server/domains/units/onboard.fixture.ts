@@ -96,6 +96,7 @@ export type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReade
 export function seededDns(): FakeDnsProvider {
   const dns = new FakeDnsProvider();
   dns.seed("s1.example", "A", "203.0.113.10");
+  dns.seed("s2.example", "A", "203.0.113.20");
   return dns;
 }
 

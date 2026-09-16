@@ -33,7 +33,7 @@ import type { Activator } from "../../adapters/activation/port.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
-import { provisionUnitDns, tenantWildcardHost } from "./unit-dns.ts";
+import { provisionUnitDns, standingHostFrom, tenantWildcardHost } from "./unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
@@ -99,9 +99,9 @@ export interface TenantOnboardPorts {
    *  admin email but absent ⇒ the step fails loud (a wiring gap, never a silent skip). It is the SAME
    *  HttpActivator instance the consumer onboard uses (wire-units.ts). */
   activator?: Activator;
-  /** The tenant's ONE wildcard DNS record `*.<subdomain>.<unitApex>` (provision-dns).
-   *  Optional but UNCONDITIONALLY needed by that step — absent ⇒ it fails loud (DNS is a mandatory
-   *  part of the run kind), never a silent skip. */
+  /** The tenant's ONE wildcard DNS record `*.<subdomain>.<stage apex>`: read by gate G27 at the plan
+   *  and written by provision-dns. Optional but UNCONDITIONALLY needed — absent ⇒ G27 fails the plan
+   *  (DNS is a mandatory part of the run kind), never a silent skip. */
   dns?: DnsProvider;
   /** The public apex (global.unitApex) of the target cluster, read off its values chain on the
    *  platform repo for the TENANT's stage — the tenant family's own repo is catalog, so the apex
@@ -632,9 +632,10 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           subdomain: req.subdomain,
           seedUsers: req.seedUsers,
           clusterValueFiles,
+          clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
-        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal },
+        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, ...standingHostFrom(ports.dns, ctx.db, ctx.signal) },
       );
       if (outcome.verdict !== "pass") {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");

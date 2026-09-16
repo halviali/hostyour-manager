@@ -26,9 +26,7 @@ import { consumerHostLabel } from "../../../shared/consumer.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
-import { consumerUnitHost, readStandingHost, type StandingHost } from "./unit-dns.ts";
-import type { DnsProvider } from "../../adapters/dns/port.ts";
-import type { Db } from "../../db/client.ts";
+import { consumerUnitHost, type StandingHostReader } from "./unit-dns.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "../../../shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -125,7 +123,7 @@ export interface ValidateDeps {
    *  the inventory through standingHostFrom. Absent where the Manager has no DNS provider: G27 then
    *  fails a deployable target before the run writes anything, where provision-dns would have failed
    *  at its thirteenth step for the same reason. */
-  standingHost?: (host: string, clusterFqdn: string) => Promise<StandingHost>;
+  standingHost?: StandingHostReader;
   /** Poll pacing; the fake returns "done" on the first poll, so this never fires in tests. */
   pollIntervalMs?: number;
   /** Terminating deadline of the whole runner poll (default DEFAULT_POLL_BUDGET_MS). The sandbox
@@ -336,11 +334,4 @@ function unitApexIfStated(files: readonly { path: string; content: string }[]): 
     if (typeof apex === "string" && apex.length > 0) found = apex;
   }
   return found;
-}
-
-/** G27's reader, bound to the DNS provider and the inventory — the same reading provision-dns takes
- *  at its own step. Empty where the Manager has no provider, so the gate says so. */
-export function standingHostFrom(dns: DnsProvider | undefined, db: Db, signal: AbortSignal): Pick<ValidateDeps, "standingHost"> {
-  if (!dns) return {};
-  return { standingHost: (host, clusterFqdn) => readStandingHost(dns, db, { recordName: host, clusterFqdn, signal }) };
 }

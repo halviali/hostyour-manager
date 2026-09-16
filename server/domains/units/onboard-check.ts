@@ -3,7 +3,8 @@
 // validate.ts — this step only runs them and holds the outcome against the approved facts.
 import type { Step } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import { validateOnboard, standingHostFrom, type OnboardTarget } from "./validate.ts";
+import { validateOnboard, type OnboardTarget } from "./validate.ts";
+import { standingHostFrom } from "./unit-dns.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "./unit-size.ts";
 import { DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts";

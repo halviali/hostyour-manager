@@ -25,6 +25,7 @@ import type { TenantStatus } from "../../../shared/enums.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder, VaultSeedOutcome, TenantCryptoDeleteInput } from "../../adapters/vault/seeder-port.ts";
+import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 
 
 // tenant-purge (force-offboard by GUID) tests — the tenant twin of
@@ -69,7 +70,7 @@ function entry(cluster = "s1"): TenantRegistration {
   };
 }
 
-type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter; seeder?: VaultSeeder | null };
+type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter; seeder?: VaultSeeder | null; objectStore?: FakeObjectStore | null };
 
 /** Records the crypto deletes a purge issues. The purge never SEEDS, so those throw: a purge that
  *  wrote a tenant's identity instead of destroying it would be the exact inverse of the run kind. */
@@ -93,6 +94,7 @@ function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePo
     // null models the Manager with no Vault wired at all — the one case where the crypto entry
     // survives a purge, which the run has to SAY rather than pass over.
     ...(over.seeder === null ? {} : { seeder: over.seeder ?? new FakePurgeSeeder() }),
+    ...(over.objectStore === null ? {} : { objectStore: over.objectStore ?? new FakeObjectStore() }),
     resolver: new FakeClusterKubeResolver({
       clusterReader: over.cluster ?? new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 } }),
       // Default: every fan-out name reads Missing (already pruned) — watch-prune logs a clean prune.
@@ -386,6 +388,42 @@ describe("tenant-purge execution", () => {
     await runAll(prt, params, logs);
 
     expect(logs.some((l) => l.includes("no Vault seeder is wired") && l.includes(`prod/tenants/${GUID}`))).toBe(true);
+    expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("purged");
+  });
+
+  it("WITHDRAWS every key minted under the tenant's name and keeps the bucket — the key the abort never took back", async () => {
+    // A create that died at provision-dns had minted a key beside the standing one; the entry naming
+    // either is destroyed a step earlier and cannot be read back, so the NAME is the only handle.
+    seedTenantRow();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+    const store = new FakeObjectStore();
+    store.buckets.add(GUID);
+    await store.mintBucketKey({ bucket: GUID, name: `tenant-${GUID}-prod` });
+    await store.mintBucketKey({ bucket: GUID, name: `tenant-${GUID}-prod` });
+    await store.mintBucketKey({ bucket: "other", name: "tenant-other-prod" }); // another tenant's key stays
+    const prt = ports(reg, { objectStore: store });
+
+    const logs: string[] = [];
+    const { params } = await planned(prt);
+    await runAll(prt, params, logs);
+
+    expect([...store.keys.values()].map((k) => k.bucket)).toEqual(["other"]);
+    expect([...store.buckets]).toContain(GUID); // the bucket and its objects are deliberately kept
+    expect(logs.some((l) => l.includes(`2 key(s) named tenant-${GUID}-prod withdrawn`))).toBe(true);
+    expect(makeTenantPurgeDef(prt).steps(params).map((s) => s.name).indexOf("withdraw-bucket-keys")).toBeGreaterThan(
+      makeTenantPurgeDef(prt).steps(params).map((s) => s.name).indexOf("delete-tenant-crypto"),
+    );
+  });
+
+  it("SAYS it when no object storage is wired — the key stands at the provider after the purge", async () => {
+    seedTenantRow();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+    const logs: string[] = [];
+    const { params } = await planned(ports(reg, { objectStore: null }));
+    await runAll(ports(reg, { objectStore: null }), params, logs);
+    expect(logs.some((l) => l.includes("no object storage is wired") && l.includes(`tenant-${GUID}-prod`))).toBe(true);
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("purged");
   });
 

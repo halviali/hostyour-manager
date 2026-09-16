@@ -734,8 +734,10 @@ function buildTenantOnboarding(
     // apex resolver the create side uses, so the record removed is the record created.
     ...(dns ? { dns } : {}),
     resolveUnitApex,
-    // tenant-purge destroys the crypto entry create-tenant seeded, through the same seeder.
+    // tenant-purge destroys the crypto entry create-tenant seeded, through the same seeder, and
+    // withdraws the bucket keys create-tenant minted, through the same store.
     seeder,
+    ...(objectStore ? { objectStore } : {}),
   };
 
   // The tenant relocation ports: the lifecycle set (registrations/resolver/dns/argo-sync/apex) plus the

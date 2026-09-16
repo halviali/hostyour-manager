@@ -17,6 +17,7 @@ import type { BuildRbacWriter, DeployState, ClusterKubeResolver, ClusterReader }
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
+import type { ObjectStore } from "../../adapters/object-store/port.ts";
 
 // Every lifecycle run resolves the RIGHT kube clients + ArgoCD namespace for its target cluster at run
 // time via `resolver.resolve(clusterId)`. The master path resolves to
@@ -191,6 +192,10 @@ export interface TenantLifecyclePorts {
    *  what WROTE the entry, so a purge running without one has nothing it could take back. The step
    *  says which of the two happened rather than passing over it. */
   seeder?: VaultSeeder;
+  /** Withdraws the tenant's bucket keys — the purge inverse of the mint create-tenant does. Optional
+   *  and skipped when absent, the same shape seeder has: the store is what MINTED the keys, so a
+   *  purge running without one has none it could take back, and the step says so. */
+  objectStore?: ObjectStore;
 }
 
 /** A tenant + its cluster context, resolved from the tenants row (tnt_) and its clusters row. The

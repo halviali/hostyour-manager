@@ -166,6 +166,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
 function seededDns(): FakeDnsProvider {
   const dns = new FakeDnsProvider();
   dns.seed("s1.example", "A", "203.0.113.10");
+  dns.seed("m1.example", "A", "203.0.113.11");
   return dns;
 }
 

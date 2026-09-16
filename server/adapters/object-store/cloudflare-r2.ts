@@ -34,6 +34,8 @@ const BUCKET_PERMISSIONS = ["Workers R2 Storage Bucket Item Read", "Workers R2 S
 const BUCKET_SCOPE = "com.cloudflare.edge.r2.bucket";
 
 const MAX_RATE_LIMIT_RETRIES = 3;
+/** The API's own page ceiling for the token list; a page shorter than this is the last one. */
+const TOKEN_PAGE_SIZE = 50;
 
 interface CfEnvelope<T> {
   success: boolean;
@@ -49,6 +51,8 @@ interface CfPermissionGroup {
 
 interface CfToken {
   id: string;
+  /** The name the token was minted under — what the list call is read by. */
+  name?: string;
   /** The secret half, returned ONLY by the create call. */
   value?: string;
 }
@@ -136,6 +140,21 @@ export class CloudflareR2 implements ObjectStore {
       if (e instanceof ObjectStoreError && e.status === 404) return { deleted: 0 };
       throw e;
     }
+  }
+
+  async withdrawBucketKeys(input: { name: string; signal?: AbortSignal }): Promise<{ deleted: number }> {
+    // The token list carries no name filter, so every page of the account's tokens is read and the
+    // ones carrying the name are deleted one by one through the same call withdrawBucketKey makes.
+    const signal = input.signal ? { signal: input.signal } : {};
+    const ids: string[] = [];
+    for (let page = 1; ; page++) {
+      const tokens = (await this.send<CfToken[]>(`/accounts/${this.opts.accountId}/tokens?page=${page}&per_page=${TOKEN_PAGE_SIZE}`, signal)) ?? [];
+      for (const t of tokens) if (t.name === input.name) ids.push(t.id);
+      if (tokens.length < TOKEN_PAGE_SIZE) break;
+    }
+    let deleted = 0;
+    for (const accessKeyId of ids) deleted += (await this.withdrawBucketKey({ accessKeyId, ...signal })).deleted;
+    return { deleted };
   }
 
   /** Whether the bucket is there, under THIS jurisdiction. A 404 is an answer and not a failure, so

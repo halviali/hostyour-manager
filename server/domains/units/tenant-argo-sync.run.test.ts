@@ -11,6 +11,7 @@ import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fak
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
+import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { BUILD_PIPELINE_SERVICE_ACCOUNT } from "./build-rbac.ts";
 import type { StepCtx, PlanStreamCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -96,6 +97,13 @@ async function seededRegistrations(): Promise<TenantRegistrations> {
   return registrations;
 }
 
+/** The target cluster's own A record — what G27 reads the tenant's wildcard against at the plan. */
+function seededDns(): FakeDnsProvider {
+  const dns = new FakeDnsProvider();
+  dns.seed("s1.example", "A", "203.0.113.10");
+  return dns;
+}
+
 function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML } }),
@@ -113,6 +121,7 @@ function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
+    dns: seededDns(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => ATTESTED,
     consumerHostLabels: async () => [],

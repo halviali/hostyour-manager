@@ -43,6 +43,11 @@ export interface ObjectStore {
    *  BY ID AND NEVER BY NAME. Every key of one tenant carries the same name by construction, so a
    *  withdrawal by name would take the tenant's LIVE key with it. */
   withdrawBucketKey(input: { accessKeyId: string; signal?: AbortSignal }): Promise<{ deleted: number }>;
+  /** Withdraw EVERY key carrying the name — the tenant's live key and any the account still holds
+   *  beside it. The one caller is tenant-purge, where the tenant is being deprovisioned and no key of
+   *  it may outlive the Vault entry that named it: the Manager cannot read that entry back, so the
+   *  name is the only handle on the keys it minted. Absent keys resolve { deleted: 0 }. */
+  withdrawBucketKeys(input: { name: string; signal?: AbortSignal }): Promise<{ deleted: number }>;
 }
 
 /** Any object-storage API failure — a transport error, a non-2xx, or a body whose `success` flag is

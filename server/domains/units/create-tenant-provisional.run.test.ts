@@ -14,6 +14,7 @@ import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
+import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { resolveRunTenantState } from "./tenant-orphans.ts";
 import { AppError } from "../../kernel/errors.ts";
 import type { Step, StepCtx, Cleanup } from "../../executor/types.ts";
@@ -130,6 +131,13 @@ function fakeTenantSeeder(): VaultSeeder {
   };
 }
 
+/** The target cluster's own A record — what G27 reads the tenant's wildcard against at the plan. */
+function seededDns(): FakeDnsProvider {
+  const dns = new FakeDnsProvider();
+  dns.seed("s1.example", "A", "203.0.113.10");
+  return dns;
+}
+
 function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboardPorts {
   const { argo, cluster, projects, ...portOver } = over;
   return {
@@ -152,6 +160,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
+    dns: seededDns(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
