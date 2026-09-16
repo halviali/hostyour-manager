@@ -35,7 +35,7 @@ import { provisionUnitDns, standingHostFrom, tenantWildcardHost } from "./unit-d
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
-import { ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
+import { assertReplacesOnTargetCluster, ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 
 // The "tenant-create" Run — the tenant analogue of
@@ -450,7 +450,8 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // zone `<subdomain>.<stage apex>` (`<member>.`; nothing lives on the bare zone), so
         // `*.<subdomain>.<stage apex>` covers a stage's members — members added later included — and
         // a move changes one record. The idempotent-by-subdomain replace needs no removal of its own:
-        // the replacing tenant carries the SAME subdomain, so this upsert re-points the standing record.
+        // the replacing tenant carries the SAME subdomain on the SAME cluster (a replace across two
+        // clusters is refused at the plan, tenant-replace.ts), so this upsert re-points the record.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
         await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },
@@ -615,6 +616,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // Idempotent-by-subdomain: resolve the existing same-subdomain tenants to REPLACE — the union
       // of the DB inventory + a GitOps pointer scan (the scan also reaps ORPHANS), deduped by guid.
       const replaces = await resolveReplaceTargets({ db: ctx.db, registrations: ports.registrations }, req.stage, req.subdomain);
+      assertReplacesOnTargetCluster(replaces, rc, req.subdomain, req.stage);
       const expectedApps = tenantApplicationSet(outcome.memberRecords.map((m) => m.name), guid, req.stage);
       // Freeze the ensure-images set alongside expectedApps: the validated render's container
       // images, filtered to the target cluster's registry host. The validated revision is frozen

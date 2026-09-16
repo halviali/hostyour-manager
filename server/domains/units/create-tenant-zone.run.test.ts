@@ -25,6 +25,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedQuota } from "../../../shared/unit-size.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
@@ -162,6 +163,19 @@ describe("create-tenant plans the zone before the first write", () => {
     expect((result.planJson as TenantValidationReport).gates.find((g) => g.id === "G27")?.found).toContain("s2.example");
     expect([...store.buckets]).toEqual([]);
     expect(store.mints).toEqual([]);
+  });
+
+  it("a replace whose old tenant serves the wildcard from another cluster is refused by G27, its registration untouched", async () => {
+    const dns = new FakeDnsProvider();
+    seedClusters(dns);
+    dns.seed(WILDCARD, "A", S2_ADDRESS); // the old tenant's wildcard, provisioned at s2
+    const prt = ports(dns);
+    await prt.registrations.commitTenant({ stage: "prod", guid: "e2e8ymj86dk8", runId: "run_old", registration: { cluster: "s2", subdomain: SUB, members: testMembers([]), identityProvider: "auth", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false } });
+    const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx([]));
+    expect(result.outcome).toBe("rejected");
+    if (result.outcome !== "rejected") return;
+    expect(result.summary).toContain("G27");
+    expect(await prt.registrations.readTenant("prod", "e2e8ymj86dk8")).not.toBeNull();
   });
 
   it("plans over a leftover and the plan stream carries the G27 line with the address provision-dns will replace", async () => {

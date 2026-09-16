@@ -262,6 +262,21 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     expect(result.plan.summary).toContain("run a backup first");
   });
 
+  it("REFUSES a replace across two clusters of one installation before any teardown, naming both clusters", async () => {
+    // The old tenant holds the subdomain on s2; the create targets s1. The replace teardown would
+    // remove its registration and prune its fan-out, and provision-dns would then refuse the wildcard
+    // standing at s2's address — with the old tenant already gone. So the plan refuses first.
+    seedClusters();
+    db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_2", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
+    const registrations = makeRegistrations();
+    await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration({ cluster: "s2" }), runId: "run_old" });
+    await expect(makeCreateTenantDef(ports(registrations)).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx()))
+      .rejects.toThrow(`tenant ${OLD} on cluster "s2" (cls_2), not on the target s1.example ("s1", cls_1) — a replace across two clusters of one installation is refused before any teardown`);
+    expect(await registrations.readTenant("prod", OLD)).not.toBeNull(); // nothing was torn down
+  });
+
   it("existing ORPHAN subdomain (pointer present, NO db row): still a replace target, tenantId null", async () => {
     seedClusters(); // no seedOldRow ⇒ orphan
     const registrations = makeRegistrations();

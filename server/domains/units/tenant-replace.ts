@@ -183,6 +183,28 @@ export function ensureSubdomainFreeStep(
   };
 }
 
+/** A replace target standing on ANOTHER cluster of this installation is refused at the PLAN, before
+ *  any teardown runs. The replace teardown removes the old registration and prunes its fan-out, and
+ *  only then would provision-dns read the wildcard `*.<subdomain>.<stage apex>` at that cluster's
+ *  address and refuse it (unit-dns.ts readStandingHost) — with the replaced tenant already gone.
+ *  Gate G27 refuses the same collision where the old wildcard stands; this reads the inventory and
+ *  the pointer, so it holds where no record was ever written too. Names both clusters. */
+export function assertReplacesOnTargetCluster(
+  replaces: readonly TenantTeardownTarget[],
+  target: { clusterId: string; cluster: string; domain: string },
+  subdomain: string,
+  stage: Stage,
+): void {
+  const elsewhere = replaces.filter((t) => t.clusterId !== target.clusterId);
+  if (elsewhere.length === 0) return;
+  throw errValidation(
+    `subdomain "${subdomain}" at ${stage} is held by ${elsewhere.map((t) => `tenant ${t.guid} on cluster "${t.cluster}" (${t.clusterId})`).join(", ")}, ` +
+    `not on the target ${target.domain} ("${target.cluster}", ${target.clusterId}) — a replace across two clusters of one installation is refused ` +
+    `before any teardown: the wildcard *.${subdomain}.<stage apex> answers for one cluster, and moving a tenant between clusters is a relocation, not a create. ` +
+    `Offboard the tenant there first, or create this one on that cluster.`,
+  );
+}
+
 export async function resolveReplaceTargets(
   deps: { db: Db; registrations: TenantRegistrations },
   stage: Stage,
