@@ -31,11 +31,11 @@ const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const TRUNK = `refs/remotes/origin/${PRODUCT_BRANCH}`;
 
 // Ref-name safety for a name that becomes part of a refspec: the same shape a branch must have, plus
-// git's own two refusals (".." opens a range, ".lock" collides with the ref lock file).
-function assertRefName(name: string, kind: string): void {
-  if (!BRANCH_RE.test(name) || name.includes("..") || name.endsWith(".lock")) {
-    throw errValidation(`invalid ${kind} name: "${name}"`);
-  }
+// git's own two refusals (".." opens a range, ".lock" collides with the ref lock file). Answers the
+// name it accepted, so a caller can take it in one expression.
+function assertRefName(name: string, kind: string): string {
+  if (!BRANCH_RE.test(name) || name.includes("..") || name.endsWith(".lock")) throw errValidation(`invalid ${kind} name: "${name}"`);
+  return name;
 }
 
 // https:// only in production (and never with userinfo — a credential belongs in the sealed store
@@ -528,7 +528,16 @@ export class GitConsumerRepo implements ConsumerRepo {
         // Resolve the remote's default branch (its HEAD symref) — never assume main vs master.
         const out = await run(["ls-remote", "--symref", repoURL, "HEAD"], env);
         const m = HEAD_SYMREF_RE.exec(out);
-        if (!m?.[1]) throw errValidation(`could not resolve the default branch of ${repoURL} (git ls-remote --symref HEAD returned no "ref: refs/heads/<branch>")`);
+        if (!m?.[1]) {
+          // An EMPTY repository — created a moment ago, no commit yet — advertises no HEAD to
+          // ls-remote and carries no branch to fetch. A clone still learns the NAME of its unborn
+          // default branch from the remote and checks that branch out, unborn, so the first
+          // commitPush creates it on the remote under the name the remote chose (tenant-apps-repo
+          // writes a tenant's tree into the repository it just created).
+          if ((await run(["ls-remote", "--heads", repoURL], env)).trim() !== "") throw errValidation(`could not resolve the default branch of ${repoURL} (git ls-remote --symref HEAD returned no "ref: refs/heads/<branch>")`);
+          await run(["clone", "-q", repoURL, "."], env);
+          return assertRefName((await run(["symbolic-ref", "--short", "HEAD"], env)).trim(), "branch");
+        }
         const resolved = m[1];
         assertRefName(resolved, "branch");
         await run(["init", "-q"], env);
