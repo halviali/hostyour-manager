@@ -14,24 +14,21 @@ import type { DnsProvider } from "../adapters/dns/port.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
 import { readClusterValueChain } from "../domains/inventory/cluster-value-chain.ts";
 import { unitApexFromChain } from "../domains/units/admission-policy.ts";
-import { STAGE, type Stage } from "../../shared/enums.ts";
+import { type Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
 import { readChannelStages } from "../domains/inventory/channel-stages.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
 import type { ClusterKubeResolver } from "../adapters/kube/port.ts";
 import { masterKubeInput, type MasterKubeClients } from "./master-kube.ts";
 import { TektonGateRunner } from "../adapters/gate-runner/gate-runner-tekton.ts";
-import { HttpRegistryProbe, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
 import { TektonBuildPlane } from "../adapters/build-plane/build-plane-tekton.ts";
 import { VaultSelfSeeder } from "../adapters/vault/vault-self-seeder.ts";
 import type { VaultSeeder } from "../adapters/vault/seeder-port.ts";
-import type { ObjectStore } from "../adapters/object-store/port.ts";
 import { HttpActivator } from "../adapters/activation/activation-http.ts";
 import type { Activator } from "../adapters/activation/port.ts";
 import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
 import type { GitHubConsumer } from "../adapters/github-consumer/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
-import { HelmCliRenderer } from "../adapters/helm/helm.ts";
 import { Registrations } from "../domains/units/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import { makeOnboardDef, type OnboardPorts } from "../domains/units/onboard.run.ts";
@@ -39,36 +36,28 @@ import { makeOffboardDef } from "../domains/units/offboard.run.ts";
 import { makePurgeDef } from "../domains/units/purge.run.ts";
 import { makeAdoptConsumerDef } from "../domains/units/adopt-consumer.run.ts";
 import { makeSuspendDef, makeResumeDef } from "../domains/units/suspend-resume.run.ts";
-import { makeRestartWorkloadsDef, makeTenantRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
-import { makeSetSizeDef, makeTenantSetSizeDef } from "../domains/units/set-size.run.ts";
-import type { LifecyclePorts, TenantLifecyclePorts } from "../domains/units/lifecycle.ts";
-import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/create-tenant.run.ts";
+import { makeRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
+import { makeSetSizeDef } from "../domains/units/set-size.run.ts";
+import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
-import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
-import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
-import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
-import { makeAddAppDef } from "../domains/units/add-app.run.ts";
-import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts";
-import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
-import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
-import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
+import { type AppCatalogProvider, type TenantAppsManifestReader } from "../domains/units/app-catalog.ts";
 import { HttpPublicProbe } from "../adapters/http-probe/http-probe.ts";
 import type { RelocationPorts } from "../domains/units/relocation.ts";
 import type { ConsumerRelocationPorts } from "../domains/units/relocation-world-consumer.ts";
-import type { TenantRelocationPorts } from "../domains/units/relocation-world-tenant.ts";
-import { makeBackupDef, makeTenantBackupDef } from "../domains/units/backup.run.ts";
-import { makeRestoreDef, makeTenantRestoreDef } from "../domains/units/restore.run.ts";
-import { makeMigrateDef, makeTenantMigrateDef } from "../domains/units/migrate.run.ts";
+import { makeBackupDef } from "../domains/units/backup.run.ts";
+import { makeRestoreDef } from "../domains/units/restore.run.ts";
+import { makeMigrateDef } from "../domains/units/migrate.run.ts";
 import { errValidation } from "../kernel/errors.ts";
+import { buildTenantOnboarding } from "./wire-tenants.ts";
 
 // The unit composition — the only place the real
 // unit adapters are constructed and handed to the Run families. Kept out of wire.ts to keep that
-// file focused. Two INDEPENDENT families live here:
+// file focused. Two INDEPENDENT families are built:
 //
-//  - CONSUMER units: the Tekton gate-runner + platform/kube adapters. Goes live ONLY when BOTH
-//    the gate-runner config (ONBOARD_GATE_MANAGER_ADDR) and the platform repo (github) are
+//  - CONSUMER units, here: the Tekton gate-runner + platform/kube adapters. Goes live ONLY when
+//    BOTH the gate-runner config (ONBOARD_GATE_MANAGER_ADDR) and the platform repo (github) are
 //    configured — a partial config is a 501, never a half-wired feature.
-//  - TENANT (multi-app) units: a SECOND GitPlatformRepo bound to catalog + the
+//  - TENANT (multi-app) units, in wire-tenants.ts: a SECOND GitPlatformRepo bound to catalog + the
 //    manager-side HelmRenderer (tenant charts are trusted first-party, validated manager-side —
 //    NO gate-runner). Goes live when the catalog write PAT is configured. It is NOT gated on
 //    the consumer prerequisites: a cluster can run tenants without a consumer gate-runner.
@@ -96,10 +85,6 @@ const DEPLOY_REF_VISIBLE_MS = 5 * 60_000; // the bump's push becomes visible in 
 // The build-plane release run (clone + install + buildah + bump + sync) gets the cold-build ceiling —
 // the same order the tenant ensure-images budget uses, for the same reason.
 const RELEASE_BUILD_APPEAR_MS = 5 * 60_000; // the webhook fires the PipelineRun in seconds; five minutes is generous
-// A whole tenant fan-out (base + trio + N per-app stacks) has more to converge than a single consumer
-// app, so it gets a longer budget before the set-watch fails loudly.
-const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
-
 export interface UnitsWiring {
   defs: AnyRunDefinition[];
   /** The DNS provider, for the mail DNS run kind (the master's egress address is read off its own
@@ -127,6 +112,11 @@ export interface UnitsWiring {
    *  /api/tenants/app-catalog can offer the wizard the apps of the apps repository's apps.yaml.
    *  Undefined when tenant onboarding is not configured — the catalog route then serves { apps: [] }. */
   appCatalog?: AppCatalogProvider;
+  /** ONE tenant's own catalog — its bundle's apps.yaml, read with a credential minted from the App
+   *  at the read — threaded to the route GET /api/tenants/:id/app-catalog; the SAME closure the
+   *  tenant-add-app plan judges against. Undefined without tenant onboarding or without the App;
+   *  the route then answers { apps: [], reason }. */
+  tenantAppsManifest?: TenantAppsManifestReader;
   /** The shared activation client (ONE HttpActivator for the whole manager), threaded to
    *  registerTenantRoutes so the operator-driven POST /api/tenants/:id/invite-admin can call a
    *  tenant's own example-auth first-admin bootstrap. Always constructed here. */
@@ -173,37 +163,24 @@ export interface UnitsWiring {
   platformRepo?: PlatformRepo;
 }
 
+/** What the consumer family hands the composition: its defs, its flag and the collaborators its
+ *  read routes need. The tenant family's twin is TenantFamily (wire-tenants.ts). */
 interface Family {
   defs: AnyRunDefinition[];
   enabled: boolean;
-  /** Present only for the consumer family — the resolver its live reconciliation endpoint reads
-   *  the cluster + ArgoCD through. Undefined when the family is not configured. */
+  /** The resolver its live reconciliation endpoint reads the cluster + ArgoCD through. Undefined
+   *  when the family is not configured. */
   resolver?: ClusterKubeResolver;
-  /** Present only for the tenant family — the app-type catalog its wizard read route serves.
+  /** The registration registrations its detected-scan read route diffs against the inventory.
    *  Undefined when the family is not configured. */
-  appCatalog?: AppCatalogProvider;
-  /** Present only for the tenant family — the catalog URL its live read resolves the fan-out's
-   *  pin against. Undefined when the family is not configured. */
-  catalogRepoUrl?: string;
-  /** Present only for the tenant family — the pointer registrations its orphan-scan read route diffs
-   *  against the inventory. Undefined when the family is not configured. */
-  tenantRegistrations?: TenantRegistrations;
-  /** Present only for the consumer family — the registration registrations its detected-scan read route
-   *  diffs against the inventory. Undefined when the family is not configured. */
   registrations?: Registrations;
-  /** Present only for the consumer family — the repository reader its prefill route clones with.
-   *  Undefined when the family is not configured. */
+  /** The repository reader its prefill route clones with. Undefined when the family is not
+   *  configured. */
   repoReader?: RepoReader;
   github?: GitHubConsumer;
   /** The consumer onboarding's ports, so the tenant family can run the build-only chain per build unit (tenant-builds.ts). */
   onboardPorts?: OnboardPorts;
   platformGitHub?: { owner: string; repo: string };
-  /** Present only for the tenant family — bring the catalog's books branch into being and to the
-   *  catalog's trunk, so the tenant ApplicationSet's git generator has a revision to resolve before
-   *  the first tenant exists and the member charts on that revision are the current ones. It crosses
-   *  as a closure because buildUnits is synchronous and the boot that awaits it is not. Undefined
-   *  when the family is not configured — there is then no catalog to write into. */
-  carryTrunkToBooksBranch?: () => Promise<void>;
 }
 
 export function buildUnits(
@@ -311,7 +288,7 @@ export function buildUnits(
   // CONSUMER'S BUILD CHAIN per build unit it lacks (tenant-builds.ts) — so the consumer ports reach it
   // through a holder filled once both stand. The tenant defs read it at run time, never at wiring.
   const lateBuild: { deps?: TenantBuildDeps } = {};
-  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, githubApp);
+  const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, githubApp);
   const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube);
   if (consumer.onboardPorts) {
     lateBuild.deps = {
@@ -337,6 +314,7 @@ export function buildUnits(
     ...(tenant.resolver ? { tenantResolver: tenant.resolver } : {}),
     ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
+    ...(tenant.tenantAppsManifest ? { tenantAppsManifest: tenant.tenantAppsManifest } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     // The shared activation client is always constructed above — surface it for the tenant invite route.
@@ -566,243 +544,4 @@ function buildConsumerOnboarding(
   // out so the detected scan (GET /api/consumers/detected) diffs the very pointers the runs commit;
   // the repository reader rides out so the wizard's prefill clones with the reader the run clones with.
   return { defs, enabled: true, resolver, registrations, repoReader: repo, github, onboardPorts, platformGitHub: { owner: config.github.owner, repo: config.github.repo } };
-}
-
-// ---- Tenant (multi-app) onboarding: catalog + the manager-side HelmRenderer ----
-function buildTenantOnboarding(
-  config: Config,
-  activator: Activator,
-  logger: Logger,
-  platformRepo: PlatformRepo | undefined,
-  dns: DnsProvider | undefined,
-  resolveUnitApex: ((domain: string, stage: Stage) => Promise<string>) | undefined,
-  resolveClusterValueFiles: ((domain: string, stage: Stage) => Promise<ClusterValueFile[]>) | undefined,
-  relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage">,
-  /** The SAME VaultSelfSeeder the consumer family writes through — one Vault, one identity. create-tenant
-   *  seeds the tenant's crypto entry with it and tenant-purge destroys the same entry, so the writer and
-   *  the destroyer are provably the same object. */
-  seeder: VaultSeeder,
-  /** Makes each tenant's bucket and mints the one key that reaches it. Absent (no managing token) ⇒
-   *  create-tenant's seed step fails loud, for the same reason the seeder's absence does: a tenant
-   *  short of one secret is a tenant whose pods never start. */
-  objectStore: ObjectStore | undefined,
-  /** The master-local clients and the one resolver over them, built in the composition root. */
-  kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
-  /** The consumer onboarding's ports, handed late: the tenant defs run its build-only chain per build
-   *  unit a tenant lacks (tenant-builds.ts), and that family is wired after this one. */
-  onboard: () => TenantBuildDeps | undefined,
-  /** The platform's GitHub App — the identity a tenant's own repository is created with. */
-  githubApp: GitHubApp | undefined,
-): Family {
-  // The platform repo coordinates are required: every member AppProject must allow the `$values`
-  // source its Application pulls from, and a project written without it would fail every sync.
-  if (!config.catalog || !platformRepo || !resolveUnitApex || !resolveClusterValueFiles || !config.github) return { defs: [], enabled: false };
-
-  const repoURL = config.catalog.repoURL;
-  const platformRepoURL = `https://github.com/${config.github.owner}/${config.github.repo}.git`;
-  // ONE first-party PAT (Contents: read+write on catalog) does BOTH jobs: the reader clones the
-  // repo at a ref for manager-side validation, and the platform repo pushes tenant pointers. An
-  // inline opener returns the configured token (never the store) — the SAME shape the consumer write
-  // path uses for GITHUB_WRITE_PAT. It ignores the id, so any non-empty credentialId activates askpass.
-  const deployToken = config.catalog.token;
-  const openDeployToken = (): Promise<Buffer> => Promise.resolve(Buffer.from(deployToken, "utf8"));
-
-  const repo = new GitRepoReader({ openCredential: openDeployToken });
-  // ONE INSTALLATION, ONE BOOKS BRANCH NAME, IN BOTH REPOSITORIES, so the name is taken off the
-  // platform repo rather than resolved a second time here and the two can never disagree. In
-  // catalog it is the revision every member chart is read at — by the Manager below and by every
-  // member Application (hostyour-cloud clusters/argocd/files/tenants-appset.yaml), which is one
-  // revision because ArgoCD's repo-server generates nothing for an Application naming one
-  // repository twice at two commits.
-  const books = platformRepo.booksBranch;
-  const helm = new HelmCliRenderer(); // trusted first-party charts render manager-side (no sandbox)
-  // A SECOND GitPlatformRepo, bound to catalog, with a DISTINCT workRoot: worktreeDir keys only
-  // on the branch, and the two repos' books branches carry the SAME name, so sharing the consumer
-  // onboard-git root would put two repositories in one worktree. commitPush opts into a bounded
-  // exponential backoff because many tenant lifecycle runs plus Tekton's own deploy-bump commits
-  // contend on this ONE shared branch.
-  const deployRepo = new GitPlatformRepo({
-    platformRepoURL: repoURL,
-    booksBranch: books,
-    // catalog has no installer and no stamper, so this adapter is the only thing that can bring
-    // the branch its tenant ApplicationSet generators read into being, and the only thing that can
-    // bring the catalog's trunk into it afterwards (adapters/git/git.ts).
-    carriesTrunkToBooksBranch: true,
-    workRoot: join(config.dataDir, "tenant-git"),
-    credentialId: "catalog-write-pat",
-    openCredential: openDeployToken,
-    pushBackoff: { retries: 6, baseDelayMs: 250, maxDelayMs: 8_000 },
-  });
-  // Bring the books branch into being, and to the catalog's trunk, at BOOT. Two reasons, and the
-  // act is one call (adapters/git/git.ts carryTrunkToBooksBranch).
-  //
-  // INTO BEING, rather than at the first tenant registration: the tenant ApplicationSet's git
-  // generator reads that branch from the moment the installation is deployed, and a generator whose
-  // revision resolves to nothing puts the ApplicationSet — and the root Application above it — in
-  // error. Measured on a fresh install: `tenants-dev` was the one ApplicationSet in error on a
-  // platform where every other Application was Synced and Healthy, and nothing anywhere said the red
-  // was expected until somebody onboarded a tenant. A health view that is red about a correct
-  // installation teaches the reader to ignore the colour.
-  //
-  // TO THE TRUNK, because every member Application reads its CHART off this branch and not off the
-  // catalog's trunk — one repository at one revision, or ArgoCD's repo-server generates no manifest
-  // at all. Nothing else in any repository merges the trunk into it, so without this call an
-  // installation would run the member charts of the day its books branch was born, forever. THIS IS
-  // THE ONLY MOMENT AN INSTALLATION MOVES ONTO NEWER MEMBER CHARTS: a change on the catalog's trunk
-  // reaches a tenant at the Manager's next boot and at no other time.
-  const carryTrunkToBooksBranch = (): Promise<void> => deployRepo.carryTrunkToBooksBranch();
-  const tenantRegistrations = new TenantRegistrations(deployRepo);
-  // Tenants only ever land on slaves (POLICY), so per-slave resolution is the path that matters
-  // here; the master trio still backs the master-local argoReader/projectWriter. Both come from the
-  // composition root — one resolver serves this family, the consumer family and the cluster run kinds.
-  const { resolver } = kube;
-
-  // The ensure-images gate: the registrations probe reads the mounted manager-registry-pull
-  // dockerconfigjson — the SAME pull credential the pod's imagePullSecrets reference — and answers
-  // whether each pinned tag exists. Nothing here builds.
-  const registryProbe = new HttpRegistryProbe({ dockerConfigPath: REGISTRY_PULL_DOCKERCONFIG_PATH });
-  // The tenant's argo-sync grant: written master-locally like the member AppProjects, and armed for
-  // the units that attest the builds the tenant pulls — read off the CONSUMER registration tree on the
-  // platform repo (registrations/<unit>/build.yaml), which is where a claim on a build name stands.
-  const buildRbac = new KubeBuildRbacWriter(masterKubeInput(config));
-  const registrations = new Registrations(platformRepo);
-
-  // create-tenant + add-app drive the full port set (git reader + helm + the second platform repo);
-  // the kube clients are resolved per target cluster at run time via the resolver.
-  const onboardPorts: TenantOnboardPorts = {
-    repo,
-    helm,
-    registrations: tenantRegistrations,
-    resolver,
-    catalogRepoUrl: repoURL,
-    // The platform GitOps repo — a member Application's `$values` chain comes from it, so the member's
-    // AppProject must allow it next to catalog.
-    platformRepoURL,
-    catalogCredentialId: "catalog-read-pat", // activates askpass on the validation clone
-    carryTrunkToBooksBranch,
-    argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
-    registryProbe,
-    buildRbac,
-    attestedBuilds: () => registrations.listAttestedBuildNames(),
-    // The mirror of G23's tenant-subdomain clause, read off the consumer registration tree: a
-    // subdomain that is an onboarded unit's host label would put this tenant's session cookies on
-    // the host that consumer already serves (unit-dns.ts). Over every stage, as G23 reads the
-    // subdomains over every stage.
-    consumerHostLabels: async () =>
-      (await Promise.all(STAGE.map((stage) => registrations.listAttestedHostLabels(stage, { unit: "" })))).flat().map((l) => l.host),
-    // The tenant first-admin invite (create-tenant-activate.ts) — the SAME activation client the consumer
-    // family uses (one instance, from buildUnits). Used only when the operator supplies an admin email.
-    activator,
-    // The tenant's ONE wildcard record (provision-dns) + the apex it is composed under.
-    ...(dns ? { dns } : {}),
-    resolveUnitApex,
-    // The target cluster's whole values chain — the registry host and the member renders both
-    // come off it, so the planner reads it once.
-    resolveClusterValueFiles,
-    // Writes <stage>/tenants/<guid>, the ONE Vault entry every member namespace of the tenant reads.
-    seeder,
-    // Makes the bucket that entry's three storage properties address, and mints the key that reaches
-    // it and no other bucket of this account.
-    ...(objectStore ? { objectStore } : {}),
-    onboard,
-    // A unit the installation registered: build-only under registrations/<unit>/build.yaml, deployable
-    // under a stage file; the stored credential rides the entry either way.
-    buildUnitRegistration: async (unit) => {
-      const build = await registrations.readBuildRegistration(unit);
-      if (build) return { form: "build-only", ...(build.entry.repoCredentialId ? { repoCredentialId: build.entry.repoCredentialId } : {}) };
-      for (const stage of STAGE) {
-        const deployed = await registrations.readRegistration(stage, unit);
-        if (deployed) return { form: "deployable", ...(deployed.entry.repoCredentialId ? { repoCredentialId: deployed.entry.repoCredentialId } : {}) };
-      }
-      return null;
-    },
-    // Creates a tenant's own repository in the organisation the App is installed in. Absent ⇒ the run
-    // kind that needs it refuses at the plan, naming the three config keys.
-    ...(githubApp ? { githubApp } : {}),
-  };
-  // The create-tenant wizard's app catalog: the SAME reader + read credential validateTenant clones
-  // the catalog with, on the books branch, and the apps template (tenant.appsRepo) read with that
-  // same credential (app-catalog.ts), cached with a short TTL and fail-soft (a fetch error logs +
-  // serves no apps or the stale set, so the wizard never blank-screens). The branch and not the
-  // trunk, so the wizard offers what this installation can actually deploy: a chart that reached
-  // the catalog's trunk after the last carry is not on the branch the member Application would read
-  // it from.
-  const appCatalog = makeAppCatalogProvider({
-    repo,
-    repoURL,
-    ref: books,
-    ...(onboardPorts.catalogCredentialId ? { credentialId: onboardPorts.catalogCredentialId } : {}),
-    warn: (fields, msg) => logger.warn(fields, msg),
-  });
-  // remove-app + tenant-suspend/-resume/-offboard only flip/drop the pointer + watch the fan-out — no
-  // clone/render, so they take the narrower lifecycle port set (registrations + resolver).
-  const lifecyclePorts: TenantLifecyclePorts = {
-    registrations: tenantRegistrations,
-    resolver,
-    catalogRepoUrl: repoURL,
-    argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
-    // Every removal deletes the argo-sync grant beside the member AppProjects — the same writer that
-    // provisioned it, so what create-tenant wrote is what a teardown takes back.
-    buildRbac,
-    // The remove-dns halves of tenant-offboard and tenant-purge — the same provider +
-    // apex resolver the create side uses, so the record removed is the record created.
-    ...(dns ? { dns } : {}),
-    resolveUnitApex,
-    // tenant-purge destroys the crypto entry create-tenant seeded, through the same seeder, and
-    // withdraws the bucket keys create-tenant minted, through the same store.
-    seeder,
-    ...(objectStore ? { objectStore } : {}),
-  };
-
-  // The tenant relocation ports: the lifecycle set (registrations/resolver/dns/argo-sync/apex) plus the
-  // shared relocation surface and the platform repo URL the member AppProjects allow as a source.
-  const tenantRelocationPorts: TenantRelocationPorts = {
-    ...lifecyclePorts,
-    ...relocation,
-    platformRepoURL,
-  };
-
-  const defs: AnyRunDefinition[] = [
-    makeCreateTenantDef(onboardPorts),
-    // The periodic administrator check. It reads only — a Secret off each target cluster and one
-    // GET per tenant — and writes what it found onto the inventory row. A CronJob starts it; the
-    // schedule lives in Kubernetes so this process has none to keep across a restart.
-    makeCheckTenantsDef({
-      resolver: onboardPorts.resolver,
-      resolveUnitApex: onboardPorts.resolveUnitApex,
-      health: new HttpTenantHealthReader(),
-    }),
-    makeAddAppDef(onboardPorts),
-    // The tenant's own apps repository, created from the catalog's apps bundle through the GitHub App
-    // and onboarded build-only through the consumer family's chain (the same late-handed ports the
-    // build units ride) — the SAME port set, because it reads the catalog and the template the way
-    // create-tenant does.
-    makeTenantAppsRepoDef(onboardPorts),
-    makeRemoveAppDef(lifecyclePorts),
-    makeSuspendTenantDef(lifecyclePorts),
-    makeResumeTenantDef(lifecyclePorts),
-    // The tenant twin of the consumer restart run kind: same act, walked over the tenant's member
-    // namespaces instead of a consumer's single one.
-    makeTenantRestartWorkloadsDef(lifecyclePorts),
-    makeTenantSetSizeDef(lifecyclePorts),
-    makeOffboardTenantDef(lifecyclePorts),
-    // tenant-purge / force-offboard removes a tenant's WHOLE footprint BY GUID even with no inventory
-    // row (the orphaned partial create-tenant), and additionally destroys the crypto entry (the deprovision
-    // cascade) + the namespace. Same narrow port set as the other lifecycle run kinds — the teardown and the
-    // two cluster-side deletes all resolve through the per-cluster resolver.
-    makeTenantPurgeDef(lifecyclePorts),
-    // tenant-backup / tenant-restore / tenant-migrate — the same ONE relocation mechanism over the
-    // whole member bracket.
-    makeTenantBackupDef(tenantRelocationPorts),
-    makeTenantRestoreDef(tenantRelocationPorts),
-    makeTenantMigrateDef(tenantRelocationPorts),
-  ].map((d) => d as unknown as AnyRunDefinition);
-
-  // appCatalog + resolver + the repo URL + the registrations ride out so registerTenantRoutes can serve GET
-  // /api/tenants/app-catalog from the same catalog reader the runs validate through, resolve
-  // per-cluster access AND the fan-out's pin for the per-tenant live reconciliation read
-  // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
-  // through the very registrations the runs commit pointers with — all the same instances (and the same one
-  // repoURL the appsets are rendered from) the runs use, never a second one.
-  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, carryTrunkToBooksBranch };
 }

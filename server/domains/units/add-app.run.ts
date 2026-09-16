@@ -6,6 +6,7 @@ import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { guid as guidSchema, appName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { APPS_MANIFEST_PATH } from "../../../shared/apps-manifest.ts";
 import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -302,9 +303,9 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       throw new AppError("INTERNAL", "add-app is planned via planStream (the streaming entrypoint), not plan()");
     },
     // The streaming planner: load the live tenant (row + registration) -> refuse a duplicate app ->
-    // clone catalog at the tenant's pin -> render + T1..T4 the NEW app (subset), streamed
-    // gate-by-gate -> freeze params (watch only the new app's Application). A rejection freezes the
-    // full report.
+    // read the tenant's own catalog off its bundle's repository -> clone catalog at the books branch
+    // -> render + T1..T4 the NEW app (subset) against that catalog, streamed gate-by-gate -> freeze
+    // params (watch only the new app's Application). A rejection freezes the full report.
     planStream: async (rawParams, ctx) => {
       const req = AddAppRequest.parse(rawParams);
       const tc = loadTenantCluster(ctx.db, req.tenantId);
@@ -318,9 +319,16 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       }
       // Every tenant with an app mounts its own bundle; a tenant registered without one has nothing
       // the new app's engine could mount, and the catalog's bundle is mounted by no tenant.
-      if (!current.entry.appsImage || !current.entry.appsImageTag) {
-        throw errValidation(`tenant ${tc.guid} has no apps bundle (appsImage) in its registration — every tenant mounts its own ${current.entry.subdomain}-apps bundle, created and built by the tenant-apps-repo run; nothing can be added until it has one`);
+      const { appsRepo, appsImage, appsImageTag } = current.entry;
+      if (!appsRepo || !appsImage || !appsImageTag) {
+        throw errValidation(`tenant ${tc.guid} has no apps bundle (appsRepo, appsImage) in its registration — every tenant mounts its own ${current.entry.subdomain}-apps bundle, created and built by the tenant-apps-repo run; nothing can be added until it has one`);
       }
+      // The tenant's OWN catalog: what its bundle's repository carries is what can be deployed, so
+      // T4 judges the new app and its selections against that apps.yaml and never the template's.
+      if (!ports.tenantAppsManifest) throw errValidation(`this Manager holds no GitHub App identity, so tenant ${tc.guid}'s repository ${appsRepo} cannot be read — set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY`);
+      const tenantCatalog = await ports.tenantAppsManifest(appsRepo, ctx.signal);
+      if (!tenantCatalog) throw errValidation(`${appsRepo} carries no ${APPS_MANIFEST_PATH} at its default branch — nothing says which apps tenant ${tc.guid}'s bundle carries; tenant-apps-repo writes it`);
+      ctx.log(`tenant ${tc.guid}'s catalog: ${appsRepo} names ${tenantCatalog.apps.map((a) => a.name).join(", ") || "no app"}`);
       // The registration is the GitOps truth for the tenant's target slave; apply-appproject pins the
       // new member's project against exactly it.
       const { cluster } = current.entry;
@@ -334,13 +342,14 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           ref: ports.registrations.branch,
           stage: tc.stage,
           apps: [{ name: req.app, seedReference: req.seedReference, seedDemo: req.seedDemo, selections: req.selections }],
+          tenantCatalog,
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,
           // The tenant's own bundle, as the appset delivers it: the new app's engine renders with it
           // and ensure-images probes it.
-          appsImage: current.entry.appsImage,
-          appsImageTag: current.entry.appsImageTag,
+          appsImage,
+          appsImageTag,
           clusterValueFiles,
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },

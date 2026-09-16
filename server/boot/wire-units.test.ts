@@ -16,6 +16,7 @@ import { masterKubeClients } from "./master-kube.ts";
 import { KubeClusterReader } from "../adapters/kube/kube.ts";
 import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
 import { buildUnits } from "./wire-units.ts";
+import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
 import { RUN_FAMILY } from "../../shared/enums.ts";
 import type { StepCtx } from "../executor/types.ts";
 
@@ -107,6 +108,11 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     // instance the tenant runs commit pointers through, never a second one.
     expect(wiring.tenantRegistrations).toBeDefined();
     expect(wiring.appCatalog).toBeDefined();
+    // A tenant's own catalog needs the GitHub App to read its repository: without one the reader
+    // stays out and the route says so; with one it rides out beside the wizard's catalog.
+    expect(wiring.tenantAppsManifest).toBeUndefined();
+    const [config, store, db, logger, kube] = setup();
+    expect(buildUnits(config, store, db, logger, kube, new FakeGitHubApp()).tenantAppsManifest).toBeDefined();
     // The consumer twin: the Registrations rides out so the detected scan
     // (GET /api/consumers/detected) diffs the very pointers the consumer runs commit.
     expect(wiring.registrations).toBeDefined();

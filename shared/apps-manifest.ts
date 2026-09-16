@@ -67,3 +67,23 @@ export function parseAppsManifest(text: string): AppsManifest {
   }
   return parsed.data;
 }
+
+/** One app of a tenant's own bundle, as its apps.yaml declares it, and whether the tenant deploys it:
+ *  `deployed` is the registration's apps[], the list the tenants ApplicationSet fans out over. The
+ *  tenant page offers the undeployed ones to tenant-add-app and marks the rest. */
+export interface TenantCatalogAppView extends AppEntry {
+  deployed: boolean;
+}
+
+/** GET /api/tenants/:id/app-catalog — a READ, and it degrades the way the orphan scan does: `apps`
+ *  alone is the answer only while neither field below is set. `reason` names why there is no catalog
+ *  to read BY DESIGN (tenant onboarding not wired, no GitHub App, a tenant without a bundle, a
+ *  repository without an apps.yaml); `error` means the read itself failed (the App refused, the clone
+ *  failed, the file does not parse), so `apps: []` says NOTHING and the page must show the error,
+ *  never "the bundle carries no app". Declared beside the entry it extends rather than in
+ *  api-types.ts, which stands at the file-size budget. */
+export interface TenantAppCatalogView {
+  apps: TenantCatalogAppView[];
+  reason?: string;
+  error?: string;
+}

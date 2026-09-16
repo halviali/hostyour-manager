@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { ClonedRepo, RepoReader } from "../../adapters/git/port.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
+import type { CredentialStore } from "../../security/store.ts";
 import { TenantSpecSchema } from "../../../shared/consumer.ts";
 import { APPS_MANIFEST_PATH } from "../../../shared/apps-manifest.ts";
 import {
@@ -9,6 +11,7 @@ import {
   makeAppCatalogProvider,
   readAppCatalog,
   readAppsManifest,
+  readTenantAppsManifest,
 } from "./app-catalog.ts";
 
 /** The engine chart the fixture product declares — the stand-in reads it out of the manifest, so
@@ -98,6 +101,67 @@ describe("readAppsManifest (the primitive: one apps repository, one credential)"
     const repo = new FakeRepoReader({ files: {} });
     expect(await readAppsManifest({ repo, repoURL: APPS_REPO })).toBeNull();
     expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD" }]);
+  });
+});
+
+/** A store that records what was sealed, purged and opened: the read seals the App's token, clones
+ *  under that id and purges it; it never opens anything, because the reader opens. */
+function fakeCreds(): { store: Pick<CredentialStore, "seal" | "purge">; seals: { id: string; kind: string; plaintext: string }[]; purged: string[]; opened: string[] } {
+  const seals: { id: string; kind: string; plaintext: string }[] = [];
+  const purged: string[] = [];
+  const opened: string[] = [];
+  const store = {
+    seal: async (i: { kind: string; label: string; plaintext: Buffer; fingerprint: string }) => {
+      const id = `cred_${seals.length + 1}`;
+      seals.push({ id, kind: i.kind, plaintext: i.plaintext.toString("utf8") });
+      return { id, kind: i.kind, label: i.label, fingerprint: i.fingerprint };
+    },
+    purge: async (id: string) => { purged.push(id); },
+    open: async (id: string) => { opened.push(id); return Buffer.from("never"); },
+  };
+  return { store: store as unknown as Pick<CredentialStore, "seal" | "purge">, seals, purged, opened };
+}
+
+describe("readTenantAppsManifest (a standing tenant's own catalog, under a credential minted now)", () => {
+  const TENANT_REPO = "https://github.com/acme/acme-tenant-apps.git";
+
+  it("clones the tenant's repository at its default branch head under a credential sealed from the App's fresh token, and purges it after the read — no stored credential is opened", async () => {
+    const repo = new FakeRepoReader({});
+    repo.scriptFor(TENANT_REPO, { files: { [APPS_MANIFEST_PATH]: APPS_YAML } });
+    const githubApp = new FakeGitHubApp();
+    githubApp.token = "ghs_minted_now";
+    const creds = fakeCreds();
+    const m = await readTenantAppsManifest({ appsRepo: TENANT_REPO, repo, githubApp, creds: creds.store });
+    expect(m?.apps.map((a) => a.name)).toEqual(["erp", "web"]);
+    expect(creds.seals).toEqual([{ id: "cred_1", kind: "pat", plaintext: "ghs_minted_now" }]);
+    expect(repo.clones).toEqual([{ repoURL: TENANT_REPO, ref: "HEAD", credentialId: "cred_1" }]);
+    expect(creds.purged).toEqual(["cred_1"]);
+    expect(creds.opened).toEqual([]);
+  });
+
+  it("answers null where the repository carries no apps.yaml, and still purges the credential", async () => {
+    const repo = new FakeRepoReader({ files: { "README.md": "x" } });
+    const creds = fakeCreds();
+    expect(await readTenantAppsManifest({ appsRepo: TENANT_REPO, repo, githubApp: new FakeGitHubApp(), creds: creds.store })).toBeNull();
+    expect(creds.purged).toEqual(["cred_1"]);
+  });
+
+  it("purges the credential when the clone fails, and lets the failure through", async () => {
+    const repo: RepoReader = {
+      cloneAtRef: async () => { throw new Error("clone failed: authentication required"); },
+      readFile: async () => null, listDir: async () => [], dispose: async () => {},
+    };
+    const creds = fakeCreds();
+    await expect(readTenantAppsManifest({ appsRepo: TENANT_REPO, repo, githubApp: new FakeGitHubApp(), creds: creds.store })).rejects.toThrow(/clone failed/);
+    expect(creds.purged).toEqual(["cred_1"]);
+  });
+
+  it("seals nothing when the App refuses the token", async () => {
+    const githubApp = new FakeGitHubApp();
+    githubApp.failWith = new Error("installation suspended");
+    const creds = fakeCreds();
+    await expect(readTenantAppsManifest({ appsRepo: TENANT_REPO, repo: new FakeRepoReader({}), githubApp, creds: creds.store })).rejects.toThrow(/installation suspended/);
+    expect(creds.seals).toEqual([]);
   });
 });
 

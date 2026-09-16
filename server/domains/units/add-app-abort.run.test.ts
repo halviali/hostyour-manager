@@ -115,6 +115,8 @@ function harness(): Harness {
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
+    // The tenant's own catalog names the new app with no selection — the plan judges against it.
+    tenantAppsManifest: async () => ({ apps: [{ name: NEW_APP, title: NEW_APP, description: "", selections: {} }] }),
   };
   const def = makeAddAppDef(ports) as unknown as AnyRunDefinition;
   const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });

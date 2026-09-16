@@ -5,8 +5,10 @@
 // carries no list of apps and no list of selections. The template is the repository a tenant's own
 // apps repository is copied from, never a unit: the platform does not build it and no tenant mounts
 // it, so nothing here reaches for a registration or a unit's credential. readAppsManifest is the
-// primitive: one apps repository, one credential — a tenant's OWN bundle is read through it with
-// the tenant's credential by whoever offers a standing tenant its own catalog.
+// primitive: one apps repository, one credential. A STANDING tenant's own catalog is its own
+// bundle's apps.yaml, read through the same primitive by readTenantAppsManifest with a credential
+// minted from the GitHub App at the moment of the read, because the App is installed in the
+// organisation the tenant repositories live in and a token stored at the onboarding has expired.
 //
 // WHERE NO MANIFEST STANDS — the catalog declares no template, or the template carries no apps.yaml
 // yet — the catalog is what it was before the manifest existed: the engine chart's
@@ -17,6 +19,9 @@
 // Boundary: a domain module. It depends on the git RepoReader PORT, on shared/ and on nothing that
 // does IO of its own; the clone/read/dispose is the port's job. fallbackCatalog is pure.
 import type { RepoReader } from "../../adapters/git/port.ts";
+import type { GitHubApp } from "../../adapters/github-app/port.ts";
+import type { CredentialStore } from "../../security/store.ts";
+import { fingerprintSecret } from "../../security/fingerprint.ts";
 import { parse as parseYaml } from "yaml";
 import { appName } from "../../../shared/tenant.ts";
 import { SEED_SELECTIONS } from "../../../shared/app-selections.ts";
@@ -78,6 +83,37 @@ export async function readAppsManifest(input: ReadAppsManifestInput): Promise<Ap
     return text === null ? null : parseAppsManifest(text);
   } finally {
     await input.repo.dispose(cloned.workdir);
+  }
+}
+
+export interface ReadTenantAppsManifestInput {
+  /** The tenant's own apps repository — `appsRepo` off its registration (shared/tenant.ts). */
+  appsRepo: string;
+  /** A reader that opens a SEALED credential by id (wire-units.ts: the tenant family's reader does,
+   *  for every id but the catalog's own). */
+  repo: RepoReader;
+  githubApp: GitHubApp;
+  creds: Pick<CredentialStore, "seal" | "purge">;
+  signal?: AbortSignal;
+}
+
+/** The reader of ONE tenant's own catalog, closed over the reader, the App and the store where the
+ *  ports are built: `tenant-add-app` judges against what it answers and the tenant page shows it. */
+export type TenantAppsManifestReader = (appsRepo: string, signal?: AbortSignal) => Promise<AppsManifest | null>;
+
+/** A standing tenant's OWN catalog: the apps.yaml of its bundle's repository, cloned at its default
+ *  branch head with a credential minted from the App NOW and sealed for this one read — the id is
+ *  purged in finally, so nothing of the token outlives the clone (a token stored at the onboarding
+ *  has expired, hostyour-manager#184). null where the repository carries no apps.yaml; throws where
+ *  the App refuses, the clone fails or the file does not parse. */
+export async function readTenantAppsManifest(input: ReadTenantAppsManifestInput): Promise<AppsManifest | null> {
+  const plaintext = Buffer.from(await input.githubApp.installationToken(input.signal), "utf8");
+  const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
+  const ref = await input.creds.seal({ kind: "pat", label: `GitHub App installation token (catalog read of ${input.appsRepo})`, plaintext, fingerprint });
+  try {
+    return await readAppsManifest({ repo: input.repo, repoURL: input.appsRepo, credentialId: ref.id, ...(input.signal ? { signal: input.signal } : {}) });
+  } finally {
+    await input.creds.purge(ref.id);
   }
 }
 

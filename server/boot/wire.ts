@@ -42,6 +42,7 @@ import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/a
 import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
+import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
@@ -308,6 +309,8 @@ export async function wire(): Promise<Wired> {
       registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.catalogRepoUrl ? { catalogRepoUrl: units.catalogRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
+      // One tenant's own catalog, read through the same closure tenant-add-app judges against.
+      registerTenantAppCatalogRoute(a, { db: db.db, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.tenantAppsManifest ? { tenantAppsManifest: units.tenantAppsManifest } : {}) });
       registerResetRoutes(a, {
         config, db: db.db, sqlite: db.sqlite, store, logger,
         github,

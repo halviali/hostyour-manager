@@ -1,6 +1,7 @@
 // The tenant (multi-app fan-out) validation core. The
 // tenant analogue of validate.ts: it clones catalog@ref Manager-side, parses the fan-out
-// manifest, reads the app catalog the apps repository declares (app-catalog.ts), resolves the fan-out
+// manifest, takes the app catalog — a standing tenant's own, handed in by add-app, or the
+// template's the apps repository declares, read here (app-catalog.ts) — resolves the fan-out
 // (the standing members + the guid × apps[] matrix) at a THROWAWAY probe guid, renders every member
 // INTO ITS OWN member namespace with the Manager's own HelmRenderer (the tenant charts are TRUSTED
 // first-party charts, so there is no sandbox — the Manager renders them itself), and runs the T1..T4
@@ -57,6 +58,11 @@ export interface ValidateTenantRequest {
   stage: Stage;
   /** The apps and the selections each chose — T4 holds both against the app catalog. */
   apps: AppChoice[];
+  /** A STANDING tenant's own catalog: the apps.yaml of its bundle's repository (app-catalog.ts
+   *  readTenantAppsManifest), given by add-app. Present, T4 judges against it and nothing reads the
+   *  template; absent, the template's catalog is read off the checkout, which is what a NEW tenant
+   *  chooses from. */
+  tenantCatalog?: AppsManifest;
   probeGuid: string; // the throwaway guid the fan-out is rendered at
   /** The subdomain the tenant stands on — the members render at `<member>.<subdomain>.<stage apex>`
    *  (tenant.zone), so the validation holds the hosts the deploy will serve. */
@@ -220,8 +226,9 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // appsImage, appsImageTag),
       // which every source gets and each chart uses what it needs.
       // The app catalog first: what the apps repository's manifest declares fills the fan-out
-      // (`{databases}`) and is what T4 holds the request against. A stand-in is said in the log.
-      const catalog = await readAppCatalog({
+      // (`{databases}`) and is what T4 holds the request against — the tenant's own where the
+      // caller read it, else the template's. A stand-in is said in the log.
+      const catalog = req.tenantCatalog ?? await readAppCatalog({
         spec: t1.spec,
         catalog: { repo: deps.repo, workdir: cloned.workdir, ...(req.credentialId ? { credentialId: req.credentialId } : {}) },
         warn: deps.log,
@@ -304,7 +311,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       images = collectContainerImages(docsByMember.flatMap((m) => m.docs));
       const t2 = gateT2Render(renders);
       const t3 = gateT3Isolation(docsByMember);
-      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: t1.spec.members.map((m) => m.name), catalog });
+      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: t1.spec.members.map((m) => m.name), catalog, isTenantCatalog: req.tenantCatalog !== undefined });
       for (const g of [t2, t3, t4]) {
         gates.push(g);
         streamGate(deps, g);
