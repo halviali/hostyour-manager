@@ -374,8 +374,9 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
 }
 
 /** Exported for the tenant onboarding, which runs this very chain per build unit it lacks (tenant-builds.ts). */
-export function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams): Step[] {
-  const release: ReleaseCycleRuntime = {};
+/** `release` is the in-run memory the watch fills; a caller that reads what the release built (the
+ *  tenant run, for the tenant's own bundle) hands its own in. */
+export function buildOnlySteps(ports: OnboardPorts, p: BuildOnlyOnboardParams, release: ReleaseCycleRuntime = {}): Step[] {
   return [
     // No attest-target: there is no target cluster whose deploy-state could be attested — the run kind
     // touches git, the local Vault and the build plane's own namespaces, all on the cluster the

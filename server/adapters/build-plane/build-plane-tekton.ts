@@ -41,12 +41,18 @@ export interface ListedPipelineRun {
   params: Record<string, string>;
 }
 
+export interface PipelineRunOutcome {
+  succeeded: boolean;
+  imageTag?: string;
+}
+
 /** The narrow cluster seam the build plane needs — a fake in tests, KubeBuildPlaneCluster in
  *  production. Every call names the unit's OWN `<unit>-build` namespace; there is no default. */
 export interface BuildPlaneCluster {
   listPipelineRuns(labelSelector: string, namespace: string): Promise<ListedPipelineRun[]>;
-  /** null while the PipelineRun is still running; {succeeded} once its Succeeded condition settles. */
-  pipelineRunOutcome(name: string, namespace: string): Promise<{ succeeded: boolean } | null>;
+  /** null while the PipelineRun is still running; {succeeded, imageTag} once its Succeeded condition
+   *  settles — imageTag is the run's `image-tag` result, absent when the run states none. */
+  pipelineRunOutcome(name: string, namespace: string): Promise<PipelineRunOutcome | null>;
 }
 
 /** The production cluster seam over @kubernetes/client-node. */
@@ -82,13 +88,16 @@ export class KubeBuildPlaneCluster implements BuildPlaneCluster {
       }));
   }
 
-  async pipelineRunOutcome(name: string, namespace: string): Promise<{ succeeded: boolean } | null> {
+  async pipelineRunOutcome(name: string, namespace: string): Promise<PipelineRunOutcome | null> {
     const raw = (await this.custom.getNamespacedCustomObject({ ...TEKTON, namespace, name })) as {
-      status?: { conditions?: Array<{ type?: string; status?: string }> };
+      status?: { conditions?: Array<{ type?: string; status?: string }>; results?: Array<{ name?: string; value?: unknown }> };
     };
     const cond = (raw.status?.conditions ?? []).find((c) => c.type === "Succeeded");
     if (!cond || cond.status === undefined || cond.status === "Unknown") return null; // still running
-    return { succeeded: cond.status === "True" };
+    // The pipeline's own `image-tag` result: `<release tag>-<sha7>`, the tag every build of the run
+    // was pushed and pinned under (consumer-build pipeline-release.yaml, results).
+    const imageTag = (raw.status?.results ?? []).find((r) => r.name === "image-tag")?.value;
+    return { succeeded: cond.status === "True", ...(typeof imageTag === "string" && imageTag.length > 0 ? { imageTag } : {}) };
   }
 }
 
@@ -132,13 +141,13 @@ export class TektonBuildPlane implements BuildPlane {
         .sort((a, b) => a.creationTimestamp.localeCompare(b.creationTimestamp))
         .at(-1);
       if (match) {
-        let outcome: { succeeded: boolean } | null;
+        let outcome: PipelineRunOutcome | null;
         try {
           outcome = await this.cluster.pipelineRunOutcome(match.name, ns);
         } catch (e) {
           throw upstream(`could not read PipelineRun ${ns}/${match.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
-        if (outcome !== null) return { runName: match.name, releaseTag: match.params["release-tag"] ?? "", succeeded: outcome.succeeded };
+        if (outcome !== null) return { runName: match.name, releaseTag: match.params["release-tag"] ?? "", ...outcome };
       } else if (Date.now() >= appearBy) {
         return null; // nothing appeared — the caller decides
       }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TektonBuildPlane, type BuildPlaneCluster, type ListedPipelineRun, type TektonBuildPlaneConfig } from "./build-plane-tekton.ts";
+import { TektonBuildPlane, type BuildPlaneCluster, type ListedPipelineRun, type PipelineRunOutcome, type TektonBuildPlaneConfig } from "./build-plane-tekton.ts";
 
 // The Tekton BuildPlane over a scripted cluster seam — no cluster, no network (the same test
 // shape as gate-runner-tekton.test.ts). The load-bearing assertions: the release watch finds the
@@ -13,8 +13,8 @@ interface Rec {
 
 class FakeCluster implements BuildPlaneCluster {
   rec: Rec = { listSelectors: [], listNamespaces: [] };
-  private outcomes: Array<{ succeeded: boolean } | null>;
-  constructor(private script: { runs?: ListedPipelineRun[]; outcomes?: Array<{ succeeded: boolean } | null> } = {}) {
+  private outcomes: Array<PipelineRunOutcome | null>;
+  constructor(private script: { runs?: ListedPipelineRun[]; outcomes?: Array<PipelineRunOutcome | null> } = {}) {
     this.outcomes = [...(script.outcomes ?? [])];
   }
   async listPipelineRuns(labelSelector: string, namespace: string): Promise<ListedPipelineRun[]> {
@@ -22,7 +22,7 @@ class FakeCluster implements BuildPlaneCluster {
     this.rec.listNamespaces.push(namespace);
     return this.script.runs ?? [];
   }
-  async pipelineRunOutcome(): Promise<{ succeeded: boolean } | null> {
+  async pipelineRunOutcome(): Promise<PipelineRunOutcome | null> {
     // Consume the scripted outcome sequence; the last entry repeats (models a settled run).
     return this.outcomes.length > 1 ? (this.outcomes.shift() ?? null) : (this.outcomes[0] ?? null);
   }
@@ -49,6 +49,14 @@ describe("TektonBuildPlane", () => {
     expect(out).toEqual({ runName: "acme-release-7", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
     expect(c.rec.listSelectors.at(-1)).toBe("image-builder.io/consumer=acme");
     expect(c.rec.listNamespaces.at(-1)).toBe("acme-build"); // the per-unit namespace, never image-builder
+  });
+
+  it("carries the run's image-tag result — the immutable <release tag>-<sha7> every build was pushed under — when the run states one", async () => {
+    const runs = [{ name: "acme-release-8", creationTimestamp: "2026-07-28T11:00:00Z", params: { "release-tag": "1.1.0-stable-20260728110000" } }];
+    const stated = new TektonBuildPlane(cfg(), new FakeCluster({ runs, outcomes: [{ succeeded: true, imageTag: "1.1.0-stable-20260728110000-abc1234" }] }));
+    expect(await stated.awaitReleaseRun({ unit: "acme", version: "1.1.0", channel: "stable" }, { appearMs: 100 })).toMatchObject({ succeeded: true, imageTag: "1.1.0-stable-20260728110000-abc1234" });
+    const unstated = new TektonBuildPlane(cfg(), new FakeCluster({ runs, outcomes: [{ succeeded: true }] }));
+    expect(await unstated.awaitReleaseRun({ unit: "acme", version: "1.1.0", channel: "stable" }, { appearMs: 100 })).not.toHaveProperty("imageTag");
   });
 
   it("awaitReleaseRun returns null when no matching run APPEARS inside the budget (the caller decides)", async () => {

@@ -20,11 +20,15 @@ export interface ReleaseRunQuery {
 }
 
 /** The observed end of a release run: which PipelineRun it was, the FULL release tag its param
- *  carried (the minted truth the manager reads, never computes), and whether it succeeded. */
+ *  carried (the minted truth the manager reads, never computes), whether it succeeded, and the
+ *  immutable image tag `<release tag>-<sha7>` its `image-tag` result states — read off the run for
+ *  the same reason the release tag is: the sha7 is the commit the release script stamped and tagged,
+ *  which the manager never cloned. Absent when the run exposes no such result. */
 export interface ReleaseRunOutcome {
   runName: string;
   releaseTag: string;
   succeeded: boolean;
+  imageTag?: string;
 }
 
 export interface BuildPlane {

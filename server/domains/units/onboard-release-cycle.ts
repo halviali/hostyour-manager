@@ -29,10 +29,12 @@ import { errValidation } from "../../kernel/errors.ts";
 export const RELEASE_WORKFLOW_FILE = "release.yml";
 
 /** In-run memory the release-cycle steps share within ONE execute() pass (the seed-secrets/activate
- *  precedent): `releaseTag` is the FULL minted tag read off the build run's param. Lost on a
- *  crash-resume — the watch then re-reads it. */
+ *  precedent): `releaseTag` is the FULL minted tag read off the build run's param, `imageTag` the
+ *  immutable `<release tag>-<sha7>` read off the run's `image-tag` result — what the run pushed
+ *  every build under. Lost on a crash-resume — the watch then re-reads both. */
 export interface ReleaseCycleRuntime {
   releaseTag?: string | undefined;
+  imageTag?: string | undefined;
 }
 
 const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
@@ -126,8 +128,9 @@ export function watchReleaseBuildStep(ports: OnboardPorts, p: OnboardParams, run
         throw errValidation(`release PipelineRun ${ns}/${outcome.runName} (${outcome.releaseTag}) FAILED — the release cycle died in the build plane; read that run's log`);
       }
       runtime.releaseTag = outcome.releaseTag;
-      ctx.checkpoint({ pipelineRun: outcome.runName, releaseTag: outcome.releaseTag });
-      ctx.log("meta", `release PipelineRun ${ns}/${outcome.runName} Succeeded — release ${outcome.releaseTag} is built, pushed and bumped for ${p.stage}`);
+      runtime.imageTag = outcome.imageTag;
+      ctx.checkpoint({ pipelineRun: outcome.runName, releaseTag: outcome.releaseTag, ...(outcome.imageTag ? { imageTag: outcome.imageTag } : {}) });
+      ctx.log("meta", `release PipelineRun ${ns}/${outcome.runName} Succeeded — release ${outcome.releaseTag} is built, pushed and bumped for ${p.stage}${outcome.imageTag ? ` as image tag ${outcome.imageTag}` : ""}`);
     },
   };
 }
