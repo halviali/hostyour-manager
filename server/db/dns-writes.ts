@@ -67,5 +67,5 @@ function rowToWrite(r: typeof dnsWrites.$inferSelect): DnsWrite & { writtenAt: D
 
 /** Every row of the book, newest write first. */
 export function listDnsWrites(db: Db): (DnsWrite & { writtenAt: Date })[] {
-  return db.select().from(dnsWrites).orderBy(desc(dnsWrites.writtenAt)).all().map(rowToWrite);
+  return db.select().from(dnsWrites).orderBy(desc(dnsWrites.writtenAt), dnsWrites.name, dnsWrites.type).all().map(rowToWrite);
 }

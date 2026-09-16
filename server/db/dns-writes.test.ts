@@ -14,7 +14,7 @@ afterEach(() => { db.sqlite.close(); });
 const HOST = { name: "post.example.net", type: "A" as const, owner: { kind: "consumer" as const, name: "post", stage: "prod" as const } };
 
 describe("the book of DNS writes", () => {
-  it("records an insert and an update as two rows, newest first, each with its owner and run", () => {
+  it("records an insert and an update as two rows, newest first — the same order on every read, even for two writes in one millisecond — each with its owner and run", () => {
     recordDnsWrite(db.db, { ...HOST, content: "203.0.113.9", act: "inserted", runId: "run_1" });
     recordDnsWrite(db.db, { name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", act: "updated", owner: { kind: "mail", name: "example.com" }, runId: "run_2" });
     const rows = listDnsWrites(db.db);
