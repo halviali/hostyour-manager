@@ -153,6 +153,42 @@ function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; origin?: 
 
 const MANIFEST = "name: probe-unit\nbuilds:\n  - name: probe\n";
 
+/** One more commit on the fixture's master, pushed to origin: the tree has moved past whatever was
+ *  released before it, the way a fix landing after a refused release moves it. */
+function moveMaster(f: Fixture): void {
+  writeFileSync(join(f.cwd, "fix.txt"), "landed after the release\n");
+  for (const args of [["add", "fix.txt"], ["commit", "-qm", "fix"], ["push", "-q", "origin", "HEAD:master"]]) {
+    const r = run("git", args, f.cwd);
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  }
+}
+
+/** A repository whose 1.2.3-stable release already stands on origin, put on dev by the bash spelling:
+ *  the rerun is the subject here, and the first run's bytes are what the success-path scenario
+ *  asserts. With `moved`, master has one commit on top of the released one. */
+function releasedRepo(opts: { moved: boolean }): Fixture {
+  const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
+  const first = run(BASH, [SCRIPTS.sh, "1.2.3", "stable", "dev"], f.cwd);
+  if (first.status !== 0) throw new Error(`the first release failed: ${first.stderr}`);
+  if (opts.moved) moveMaster(f);
+  return f;
+}
+
+/** A repository carrying a 1.2.3-stable tag that never reached origin and names the commit before
+ *  HEAD — what a run whose push was refused leaves behind once the fix has landed. */
+function residueRepo(): Fixture {
+  const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
+  const tag = run("git", ["tag", "-a", "1.2.3-stable-20200101000000", "-m", "residue"], f.cwd);
+  if (tag.status !== 0) throw new Error(`git tag failed: ${tag.stderr}`);
+  moveMaster(f);
+  return f;
+}
+
+/** Every ref origin holds, with its commit — the whole of what a release may move. */
+const originRefs = (f: Fixture): string => run("git", ["ls-remote", "origin"], f.cwd).stdout;
+const head = (f: Fixture): string => run("git", ["rev-parse", "HEAD"], f.cwd).stdout.trim();
+const releaseTags = (f: Fixture): string[] => run("git", ["tag", "-l", "1.2.3-stable-*"], f.cwd).stdout.split("\n").filter((l) => l.length > 0);
+
 /** A directory that is no repository at all — where the two refusals needing none are performed. */
 function bareDir(): Fixture {
   const dir = tempDir();
@@ -167,13 +203,14 @@ interface Fixture {
   root: string;
 }
 
-/** One scenario, performed twice on two identical repositories. */
-function bothSpellings(build: () => Fixture, args: string[]): { sh: ReturnType<typeof run> & { root: string }; ps1: ReturnType<typeof run> & { root: string } } {
+/** One scenario, performed twice on two identical repositories. Each side answers with its fixture
+ *  as well, so a scenario can read what the run left on origin. */
+function bothSpellings(build: () => Fixture, args: string[]): { sh: ReturnType<typeof run> & Fixture; ps1: ReturnType<typeof run> & Fixture } {
   const sh = build();
   const ps1 = build();
   return {
-    sh: { ...run(BASH, [SCRIPTS.sh, ...args], sh.cwd), root: sh.root },
-    ps1: { ...run("pwsh", ["-NoProfile", "-NonInteractive", "-File", SCRIPTS.ps1, ...args], ps1.cwd), root: ps1.root },
+    sh: { ...run(BASH, [SCRIPTS.sh, ...args], sh.cwd), ...sh },
+    ps1: { ...run("pwsh", ["-NoProfile", "-NonInteractive", "-File", SCRIPTS.ps1, ...args], ps1.cwd), ...ps1 },
   };
 }
 
@@ -299,6 +336,65 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     ].join("\n"));
     // git's own push lines are on standard error, and they are the same on both sides too.
     expect(stderr).toContain("deploy/dev/1.2.3-stable-<ts14>");
+  });
+
+  // A RERUN FOR A VERSION THAT ALREADY STANDS ON ORIGIN, in its three shapes. A version names one
+  // commit (#173): the tag on HEAD is reused and the delivery ref moves; the tag on another commit is
+  // refused before any push and the refusal names the next number; a tag that never reached origin is
+  // residue and is cut again. Each is performed by both spellings and read back off origin.
+
+  it("refuses a rerun whose tag stands on origin on another commit, before any push, naming the next number", RUNS, () => {
+    const before = new Map<string, string>();
+    const o = bothSpellings(() => {
+      const f = releasedRepo({ moved: true });
+      before.set(f.cwd, originRefs(f));
+      return f;
+    }, ["1.2.3", "stable", "test"]);
+    const { stdout, stderr } = expectSameBytes(o);
+    expect(o.sh.status).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toBe(
+      "release: 1.2.3-stable-<ts14> stands on origin at <sha7> and HEAD is <sha7>. A version names one commit, so 1.2.3 is burnt: release 1.2.4 instead. Nothing was pushed.\n",
+    );
+    for (const f of [o.sh, o.ps1]) {
+      // Nothing on origin moved: not the delivery branch of the stage asked for, not the one of the
+      // stage already released, not the tag.
+      expect(originRefs(f)).toBe(before.get(f.cwd));
+      expect(originRefs(f)).not.toContain("refs/heads/deploy/test");
+      expect(originRefs(f)).not.toContain(`${head(f)}\trefs/heads/deploy/dev`);
+    }
+  });
+
+  it("reuses a tag that stands on origin on HEAD and moves the delivery ref — a further stage, or a retry", RUNS, () => {
+    const o = bothSpellings(() => releasedRepo({ moved: false }), ["1.2.3", "stable", "test"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
+    expect(stdout).toContain("release: deploy/test stands at <sha7>\n");
+    expect(stdout).not.toContain("minted");
+    for (const f of [o.sh, o.ps1]) {
+      const [tag] = releaseTags(f);
+      expect(releaseTags(f)).toHaveLength(1);
+      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/deploy/test\n`);
+      expect(originRefs(f)).toContain(`refs/tags/deploy/test/${tag}\n`);
+    }
+  });
+
+  it("drops a tag that never reached origin and names another commit, and cuts the release again", RUNS, () => {
+    const o = bothSpellings(() => residueRepo(), ["1.2.3", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain(
+      "release: 1.2.3-stable-<ts14> stands on this machine only and names <sha7>, not the commit being released. A run whose push was refused left it behind; it is dropped and cut again.\n",
+    );
+    expect(stdout).toContain("release: minted 1.2.3-stable-<ts14>\n");
+    for (const f of [o.sh, o.ps1]) {
+      const tags = releaseTags(f);
+      expect(tags).toHaveLength(1);
+      expect(tags[0]).not.toBe("1.2.3-stable-20200101000000");
+      expect(originRefs(f)).toContain(`refs/tags/${tags[0]}\n`);
+      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/deploy/dev\n`);
+    }
   });
 
   it("COUNTER-PROBE: the comparison sees a difference when there is one", RUNS, () => {

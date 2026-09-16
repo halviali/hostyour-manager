@@ -27,7 +27,10 @@
 #      <x.y.z>-<channel>-<ts14> (ts14 = UTC yyyyMMddHHmmss) on HEAD and pushes
 #      the commit + the tag. A later run for the SAME version+channel REUSES
 #      that tag — that is how a release reaches a further stage without being
-#      rebuilt: the same commit, the same image, one more stage.
+#      rebuilt: the same commit, the same image, one more stage. A VERSION
+#      NAMES ONE COMMIT: a rerun whose tag stands on origin on a commit other
+#      than HEAD is refused before any push, and the refusal names the next
+#      number to mint (#173).
 #   6. Places the delivery branch deploy/<stage> on the release commit - the
 #      branch the unit's Application renders its chart off - and then
 #      deletes and re-pushes the deploy ref refs/tags/deploy/<stage>/<tag>.
@@ -229,6 +232,7 @@ git fetch --tags --quiet origin 2>/dev/null || true
 
 PREFIX="${VERSION}-${CHANNEL}-"
 EXISTING="$(git tag -l "${PREFIX}*" | sort | tail -1)"
+HEAD_SHA="$(git rev-parse --verify HEAD)"
 
 # A TAG THAT NEVER REACHED ORIGIN AND NAMES ANOTHER COMMIT IS RESIDUE, and reusing it aims every
 # retry at the commit a refused push left behind. The tag is minted before it is pushed, so a push
@@ -237,14 +241,28 @@ EXISTING="$(git tag -l "${PREFIX}*" | sort | tail -1)"
 #
 # A TAG THAT IS ON ORIGIN IS LEFT EXACTLY AS IT STANDS, whatever commit it names. That is mint-once
 # itself, and the reuse below relies on it: one release per version+channel, put on a further stage
-# without rebuilding, which is why the release commit is read off the tag and never off HEAD.
+# without rebuilding.
 if [ -n "$EXISTING" ] \
   && ! git ls-remote --exit-code --tags origin "refs/tags/${EXISTING}" >/dev/null 2>&1 \
-  && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$(git rev-parse --verify HEAD)" ]; then
+  && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$HEAD_SHA" ]; then
   say "${EXISTING} stands on this machine only and names $(git rev-parse --short=7 "${EXISTING}^{commit}"), not the commit being released. A run whose push was refused left it behind; it is dropped and cut again."
   git tag -d "$EXISTING" >/dev/null \
     || die "the leftover tag ${EXISTING} could not be dropped, and reusing it would release a commit nobody is releasing"
   EXISTING=""
+fi
+
+# A VERSION NAMES ONE COMMIT. A tag that survived the residue rule and names a commit other than
+# HEAD is on origin, and origin's tag is the release: what stands at HEAD is a different tree, and
+# the version cannot name both. Reusing the tag would push its commit to the delivery branch from a
+# checkout standing elsewhere - a push the organisation's pre-push hook refuses as "not what is
+# checked out", after the tag was reused and in words about the delivery branch. So the refusal is
+# here, before any push, and it names the next number: a commit that failed its own push is not
+# repaired under its number but succeeded by the next one (#173). The next number is the patch
+# plus one. This script reads no other repository, so where one sequence spans several, the person
+# holds that the number is still free.
+if [ -n "$EXISTING" ] && [ "$(git rev-parse --verify --quiet "${EXISTING}^{commit}")" != "$HEAD_SHA" ]; then
+  NEXT="${VERSION%.*}.$(( ${VERSION##*.} + 1 ))"
+  die "${EXISTING} stands on origin at $(git rev-parse --short=7 "${EXISTING}^{commit}") and HEAD is $(git rev-parse --short=7 HEAD). A version names one commit, so ${VERSION} is burnt: release ${NEXT} instead. Nothing was pushed."
 fi
 
 if [ -n "$EXISTING" ]; then
@@ -260,7 +278,8 @@ else
   say "minted ${TAG}"
 fi
 
-# The release COMMIT is the tag's, never HEAD — on a reuse, HEAD has usually moved on.
+# The release COMMIT is the tag's. The rule above makes it HEAD as well, so every push below sends
+# what is checked out.
 SHA="$(git rev-list -n 1 "$TAG")"
 SHA7="${SHA:0:7}"
 

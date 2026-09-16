@@ -75,6 +75,21 @@ describe("release-kit embedded assets", () => {
     expect(byPath["release/release.ps1"]!).toContain("reusing the existing release");
   });
 
+  it("refuses a rerun whose tag stands on origin on another commit, naming the next number (#173)", () => {
+    // A version names one commit. The sentence is the same in both spellings, and it stands BEFORE
+    // the delivery-branch push in each, so the pre-push hook's "not what is checked out" is never
+    // what a release answers with. The run itself is asserted in release-twins.test.ts.
+    const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
+    for (const [script, refusal, push] of [
+      [byPath["release/release.sh"]!, 'so ${VERSION} is burnt: release ${NEXT} instead. Nothing was pushed."', 'git push --force origin "${SHA}:${DELIVERY_BRANCH}"'],
+      [byPath["release/release.ps1"]!, 'so $Version is burnt: release $next instead. Nothing was pushed."', 'git push --force origin "${sha}:$deliveryBranch"'],
+    ] as const) {
+      const at = script.indexOf(refusal);
+      expect(at).toBeGreaterThan(-1);
+      expect(script.indexOf(push)).toBeGreaterThan(at);
+    }
+  });
+
   it("checks the channel ceiling locally but WARNS instead of refusing — only the pipeline may refuse", () => {
     const byPath = Object.fromEntries(RELEASE_KIT_FILES.map((f) => [f.path, f.content]));
 
