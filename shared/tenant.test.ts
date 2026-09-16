@@ -224,6 +224,31 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
     expect("stage" in parsed).toBe(false);
     expect("chartsRef" in parsed).toBe(false);
   });
+
+  describe("the tenant's own apps bundle — appsRepo, appsImage, appsImageTag", () => {
+    const BUNDLE = { appsRepo: "https://github.com/acme/acme-apps.git", appsImage: "acme-apps", appsImageTag: "0.1.0-stable-20260101000000-abc1234" };
+    it("carries all three, and round-trips them", () => {
+      const parsed = TenantRegistrationSchema.parse(registration(BUNDLE));
+      expect(parsed).toMatchObject(BUNDLE);
+      expect(TenantRegistrationSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+    });
+    it("carries the empty pair for a tenant without one — what the composer writes so the appset reads both bare", () => {
+      const parsed = TenantRegistrationSchema.parse(registration({ appsImage: "", appsImageTag: "" }));
+      expect(parsed.appsImage).toBe("");
+      expect(parsed.appsImageTag).toBe("");
+      expect(parsed.appsRepo).toBeUndefined();
+    });
+    it("refuses an image without its tag, a tag without its image, and a repository alone", () => {
+      const why = (over: Record<string, unknown>) => TenantRegistrationSchema.safeParse(registration(over)).error?.issues[0]?.message;
+      expect(why({ appsRepo: BUNDLE.appsRepo, appsImage: BUNDLE.appsImage })).toMatch(/appsRepo, appsImage and appsImageTag together/);
+      expect(why({ appsImageTag: BUNDLE.appsImageTag })).toMatch(/appsRepo, appsImage and appsImageTag together/);
+      expect(why({ appsRepo: BUNDLE.appsRepo, appsImage: "", appsImageTag: "" })).toMatch(/appsRepo, appsImage and appsImageTag together/);
+    });
+    it("holds the image to the flat build-name grammar and the repository to an https .git URL", () => {
+      expect(TenantRegistrationSchema.safeParse(registration({ ...BUNDLE, appsImage: "zot.example/acme-apps" })).success).toBe(false);
+      expect(TenantRegistrationSchema.safeParse(registration({ ...BUNDLE, appsRepo: "git@github.com:acme/acme-apps.git" })).success).toBe(false);
+    });
+  });
 });
 
 describe("ConsumerManifest tenant: fan-out block", () => {

@@ -20,7 +20,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -232,7 +232,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
   it("no existing subdomain: a plain onboard, NO offboard steps prepended", async () => {
     seedClusters();
     const def = makeCreateTenantDef(ports(makeRegistrations()));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.replaces).toEqual([]);
@@ -246,7 +246,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration(), runId: "run_old" });
     const def = makeCreateTenantDef(ports(registrations));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.replaces).toEqual([
@@ -272,7 +272,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_2", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration({ cluster: "s2" }), runId: "run_old" });
-    await expect(makeCreateTenantDef(ports(registrations)).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx()))
+    await expect(makeCreateTenantDef(ports(registrations)).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx()))
       .rejects.toThrow(`tenant ${OLD} on cluster "s2" (cls_2), not on the target s1.example ("s1", cls_1) — a replace across two clusters of one installation is refused before any teardown`);
     expect(await registrations.readTenant("prod", OLD)).not.toBeNull(); // nothing was torn down
   });
@@ -282,7 +282,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration(), runId: "run_old" });
     const def = makeCreateTenantDef(ports(registrations));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // The GitOps pointer scan caught the orphan (clusterId derived from the pointer's slave name).

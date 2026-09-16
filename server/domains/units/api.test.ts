@@ -39,7 +39,7 @@ import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "./unit-size.ts";
-import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 
 const SHA = "a".repeat(40);
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
@@ -374,7 +374,7 @@ function seedTenant(): void {
 
 // The request targets the seeded slave cls_2. resolveCluster is role-agnostic — it requires only
 // an ACTIVE cluster — so the slave here is test topology, not an enforced law.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }], ...TEST_BUNDLE };
 
 describe("tenant API", () => {
   it("501 NOT_CONFIGURED on create-tenant when tenant onboarding is not wired", async () => {

@@ -19,7 +19,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
-import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
@@ -89,11 +89,11 @@ function repoWithManifest(resolvedSha = SHA): FakeRepoReader {
 
 /** A FakePlatformRepo pre-seeded with a live tenant carrying one app ("erp") — the registration file a
  *  create-tenant run would have committed, so add-app's readTenant folds it back correctly. */
-function seededPlatformRepo(): FakePlatformRepo {
+function seededPlatformRepo(bundle: { appsRepo?: string; appsImage?: string; appsImageTag?: string } = TEST_BUNDLE): FakePlatformRepo {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme",
-    members: testMembers([{ name: "erp" }]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
+    members: testMembers([{ name: "erp" }]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), ...bundle,
   });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
@@ -292,6 +292,16 @@ describe("add-app streaming planner", () => {
     seedClusters();
     const def = makeAddAppDef(ports());
     await expect(def.planStream!({ tenantId: "tnt_1", app: "erp" }, planCtx())).rejects.toThrow(/already exists/);
+  });
+
+  it("renders the new app with the tenant's OWN bundle off its registration, and refuses a tenant that has none", async () => {
+    seedClusters();
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
+    await makeAddAppDef(ports({ helm })).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    expect(helm.requests.find((r) => r.namespace === `${GUID}-${NEW_APP}-prod`)?.valuesObject).toMatchObject({ tenant: { appsImage: TEST_BUNDLE.appsImage, appsImageTag: TEST_BUNDLE.appsImageTag } });
+    // A tenant registered without a bundle (the empty pair) has nothing the new app's engine could mount.
+    const def = makeAddAppDef(ports({ registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) }));
+    await expect(def.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(/has no apps bundle/);
   });
 
   it("freezes both requested seed tiers into params (default false when the request omits them)", async () => {

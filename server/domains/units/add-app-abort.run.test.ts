@@ -24,7 +24,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
-import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // ABORT-WITH-CLEANUP on an add-app run, driven through the REAL executor — the member-scoped sibling
@@ -78,7 +78,7 @@ afterEach(() => { db.sqlite.close(); });
 
 function seededPlatformRepo(): FakePlatformRepo {
   const repo = new FakePlatformRepo();
-  const registration = TenantRegistrationSchema.parse({ cluster: "s1", members: testMembers([{ name: "erp" }]), identityProvider: "auth", subdomain: "acme", apps: [{ name: "erp" }], quota: seedQuota("small") });
+  const registration = TenantRegistrationSchema.parse({ cluster: "s1", members: testMembers([{ name: "erp" }]), identityProvider: "auth", subdomain: "acme", apps: [{ name: "erp" }], quota: seedQuota("small"), ...TEST_BUNDLE });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
   return repo;

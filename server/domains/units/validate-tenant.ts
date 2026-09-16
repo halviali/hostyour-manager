@@ -63,6 +63,13 @@ export interface ValidateTenantRequest {
   subdomain: string;
   /** The IdP's user boot-seed flag the registration will carry; delivered to the members like the deploy does. */
   seedUsers?: boolean;
+  /** The tenant's own apps bundle as the registration will carry it: the flat build name the engines
+   *  mount and the immutable image tag of its last release. Delivered under `tenant:` like the
+   *  deploy does, so the render yields the bundle's image ref and ensure-images probes it. Absent
+   *  for a tenant without one, which is delivered as the empty pair the registration carries then;
+   *  it reaches no engine, because a tenant with an app names a bundle (CreateTenantRequest). */
+  appsImage?: string | undefined;
+  appsImageTag?: string | undefined;
   /** The target cluster's values chain off its install branch. The tenant appsets layer exactly
    *  this chain onto every member chart at deploy, and the charts require values from it
    *  (example-lib.image reads global.endpoints.registry.host, the auth host composes from
@@ -211,7 +218,8 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // else, so every field it needs to render a member has to be in it. The charts, the extra value
       // files and the values are the PRODUCT's, copied out of its manifest with only `{app}` filled
       // in — the platform composes none of them. What the appset adds at render time is the tenant's
-      // own facts (guid, subdomain, stage, member, appName, apps, seedUsers, suspended, quiesced),
+      // own facts (guid, subdomain, stage, member, appName, apps, seedUsers, suspended, quiesced,
+      // appsImage, appsImageTag),
       // which every source gets and each chart uses what it needs.
       // The app catalog first: what the apps repository's manifest declares fills the fan-out
       // (`{databases}`) and is what T4 holds the request against. A stand-in is said in the log.
@@ -258,6 +266,10 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           quiesced: false,
           seedUsers: req.seedUsers ?? false,
           apps: req.apps,
+          // The tenant's own bundle, or the empty pair — always both keys, as the registration
+          // always carries both and the appset reads them bare.
+          appsImage: req.appsImage ?? "",
+          appsImageTag: req.appsImageTag ?? "",
         },
         global: { stageApex: stageApex(unitApex, req.stage) },
       });

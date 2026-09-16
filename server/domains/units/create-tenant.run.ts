@@ -1,12 +1,11 @@
 import { z } from "zod";
 import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "../../../shared/unit-size.ts";
-import { resolveUnitQuota } from "./unit-size.ts";
 import { and, eq } from "drizzle-orm";
 import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
 import { STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
-import { guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantRegistrationSchema, TenantValidationReportSchema, type TenantRegistration } from "../../../shared/tenant.ts";
+import { appsBundleFields, guid as guidSchema, memberName, refineAppsBundleRequest, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -24,7 +23,7 @@ import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint
 import { provisionTenantStorage } from "./tenant-storage.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { ObjectStore } from "../../adapters/object-store/port.ts";
-import { registryHostFromChain, resolveTenantCluster } from "./tenant-values.ts";
+import { placeholderTagFromChain, registryHostFromChain, resolveTenantCluster } from "./tenant-values.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
@@ -36,6 +35,7 @@ import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
 import { provisionUnitDns, standingHostFrom, tenantWildcardHost } from "./unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
+import { writeRegistrationStep } from "./create-tenant-registration.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
 import { assertReplacesOnTargetCluster, ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
@@ -148,13 +148,6 @@ export interface TenantOnboardPorts {
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
 
-/** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: no
- *  reconciler on this platform reads it, so nothing drops the tenant's databases and restarts its pods
- *  for the boot-seeds to repopulate, and a data reset has no mechanism. The field stays because it is
- *  a mandatory part of the registration schema and whatever answers "what is a data reset" will key
- *  on it. */
-const INITIAL_RESET_NONCE = "1";
-
 /** The frozen create-tenant params: the operator's fields + everything the streaming plan resolved
  *  (the minted guid, the pinned chartsRef, the approved report, the frozen expected-Application set). */
 export const CreateTenantParams = z.object({
@@ -210,6 +203,11 @@ export const CreateTenantParams = z.object({
   // must REPLACE (offboard first) — frozen at plan time so steps() prepends the SAME offboard steps at
   // execute/resume. Empty (the normal case) ⇒ no offboard steps, a plain onboard.
   replaces: z.array(ReplaceTargetSchema).default([]),
+  // The tenant's own apps bundle as the request handed it in (shared/tenant.ts appsBundleFields):
+  // the repository, the image, and the tag its last release built — the tag ABSENT when the bundle
+  // was never built, in which case its repository is one of `buildUnits` and the build step reads
+  // the tag off the release; write-registration then carries that one.
+  ...appsBundleFields,
 });
 export type CreateTenantParams = z.infer<typeof CreateTenantParams>;
 
@@ -233,6 +231,18 @@ export const CreateTenantRequest = z.object({
   // OPTIONAL first-admin email (the wizard's "Admin email" field). Empty ⇒ omitted; when present the
   // deploy gains the first-admin invite. Kept out of the registration/inventory — see CreateTenantParams.
   adminEmail: z.string().email().optional(),
+  // The tenant's own apps bundle: its `<subdomain>-apps` repository and image, created by the
+  // tenant-apps-repo run, and the image tag that run's release built — absent when the bundle has
+  // not been built yet, which makes its repository a build unit of this run.
+  ...appsBundleFields,
+}).superRefine((r, ctx) => {
+  refineAppsBundleRequest(r, ctx);
+  // EVERY TENANT WITH AN APP MOUNTS ITS OWN BUNDLE. The catalog's bundle is the template the
+  // tenant-apps-repo run creates `<subdomain>-apps` from, and no tenant mounts it — so a request that
+  // selects an app and names no bundle is refused before anything is rendered.
+  if (r.apps.length > 0 && !r.appsImage) {
+    ctx.addIssue({ code: "custom", path: ["appsImage"], message: `${r.apps.length} app(s) selected and no apps bundle named (appsRepo + appsImage) — every tenant mounts its own ${r.subdomain}-apps bundle, created and built by the tenant-apps-repo run; the catalog's bundle is the template and is mounted by no tenant` });
+  }
 });
 export type CreateTenantRequest = z.infer<typeof CreateTenantRequest>;
 
@@ -357,7 +367,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     ...replaceSteps,
     // The build units BEFORE the tenant's own writes: a build that fails leaves a provisioning row and
     // nothing else — no Vault entry, no bucket, no key, no AppProject (the first-write law of #151).
-    ...(p.buildUnits ?? []).map((unit) => buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit)),
+    ...(p.buildUnits ?? []).map((unit) => buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage, appsImage: p.appsImage }, unit, runtime)),
     {
       name: "seed-tenant-crypto",
       title: "Seed the tenant's crypto entry in Vault (create-only)",
@@ -467,38 +477,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantWildcardHost(p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },
     },
-    {
-      name: "write-registration",
-      title: "Commit the tenant registration (GitOps deploy)",
-      run: async (ctx) => {
-        // The inverse is already armed (record-provisional registered the shared teardown, whose first
-        // step git-rm's exactly this file). ONE file per tenant per stage; the gate report is NOT
-        // written to git (it lives in this run's record). Overwrite-idempotent on resume;
-        // TenantRegistrationSchema.parse re-validates as a belt.
-        const registration: TenantRegistration = TenantRegistrationSchema.parse({
-          cluster: p.cluster,
-          subdomain: p.subdomain,
-          // As the approved validation froze them: this copy is the one the CHARTS read, and it must
-          // say what the tenant WAS created with, not what the manifest says when it is read back.
-          members: p.members, identityProvider: p.identityProvider,
-          apps: p.apps,
-          // Resolved HERE, at write time, against the size table as it stands now — see the params
-          // field above. Per MEMBER: every member namespace of this tenant gets this ceiling.
-          quota: resolveUnitQuota(ctx.db, p.size, {
-            // A tenant brings no database of its own: its members claim the cluster's shared MongoDB
-            // replica set, and no tenant runs a PostgreSQL. So its quota is the base row alone.
-            postgresql: false, mongodb: "shared",
-          }),
-          seedUsers: p.seedUsers,
-          resetNonce: INITIAL_RESET_NONCE,
-          suspended: false,
-          quiesced: false,
-        });
-        const { commit } = await ports.registrations.commitTenant({ stage: p.stage, guid: p.guid, registration, runId: ctx.runId });
-        ctx.checkpoint({ commit, registration: `registrations/${p.guid}/${p.stage}.yaml` });
-        ctx.log("meta", `tenant registration committed to catalog (${commit}) — the ArgoCD on ${p.cluster} will now generate + sync the fan-out`);
-      },
-    },
+    writeRegistrationStep(ports, p, runtime),
     {
       name: "watch-sync-set",
       title: "Wait for ArgoCD to sync the whole fan-out at the pinned commit",
@@ -598,6 +577,13 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // tenant's, and every member chart renders with exactly the files its Application layers.
       const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, req.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
+      // The tenant's own bundle, held to the request's law above: a tenant with an app has one.
+      const bundle = req.appsRepo && req.appsImage ? { repo: req.appsRepo, image: req.appsImage } : undefined;
+      // The tag the engines are rendered with: the one the bundle's last release built, or — for a
+      // bundle never built — the platform's own placeholder (global.placeholderTag, the tag a pin
+      // carries before its first release), which no registry holds, so the probe below names the
+      // bundle as missing and its repository becomes a build unit of this run.
+      const appsImageTag = bundle ? (req.appsImageTag ?? placeholderTagFromChain(clusterValueFiles)) : undefined;
       const guid = await mintFreeGuid(ports, req.stage);
       // The books branch first: LOG AND CONTINUE on failure, as boot does — a trunk that cannot be
       // carried leaves the branch one product state behind, never a wrong one, and the plan reads
@@ -621,6 +607,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           probeGuid: guid,
           subdomain: req.subdomain,
           seedUsers: req.seedUsers,
+          ...(bundle ? { appsImage: bundle.image, appsImageTag } : {}),
           clusterValueFiles,
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
@@ -648,7 +635,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // own (hostyour-manager#165, tenant-builds.ts): each missing image's repository becomes a build
       // unit the run onboards before the tenant's own writes; a PAT per unregistered unit at approve.
       const planned = await planBuildUnits({
-        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], probe: ports.registryProbe,
+        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], ...(bundle ? { bundle } : {}), probe: ports.registryProbe,
         registration: ports.buildUnitRegistration ?? (async () => null), stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
@@ -682,6 +669,9 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // Thread the operator's optional admin email into params so the `activate` step can invite the
         // first admin (spread conditionally — exactOptionalPropertyTypes forbids adminEmail: undefined).
         ...(req.adminEmail ? { adminEmail: req.adminEmail } : {}),
+        // The bundle as handed in — the tag only where a release built one; the placeholder the render
+        // used is not a fact about the tenant and is never frozen.
+        ...(bundle ? { appsRepo: bundle.repo, appsImage: bundle.image, ...(req.appsImageTag ? { appsImageTag: req.appsImageTag } : {}) } : {}),
       };
       const stepDefs = createTenantSteps(ports, params);
       const plan: Plan = {

@@ -77,14 +77,23 @@ export interface BuildUnitResolution {
   unmapped: RequiredImage[];
 }
 
+/** The tenant's own apps bundle: the image its engines mount and the repository that builds it —
+ *  the tenant's, never the catalog's, which is why it stands beside `buildRepos` and wins over it. */
+export interface TenantBundle {
+  image: string;
+  repo: string;
+}
+
 /** The plan-time policy: the missing images grouped by the repository that builds them. */
 export async function resolveBuildUnits(input: {
   missing: readonly RequiredImage[];
   buildRepos: TenantSpec["buildRepos"];
+  bundle?: TenantBundle;
   registration: (unit: string) => Promise<RegisteredUnit | null>;
 }): Promise<BuildUnitResolution> {
   const repoOf = new Map<string, string>();
   for (const entry of input.buildRepos) for (const image of entry.builds) repoOf.set(image, entry.repo);
+  if (input.bundle) repoOf.set(input.bundle.image, input.bundle.repo);
   const byRepo = new Map<string, Set<string>>();
   const unmapped: RequiredImage[] = [];
   for (const img of input.missing) {
@@ -133,6 +142,7 @@ export async function planBuildUnits(input: {
   requiredImages: readonly RequiredImage[];
   registryHost: string;
   buildRepos: TenantSpec["buildRepos"];
+  bundle?: TenantBundle;
   registration: (unit: string) => Promise<RegisteredUnit | null>;
   probe: RegistryProbe;
   stage: Stage;
@@ -144,7 +154,7 @@ export async function planBuildUnits(input: {
   for (const img of input.requiredImages) {
     if (!(await input.probe.imageExists({ registryHost: input.registryHost, repo: img.repo, tag: img.tag }, { signal: input.signal }))) missing.push(img);
   }
-  const { units, unmapped } = await resolveBuildUnits({ missing, buildRepos: input.buildRepos, registration: input.registration });
+  const { units, unmapped } = await resolveBuildUnits({ missing, buildRepos: input.buildRepos, ...(input.bundle ? { bundle: input.bundle } : {}), registration: input.registration });
   if (unmapped.length > 0) {
     return {
       outcome: "rejected",
@@ -177,11 +187,13 @@ export interface TenantBuildDeps {
 }
 
 /** What the build steps hand the steps after them, in-run memory (the run's own closure): the image
- *  set and the sync units as they stand AFTER the builds wrote their pins. Absent while no build unit
- *  ran, in which case the plan's frozen set stands. */
+ *  set and the sync units as they stand AFTER the builds wrote their pins, and the image tag the
+ *  tenant's own bundle was built at where its build unit ran. Absent while no build unit ran, in
+ *  which case the plan's frozen set (and the request's tag) stands. */
 export interface TenantBuildRuntime {
   requiredImages?: RequiredImage[];
   syncUnits?: string[];
+  appsImageTag?: string;
 }
 
 /** The channel a tenant's build units are released on: the highest channel whose ceiling admits the
@@ -230,8 +242,9 @@ async function nextVersion(ctx: StepCtx, deps: TenantBuildDeps, unit: BuildUnit,
  *  registered build-only skips the registration half and re-runs its release. */
 export function buildUnitStep(
   deps: () => TenantBuildDeps | undefined,
-  p: { guid: string; owner: string; stage: Stage },
+  p: { guid: string; owner: string; stage: Stage; appsImage?: string | undefined },
   unit: BuildUnit,
+  runtime: TenantBuildRuntime,
 ): Step {
   return {
     name: buildUnitStepName(unit.unit),
@@ -279,15 +292,25 @@ export function buildUnitStep(
         builds: ungated.builds,
         ungated,
       };
+      const release: ReleaseCycleRuntime = {};
       const chain: Step[] = unit.registered
-        ? (() => {
-            const release: ReleaseCycleRuntime = {};
-            return [triggerReleaseStep(ports, params), watchReleaseBuildStep(ports, params, release), recordBuildOnlyStep(ports, params, release)];
-          })()
-        : buildOnlySteps(ports, params);
+        ? [triggerReleaseStep(ports, params), watchReleaseBuildStep(ports, params, release), recordBuildOnlyStep(ports, params, release)]
+        : buildOnlySteps(ports, params, release);
       for (const step of chain) {
         ctx.log("meta", `${unit.unit}: ${step.title}`);
         await step.run(ctx);
+      }
+      // The tenant's own bundle has no pins file: its tag is what this release's PipelineRun states,
+      // and the registration carries it from here (refresh-images renders with it, write-registration
+      // writes it). A run that states none leaves the engines with no tag to mount — a refusal, never
+      // the request's old tag standing in for a build that just happened.
+      if (p.appsImage !== undefined && unit.images.includes(p.appsImage)) {
+        if (!release.imageTag) {
+          throw errValidation(`the release PipelineRun of build unit "${unit.unit}" states no image-tag result — the tag ${p.appsImage} was pushed under cannot be read, so the registration cannot carry it`);
+        }
+        runtime.appsImageTag = release.imageTag;
+        ctx.checkpoint({ appsImage: p.appsImage, appsImageTag: release.imageTag });
+        ctx.log("meta", `the tenant's apps bundle ${p.appsImage} is built as ${p.appsImage}:${release.imageTag} — the registration will carry that tag`);
       }
       ctx.log("meta", `build unit ${unit.unit} done — ${unit.images.join(", ")} built and pinned for ${p.stage} on the books branch`);
     },
@@ -317,6 +340,8 @@ export interface RefreshImagesParams {
   seedUsers: boolean;
   registryHost: string;
   requiredImages: readonly RequiredImage[];
+  appsImage?: string | undefined;
+  appsImageTag?: string | undefined;
 }
 
 /** After the builds: the fan-out rendered again against the books branch, where the bumps wrote the
@@ -329,6 +354,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
     title: "Render the fan-out again against the pins the builds wrote",
     run: async (ctx) => {
       const clusterValueFiles = await ports.resolveClusterValueFiles(p.domain, p.stage);
+      const appsImageTag = runtime.appsImageTag ?? p.appsImageTag;
       const outcome = await validateTenant(
         {
           repoURL: ports.catalogRepoUrl,
@@ -339,6 +365,9 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           subdomain: p.subdomain,
           seedUsers: p.seedUsers,
           clusterValueFiles,
+          // The bundle at the tag its build unit just read off the release, where one ran.
+          ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}),
+          ...(appsImageTag !== undefined ? { appsImageTag } : {}),
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
         { repo: ports.repo, helm: ports.helm, log: (l) => ctx.log("meta", l), signal: ctx.signal, unitRepo: unitRepoAccess(ports) },

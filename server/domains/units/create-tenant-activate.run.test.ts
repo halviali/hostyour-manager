@@ -20,7 +20,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
@@ -243,7 +243,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     seedSlave();
     const planCtx: PlanStreamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
     const result = await makeCreateTenantDef(ports()).planStream!(
-      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test" },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test", ...TEST_BUNDLE },
       planCtx,
     );
     expect(result.outcome).toBe("planned");

@@ -125,3 +125,24 @@ export function registryHostFromChain(files: readonly ClusterValueFile[]): strin
   }
   return found;
 }
+
+/** The tag a pin carries before its first release: `global.placeholderTag` off the cluster's values
+ *  chain, read in layering order like the registry host above. The platform's own word for "no
+ *  release has built this yet" — the pipeline seeds every unbuilt pin with it and the common chart
+ *  refuses to render it. The tenant plan renders a bundle that was never built at it, so the image
+ *  probe names the bundle as missing and its repository becomes a build unit of the run; nothing is
+ *  ever deployed at it. A chain that states it nowhere is a VALIDATION error naming the files. */
+export function placeholderTagFromChain(files: readonly ClusterValueFile[]): string {
+  let found: string | null = null;
+  for (const file of files) {
+    const parsed: unknown = parseYaml(file.content);
+    const tag = (parsed as { global?: { placeholderTag?: unknown } } | null)?.global?.placeholderTag;
+    if (typeof tag === "string" && tag.length > 0) found = tag;
+  }
+  if (found === null) {
+    throw errValidation(
+      `no global.placeholderTag in the cluster values chain (${files.map((f) => f.path).join(", ")}) — the tenant's apps bundle was never built, and there is no tag to render it at until its build unit has run`,
+    );
+  }
+  return found;
+}

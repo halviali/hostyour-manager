@@ -317,6 +317,11 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       if (current.entry.apps.some((a) => a.name === req.app)) {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
+      // Every tenant with an app mounts its own bundle; a tenant registered without one has nothing
+      // the new app's engine could mount, and the catalog's bundle is mounted by no tenant.
+      if (!current.entry.appsImage || !current.entry.appsImageTag) {
+        throw errValidation(`tenant ${tc.guid} has no apps bundle (appsImage) in its registration — every tenant mounts its own ${current.entry.subdomain}-apps bundle, created and built by the tenant-apps-repo run; nothing can be added until it has one`);
+      }
       // The registration is the GitOps truth for the tenant's target slave; apply-appproject pins the
       // new member's project against exactly it.
       const { cluster } = current.entry;
@@ -333,6 +338,10 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,
+          // The tenant's own bundle, as the appset delivers it: the new app's engine renders with it
+          // and ensure-images probes it.
+          appsImage: current.entry.appsImage,
+          appsImageTag: current.entry.appsImageTag,
           clusterValueFiles,
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },

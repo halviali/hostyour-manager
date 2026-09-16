@@ -53,3 +53,13 @@ export const APP_OVERLAYS: Record<string, string> = Object.fromEntries(["erp", "
  *  here beside the member set for the same reason that does: every tenant registration a test builds
  *  needs one, and a literal repeated per file is a literal free to drift from what the seed says. */
 export const TEST_QUOTA = seedQuota("small");
+
+/** The test tenant's OWN apps bundle: every tenant that selects an app mounts its own
+ *  `<subdomain>-apps` bundle and the catalog's is mounted by none (hostyour-manager#178), so every
+ *  create-tenant request here that selects an app names it, and every seeded registration of a
+ *  tenant with an app carries it. The tag is the shape a release's PipelineRun states. */
+export const TEST_BUNDLE = {
+  appsRepo: "https://github.com/acme/acme-apps.git",
+  appsImage: "acme-apps",
+  appsImageTag: "0.1.0-stable-20260101000000-abc1234",
+} as const;

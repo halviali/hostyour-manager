@@ -61,8 +61,8 @@ export type TenantSourceRecord = z.infer<typeof TenantSourceRecordSchema>;
  *  the per-member values itself would put a member name of one product — `report:Designer,report:Viewer`
  *  as a literal — inside a values string, where no schema could see it.
  *  What the appset still adds at render time is the tenant's own facts (guid, subdomain, stage, member,
- *  appName, apps, seedUsers, suspended, quiesced): every source gets those and each chart uses the ones
- *  it needs, so no member's business reaches the platform.
+ *  appName, apps, seedUsers, suspended, quiesced, appsImage, appsImageTag): every source gets those and
+ *  each chart uses the ones it needs, so no member's business reaches the platform.
  *
  *  `namespaceLabels`, and `valueFiles`/`values` on each source, DEFAULT rather than being optional, so
  *  the serialized registration always carries all three. The ApplicationSet reads them bare under
@@ -114,6 +114,42 @@ export const subdomain = z
   .string()
   .regex(HOST_LABEL_RE, "a subdomain is one DNS label: lower-case letters, digits and hyphens, at most 63 characters, no dot")
   .refine((s) => !RESERVED_HOST_LABELS.includes(s), { message: "a stage word cannot be a subdomain — the stage words are the zones, so the tenant would take a whole stage's zone" });
+
+/** THE TENANT'S OWN APPS BUNDLE — the three facts of its `<subdomain>-apps` repository, a Build-only
+ *  unit of this installation: the repository the bundle is rebuilt from, the flat build name its
+ *  manifest declares (the registry repository the engines mount, `tenant.appsImage` in the engine
+ *  chart) and the immutable image tag its last release built, read off that release's PipelineRun.
+ *  The tag stands on the registration and not in a pins file because no chart's builds[] can name a
+ *  per-tenant image: the release pipeline's bump seeds a chart's pins file from the chart's own
+ *  builds[] and rewrites only the entries that stand there. Declared once, for the registration
+ *  and for the create-tenant request that hands them in. The REGISTRATION carries all three or none
+ *  (`refineAppsBundle`): an image without its tag is nothing the engines can mount. The REQUEST may
+ *  carry the repository and the image without the tag (`refineAppsBundleRequest`): a bundle never
+ *  built has no tag yet, and its repository is then a build unit of the run. The registration
+ *  composer writes the empty string for `appsImage` and `appsImageTag` when the tenant has none, so
+ *  the tenants ApplicationSet may read both bare under missingkey=error; `appsRepo` reaches no
+ *  chart and is simply absent then. */
+export const appsBundleFields = {
+  appsRepo: z.string().regex(/^https:\/\/[^ ]+\.git$/).optional(),
+  appsImage: z.string().regex(/^([a-z0-9-]+)?$/).optional(),
+  appsImageTag: z.string().optional(),
+};
+type AppsBundleFields = { appsRepo?: string | undefined; appsImage?: string | undefined; appsImageTag?: string | undefined };
+const has = (v: string | undefined): boolean => v !== undefined && v !== "";
+export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): void {
+  const bundle = [e.appsRepo, e.appsImage, e.appsImageTag].map(has);
+  if (bundle.some(Boolean) && !bundle.every(Boolean)) {
+    ctx.addIssue({ code: "custom", path: ["appsImage"], message: "a tenant's apps bundle is appsRepo, appsImage and appsImageTag together — the engines mount the image at that tag, and the run rebuilds it from that repository; one without the others can be neither mounted nor rebuilt" });
+  }
+}
+export function refineAppsBundleRequest(e: AppsBundleFields, ctx: z.RefinementCtx): void {
+  if (has(e.appsRepo) !== has(e.appsImage)) {
+    ctx.addIssue({ code: "custom", path: ["appsImage"], message: "a tenant's apps bundle is appsRepo and appsImage together — the engines mount the image, and the run rebuilds it from the repository; one without the other can be neither mounted nor rebuilt" });
+  }
+  if (has(e.appsImageTag) && !has(e.appsImage)) {
+    ctx.addIssue({ code: "custom", path: ["appsImageTag"], message: "appsImageTag names the tag of appsImage — without an image there is nothing the tag can belong to" });
+  }
+}
 
 /** registrations/<guid>/<stage>.yaml — THE tenant registration, ONE flat file per tenant per stage.
  *  The guid is the DIRECTORY and the stage is the FILE NAME, so neither appears in the body: the path
@@ -168,8 +204,11 @@ export const TenantRegistrationSchema = z
     resetNonce: z.string().min(1).default("1"), // bump + commit triggers a tenant reset (Tenant CR annotation)
     suspended: z.boolean().default(false), // tenant-wide pause: replicas 0, no Ingress
     quiesced: z.boolean().default(false), // the deeper pause a removal-in-flight holds a tenant in
+    // The tenant's own apps bundle, all three or none (appsBundleFields above).
+    ...appsBundleFields,
   })
   .superRefine((e, ctx) => {
+    refineAppsBundle(e, ctx);
     // Two members may not share a name: a member's name IS its namespace, its AppProject and its
     // Application suffix, all `<guid>-<name>`, so the second would land on the first. This is also
     // where an app named after a standing member is caught, because an app IS a member here — the
