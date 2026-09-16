@@ -89,6 +89,7 @@ function mailRow(domain: string, row: MailDnsRow): DnsRecordRow {
     owner: { kind: published ? "mail" : "installer", name: domain },
     name: row.name,
     type: MAIL_ROW_TYPE[row.record],
+    record: row.record,
     expected: row.expected,
     found: row.found,
     verdict: row.found === null ? "absent" : row.ok ? "standing" : "other",

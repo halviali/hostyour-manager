@@ -40,7 +40,9 @@ function dnsRemoveSteps(params: DnsRemoveParams, ports: DnsRecordPorts): Step[] 
     {
       name: "remove-record",
       title: "Remove the record at the DNS provider",
-      run: async (ctx) => deleteRecord(ctx, requireDnsProvider(ports), params),
+      // Resolved in the inventory AGAIN rather than deleted by the params: a TXT goes by the content
+      // this platform owns, which the row and the book decide (dns-record.kit.ts), never the name.
+      run: async (ctx) => deleteRecord(ctx, requireDnsProvider(ports), removableRecord(await ownedRecords(ports), params.name, params.type)),
     },
   ];
 }

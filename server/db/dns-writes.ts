@@ -40,15 +40,21 @@ export function recordDnsWrite(db: Db, write: DnsWrite): void {
     .run();
 }
 
+/** The book's row of ONE record, or null where this Manager never wrote it — a record published
+ *  before the book existed, or by a hand at the provider. */
+export function findDnsWrite(db: Db, record: { name: string; type: DnsRecordType }): DnsWrite | null {
+  const row = db.select().from(dnsWrites).where(and(eq(dnsWrites.name, record.name), eq(dnsWrites.type, record.type))).get();
+  return row === undefined ? null : rowToWrite(row);
+}
+
 /** Take a record out of the book, beside the deletion at the provider. A record the book never
  *  carried is the idempotent no-op, exactly as the deletion of an absent record is. */
 export function forgetDnsWrite(db: Db, record: { name: string; type: DnsRecordType }): void {
   db.delete(dnsWrites).where(and(eq(dnsWrites.name, record.name), eq(dnsWrites.type, record.type))).run();
 }
 
-/** Every row of the book, newest write first. */
-export function listDnsWrites(db: Db): (DnsWrite & { writtenAt: Date })[] {
-  return db.select().from(dnsWrites).orderBy(desc(dnsWrites.writtenAt)).all().map((r) => ({
+function rowToWrite(r: typeof dnsWrites.$inferSelect): DnsWrite & { writtenAt: Date } {
+  return {
     name: r.name,
     type: r.type,
     content: r.content,
@@ -56,5 +62,10 @@ export function listDnsWrites(db: Db): (DnsWrite & { writtenAt: Date })[] {
     owner: { kind: r.ownerKind, name: r.ownerName, ...(r.ownerStage === null ? {} : { stage: r.ownerStage }) },
     runId: r.runId,
     writtenAt: r.writtenAt,
-  }));
+  };
+}
+
+/** Every row of the book, newest write first. */
+export function listDnsWrites(db: Db): (DnsWrite & { writtenAt: Date })[] {
+  return db.select().from(dnsWrites).orderBy(desc(dnsWrites.writtenAt)).all().map(rowToWrite);
 }

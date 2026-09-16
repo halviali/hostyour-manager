@@ -3,7 +3,7 @@ import type { RunDefinition, Step } from "../../../executor/types.ts";
 import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import type { DnsRecordRow } from "../../../../shared/dns.ts";
-import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts } from "./dns-record.kit.ts";
+import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "./dns-record.kit.ts";
 
 // mail-dns-unpublish: the inverse of mail-dns-publish — take the mail records of ONE sender domain
 // of this installation back out of the zone. Three records go, in one act: the domain's SPF, the
@@ -21,7 +21,10 @@ import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts } f
 // WHAT IT DELETES IS THE INVENTORY'S OWN LIST. The three record names are composed in exactly one
 // place (shared/mail.ts mailRecordNames, which the rows the Mail page measures are named by), so
 // this run kind reads them off the inventory rather than composing a second spelling of
-// `<stage>._domainkey.<domain>` that could drift from the one the publish writes.
+// `<stage>._domainkey.<domain>` that could drift from the one the publish writes. Each goes BY
+// CONTENT — the content the book of DNS writes holds, or for a record published before the book
+// the one its tag picks at the provider — so another service's TXT beside the SPF at the apex
+// stays (dns-record.kit.ts states the rule).
 
 export const MailDnsUnpublishParams = z.object({
   /** One of the two domains this installation sends as, as the Mail page names it. */
@@ -33,8 +36,8 @@ export type MailDnsUnpublishParams = z.infer<typeof MailDnsUnpublishParams>;
  *  send as: mail leaves an installation as its platform domain (customer mail) and its unit apex
  *  (alert mail) and as nothing else, and a name outside those two is a domain whose records belong
  *  to somebody else entirely. */
-function publishedRecordsOf(rows: DnsRecordRow[], domain: string): DnsRecordRow[] {
-  const mine = rows.filter((r) => r.owner.kind === "mail" && r.owner.name === domain && r.removable && r.type === "TXT");
+function publishedRecordsOf(rows: DnsRecordRow[], domain: string): RemovableRecordRow[] {
+  const mine = rows.filter((r): r is RemovableRecordRow => r.owner.kind === "mail" && r.owner.name === domain && r.removable && r.type === "TXT");
   if (mine.length === 0) {
     const senders = [...new Set(rows.filter((r) => r.owner.kind === "mail").map((r) => r.owner.name))];
     throw errValidation(
@@ -66,7 +69,7 @@ function mailDnsUnpublishSteps(params: MailDnsUnpublishParams, ports: DnsRecordP
         // Read again rather than carrying the attest step's list: a step is idempotent by contract
         // and may be re-run after a crash, and the names it deletes must be the ones that stand now.
         for (const record of publishedRecordsOf(await ownedRecords(ports), params.domain)) {
-          await deleteRecord(ctx, dns, { name: record.name, type: "TXT" });
+          await deleteRecord(ctx, dns, record);
         }
         ctx.log("meta", `${params.domain} announces no SPF, no DKIM key and no DMARC policy any more — its address record and the reverse DNS of the egress are untouched`);
       },

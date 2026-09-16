@@ -12,6 +12,7 @@
 // only what a run here changed, which is what an operator tearing an installation down or checking
 // a day's work wants to see first (hostyour-manager#171).
 import type { DnsWriteAct, DnsWriteOwnerKind, Stage } from "./enums.ts";
+import type { MailDnsRecord } from "./mail.ts";
 
 /** The record types the DnsProvider port writes and reads: A for the unit records the onboarding
  *  run kinds provision, TXT for the mail records of a sender domain (SPF, DKIM, DMARC). Nothing
@@ -49,11 +50,14 @@ export type DnsVerdict = "standing" | "absent" | "other";
 
 /** ONE record: who owns it, the name asked at the provider, what the owner's state says it must
  *  carry, what was found (null for no record at all), and whether a `dns-remove` run may take it
- *  back — false for every row the installer or the hosting provider owns. */
+ *  back — false for every row the installer or the hosting provider owns. A mail row also says
+ *  WHICH of the five mail records it is: a TXT name carries other services' records beside ours,
+ *  and the record's tag (shared/mail.ts MAIL_RECORD_TAG) is what picks ours among them. */
 export interface DnsRecordRow {
   owner: DnsOwner;
   name: string;
   type: DnsRowType;
+  record?: MailDnsRecord;
   expected: string;
   found: string | null;
   verdict: DnsVerdict;

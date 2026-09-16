@@ -13,7 +13,8 @@ import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
 // deletes only what the DNS inventory names as this installation's and removable, so a typed name
 // and a row this platform merely depends on both end the plan with a sentence instead of a deletion.
 // The steps run against a real database, because the deletion takes the record's row out of the
-// book of DNS writes beside it.
+// book of DNS writes beside it. An A record goes by name and type; a TXT goes by the content this
+// installation owns, so a sibling TXT with other content stays.
 
 let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); });
@@ -25,7 +26,11 @@ const CONSUMER_ROW: DnsRecordRow = {
 };
 const INSTALLER_ROW: DnsRecordRow = {
   owner: { kind: "installer", name: "example.com" },
-  name: "example.com", type: "A", expected: "203.0.113.9", found: "203.0.113.9", verdict: "standing", removable: false,
+  name: "example.com", type: "A", record: "a", expected: "203.0.113.9", found: "203.0.113.9", verdict: "standing", removable: false,
+};
+const DMARC_ROW: DnsRecordRow = {
+  owner: { kind: "mail", name: "example.com" },
+  name: "_dmarc.example.com", type: "TXT", record: "dmarc", expected: "one v=DMARC1 record", found: "v=DMARC1; p=none", verdict: "standing", removable: true,
 };
 
 const inventory = (rows: DnsRecordRow[]): DnsInventoryView => ({ rows, skipped: [], readAt: new Date().toISOString() });
@@ -88,11 +93,33 @@ describe("dns-remove steps", () => {
     const steps = makeDnsRemoveDef(ports(dns)).steps(PARAMS);
     for (const step of steps) await step.run(ctx(logs, PARAMS));
     expect(dns.record("post.example.net", "A")).toBeUndefined();
-    expect(dns.deletes).toEqual([{ name: "post.example.net", type: "A", deleted: 1 }]);
+    expect(dns.deletes).toEqual([{ name: "post.example.net", type: "A", deleted: 1 }]); // by name and type, no content: the name is the unit's own
     expect(logs[0]).toContain('belongs to the consumer "post" at prod');
     expect(logs[1]).toBe("A post.example.net stood at 198.51.100.4 and is gone (1 removed)");
     // ONE row leaves the book: the record this run took back, and no other.
     expect(listDnsWrites(db.db).map((r) => r.name)).toEqual(["_dmarc.example.com"]);
+  });
+
+  it("deletes a TXT by the content the book holds and leaves a sibling TXT with other content standing", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("_dmarc.example.com", "TXT", "v=DMARC1; p=none", "somebody-else=verification");
+    recordDnsWrite(db.db, { name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", act: "inserted", owner: { kind: "mail", name: "example.com" }, runId: "run_publish" });
+    const logs: string[] = [];
+    const params: DnsRemoveParams = { name: "_dmarc.example.com", type: "TXT" };
+    for (const step of makeDnsRemoveDef(ports(dns, [DMARC_ROW])).steps(params)) await step.run(ctx(logs, params));
+    expect(dns.deletes).toEqual([{ name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 1 }]);
+    expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual(["somebody-else=verification"]);
+    expect(listDnsWrites(db.db)).toEqual([]);
+    expect(logs[1]).toBe("TXT _dmarc.example.com stood at v=DMARC1; p=none and is gone (1 removed, 1 other record(s) of the name left standing)");
+  });
+
+  it("a TXT no book row names goes by its tag — the record published before the book existed", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("_dmarc.example.com", "TXT", "somebody-else=verification", "v=DMARC1; p=none");
+    const params: DnsRemoveParams = { name: "_dmarc.example.com", type: "TXT" };
+    await makeDnsRemoveDef(ports(dns, [DMARC_ROW])).steps(params)[1]!.run(ctx([], params));
+    expect(dns.deletes).toEqual([{ name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 1 }]);
+    expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual(["somebody-else=verification"]);
   });
 
   it("is a no-op on a record that is already absent — a resumed run deletes nothing twice", async () => {

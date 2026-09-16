@@ -28,6 +28,21 @@ interface CfEnvelope<T> {
 
 const MAX_RATE_LIMIT_RETRIES = 3;
 
+/** A TXT value as the one text it is, however the zone stored it. The API stores a long TXT value
+ *  as quoted 255-character chunks and returns it that way — outer quotes, and `" "` where it
+ *  split — so a DKIM key compared raw never equals the text that was published, and a content read
+ *  here would never equal the same record read at a public resolver. Every TXT content this
+ *  adapter answers or compares goes through this first (the catalogue's cloudflare plugin reads
+ *  the same records the same way, ansiwise-cloudflare/lib/src/steps/cloudflare_api.dart). */
+export function txtText(raw: string): string {
+  let value = raw;
+  if (value.startsWith('"')) value = value.slice(1);
+  if (value.endsWith('"')) value = value.slice(0, -1);
+  return value.replaceAll('" "', "");
+}
+
+const contentOf = (record: CfRecord, type: DnsRecordType): string => (type === "TXT" ? txtText(record.content) : record.content);
+
 export class CloudflareDns implements DnsProvider {
   private readonly apiBase: string;
   private readonly fetchImpl: FetchLike;
@@ -65,9 +80,10 @@ export class CloudflareDns implements DnsProvider {
     return { created: false };
   }
 
-  async deleteRecord(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<{ deleted: number }> {
+  async deleteRecord(input: { name: string; type: DnsRecordType; content?: string; signal?: AbortSignal }): Promise<{ deleted: number }> {
     const zone = await this.zoneId(input.name, input.signal);
-    const existing = await this.listRecords(zone, input.name, input.type, input.signal);
+    const existing = (await this.listRecords(zone, input.name, input.type, input.signal))
+      .filter((r) => input.content === undefined || contentOf(r, input.type) === input.content);
     for (const r of existing) {
       await this.send<unknown>(`/zones/${zone}/dns_records/${r.id}`, { method: "DELETE", ...(input.signal ? { signal: input.signal } : {}) });
     }
@@ -80,7 +96,7 @@ export class CloudflareDns implements DnsProvider {
 
   async listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]> {
     const zone = await this.zoneId(input.name, input.signal);
-    return (await this.listRecords(zone, input.name, input.type, input.signal)).map((r) => r.content);
+    return (await this.listRecords(zone, input.name, input.type, input.signal)).map((r) => contentOf(r, input.type));
   }
 
   private async listRecords(zone: string, name: string, type: DnsRecordType, signal?: AbortSignal): Promise<CfRecord[]> {

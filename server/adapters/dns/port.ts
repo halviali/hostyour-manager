@@ -25,17 +25,22 @@ export interface DnsProvider {
    *  in place — a move is exactly this call with a new content. Never proxied: the platform
    *  terminates TLS itself, and a proxy in front would break cert issuance and SSH. */
   upsertRecord(input: { name: string; type: DnsRecordType; content: string; signal?: AbortSignal }): Promise<{ created: boolean }>;
-  /** Idempotent delete-by-(name, type): remove every record of that name and type. An absent record
-   *  resolves { deleted: 0 } — offboard and purge re-run safely, and a unit whose record was never
-   *  created (a run that died before provision-dns) is a no-op, not an error. */
-  deleteRecord(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<{ deleted: number }>;
+  /** Idempotent delete-by-(name, type): remove every record of that name and type, or, with
+   *  `content`, only the records whose content equals it. An absent record resolves { deleted: 0 } —
+   *  offboard and purge re-run safely, and a unit whose record was never created (a run that died
+   *  before provision-dns) is a no-op, not an error. A TXT is always deleted BY CONTENT: a sender
+   *  domain's apex carries other services' TXT beside the SPF, and a deletion by name alone would
+   *  take a record this platform never wrote (runs/defs/dns-record.kit.ts holds that rule). */
+  deleteRecord(input: { name: string; type: DnsRecordType; content?: string; signal?: AbortSignal }): Promise<{ deleted: number }>;
   /** Read one record's content, or null when no such record exists. provision-dns reads the target
    *  cluster's own A record with this — the unit record's content IS that address. */
   readRecordContent(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string | null>;
   /** EVERY record of that name and type, in the provider's order; empty when none stands. The
    *  reading for a TXT name, because a sender domain's apex carries other services' TXT beside the
    *  SPF and the first record answers about the wrong one — the book of DNS writes picks the record
-   *  by its version tag (shared/mail.ts MAIL_RECORD_TAG) and judges its rows against the whole list. */
+   *  by its version tag (shared/mail.ts MAIL_RECORD_TAG) and judges its rows against the whole list.
+   *  A TXT content is answered as the ONE text the record is, however the provider stores it, and
+   *  `deleteRecord` compares a content against the same text. */
   listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]>;
 }
 

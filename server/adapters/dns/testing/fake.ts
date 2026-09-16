@@ -9,8 +9,8 @@ export class FakeDnsProvider implements DnsProvider {
   private readonly records = new Map<string, string[]>();
   /** Every upsert, in order — a test asserts the one record per unit and its content. */
   readonly upserts: Array<{ name: string; type: DnsRecordType; content: string; created: boolean }> = [];
-  /** Every delete call, in order, with how many records it removed. */
-  readonly deletes: Array<{ name: string; type: DnsRecordType; deleted: number }> = [];
+  /** Every delete call, in order, with the content it was narrowed to and how many records it removed. */
+  readonly deletes: Array<{ name: string; type: DnsRecordType; content?: string; deleted: number }> = [];
   /** When set, every call throws it — the API-failure path (an unreachable/refusing provider). */
   failWith: Error | null = null;
 
@@ -37,11 +37,15 @@ export class FakeDnsProvider implements DnsProvider {
     return { created };
   }
 
-  async deleteRecord(input: { name: string; type: DnsRecordType }): Promise<{ deleted: number }> {
+  async deleteRecord(input: { name: string; type: DnsRecordType; content?: string }): Promise<{ deleted: number }> {
     if (this.failWith) throw this.failWith;
-    const deleted = this.records.get(this.key(input.name, input.type))?.length ?? 0;
-    this.records.delete(this.key(input.name, input.type));
-    this.deletes.push({ name: input.name, type: input.type, deleted });
+    const key = this.key(input.name, input.type);
+    const standing = this.records.get(key) ?? [];
+    const kept = input.content === undefined ? [] : standing.filter((c) => c !== input.content);
+    const deleted = standing.length - kept.length;
+    if (kept.length === 0) this.records.delete(key);
+    else this.records.set(key, kept);
+    this.deletes.push({ name: input.name, type: input.type, ...(input.content === undefined ? {} : { content: input.content }), deleted });
     return { deleted };
   }
 
