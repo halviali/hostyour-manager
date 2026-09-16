@@ -24,6 +24,9 @@ import type {
   OperatorKeyView,
 } from "../../shared/api-types.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
+// The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
+// answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
+import type { AppsManifest } from "../../shared/apps-manifest.ts";
 // The DNS inventory the /dns page renders and the one act it offers. Declared ONCE in shared/dns.ts
 // and answered in that shape by the server's own domain module, for the reason the block above
 // states: there is no browser-side twin left to fall behind a server change.
@@ -492,10 +495,10 @@ export interface TenantCreateForm {
   owner: string;
   /** The tenant's size — the ceiling every member namespace of it gets (the wizard's size field). */
   size: UnitSize;
-  /** The selected app-types with their two per-app seed tiers: seedReference ⇒ reference
-   *  data (roles, navigation → the operator app is usable), seedDemo ⇒ demo/sample records. Both
-   *  default off. */
-  apps: { name: string; seedReference: boolean; seedDemo: boolean }[];
+  /** The selected apps, each in the shape of one request apps[] entry (shared/tenant.ts
+   *  appSelectionsToRequest): the two seed selections as fields, every further one under
+   *  selections. */
+  apps: TenantAppRequest[];
   seedUsers: boolean;
   /** OPTIONAL first-admin email. Empty ⇒ omitted from the body (no first-admin invite). */
   adminEmail?: string;
@@ -503,13 +506,21 @@ export interface TenantCreateForm {
 /** The POST /api/tenants body == the server's CreateTenantRequest (the domain is derived from the
  *  target cluster row server-side, never sent; the stage IS sent, and the server refuses one that is
  *  not the target cluster's own). */
+/** ONE app of the request — the server's TenantAppSchema input, written out here because the
+ *  wizard composes it (appSelectionsToRequest) and the body test asserts its exact shape. */
+export interface TenantAppRequest {
+  name: string;
+  seedReference: boolean;
+  seedDemo: boolean;
+  selections: Record<string, boolean>;
+}
 export interface CreateTenantBody {
   clusterId: string;
   stage: Stage;
   subdomain: string;
   owner: string;
   size: UnitSize;
-  apps: { name: string; seedReference: boolean; seedDemo: boolean }[]; // per-app seed tiers; default off
+  apps: TenantAppRequest[]; // the chosen apps with their selections; default off
   seedUsers: boolean; // flips the tenant IdP's user boot-seed
   adminEmail?: string; // OPTIONAL — omitted when the operator left the field blank
 }
@@ -518,12 +529,12 @@ export interface CreateTenantBody {
  *  and de-duplicate app names (the server refines uniqueness too — this is the early UX guard). */
 export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
   const seen = new Set<string>();
-  const apps: { name: string; seedReference: boolean; seedDemo: boolean }[] = [];
+  const apps: TenantAppRequest[] = [];
   for (const raw of f.apps) {
     const name = raw.name.trim();
     if (!name || seen.has(name)) continue;
     seen.add(name);
-    apps.push({ name, seedReference: raw.seedReference, seedDemo: raw.seedDemo }); // carry both seed tiers to the server
+    apps.push({ name, seedReference: raw.seedReference, seedDemo: raw.seedDemo, selections: raw.selections }); // every selection travels to the server
   }
   const adminEmail = f.adminEmail?.trim();
   return {
@@ -541,19 +552,17 @@ export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
 
 export const listTenants = (): Promise<TenantView[]> => req<TenantView[]>("/api/tenants");
 export const listTenantTargets = (): Promise<TenantTargetView[]> => req<TenantTargetView[]>("/api/tenants/targets");
-/** The tenant app-type catalog (GET /api/tenants/app-catalog) — the app-types the create-tenant wizard
- *  offers as checkboxes, discovered from the values-<app>.yaml overlays beside the product's per-app
- *  chart in catalog (server app-catalog.ts reads the chart directory off the fan-out manifest). The
- *  server route is fail-soft (empty when tenant onboarding is not wired or catalog is momentarily
- *  unreadable), so the wizard just shows an inline "catalog unavailable" note and can still onboard a
- *  tenant with no apps. */
-export const listTenantAppCatalog = (): Promise<string[]> =>
-  req<{ apps: string[] }>("/api/tenants/app-catalog").then((r) => r.apps);
+/** The tenant app catalog (GET /api/tenants/app-catalog) — the apps the create-tenant wizard offers
+ *  as checkboxes, each with its title, description and selections, read off the apps repository's
+ *  apps.yaml (server app-catalog.ts). The server route is fail-soft (no apps when tenant onboarding
+ *  is not wired or the catalog is momentarily unreadable), so the wizard just shows an inline
+ *  "catalog unavailable" note and can still onboard a tenant with no apps. */
+export const listTenantAppCatalog = (): Promise<AppsManifest> => req<AppsManifest>("/api/tenants/app-catalog");
 export const getTenant = (id: string): Promise<TenantDetailView> => req<TenantDetailView>(`/api/tenants/${id}`);
 export const getTenantLive = (id: string): Promise<TenantLiveView> => req<TenantLiveView>(`/api/tenants/${id}/live`);
 export const createTenant = (form: TenantCreateForm): Promise<{ runId: string }> =>
   post<{ runId: string }>("/api/tenants", buildCreateTenantBody(form) as unknown as Record<string, unknown>);
-export const addTenantApp = (tenantId: string, app: string, opts?: { seedReference?: boolean; seedDemo?: boolean }): Promise<{ runId: string }> =>
+export const addTenantApp = (tenantId: string, app: string, opts?: { seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean> }): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/apps`, { app, ...(opts ?? {}) });
 export const removeTenantApp = (tenantId: string, app: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/apps/${encodeURIComponent(app)}/remove`);

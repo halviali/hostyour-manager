@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { buildCreateTenantBody, type TenantCreateForm } from "./api.ts";
+import { appSelectionsToRequest } from "../../shared/app-selections.ts";
 
 // The create-tenant wizard's only load-bearing pure logic: shaping the form state into the exact
 // CreateTenantRequest body the server parses. The trio.report OMISSION (never `report: undefined`)
 // is the subtle exactOptionalPropertyTypes rule, and app-row cleanup (trim/blank/dedupe) mirrors
-// the server's uniqueness refine — both are asserted here.
+// the server's uniqueness refine — both are asserted here. appSelectionsToRequest is the wizard's
+// other pure step: one app's checked selections into the entry shape.
 
 const base: TenantCreateForm = {
   clusterId: "cls_abc",
@@ -29,30 +31,40 @@ describe("buildCreateTenantBody", () => {
     const body = buildCreateTenantBody({
       ...base,
       apps: [
-        { name: " web ", seedReference: false, seedDemo: false },
-        { name: "", seedReference: false, seedDemo: false },
-        { name: "web", seedReference: true, seedDemo: true },
-        { name: "api", seedReference: false, seedDemo: false },
-        { name: "   ", seedReference: false, seedDemo: false },
+        { name: " web ", seedReference: false, seedDemo: false, selections: {} },
+        { name: "", seedReference: false, seedDemo: false, selections: {} },
+        { name: "web", seedReference: true, seedDemo: true, selections: {} },
+        { name: "api", seedReference: false, seedDemo: false, selections: {} },
+        { name: "   ", seedReference: false, seedDemo: false, selections: {} },
       ],
     });
     // The first "web" (both tiers false) survives; the later duplicate (both tiers true) is dropped whole.
     expect(body.apps).toEqual([
-      { name: "web", seedReference: false, seedDemo: false },
-      { name: "api", seedReference: false, seedDemo: false },
+      { name: "web", seedReference: false, seedDemo: false, selections: {} },
+      { name: "api", seedReference: false, seedDemo: false, selections: {} },
     ]);
   });
 
   it("carries each selected app's per-app seed tiers through to the body", () => {
     const body = buildCreateTenantBody({ ...base, apps: [
-      { name: "erp", seedReference: true, seedDemo: false },
-      { name: "web", seedReference: false, seedDemo: true },
+      { name: "erp", seedReference: true, seedDemo: false, selections: {} },
+      { name: "web", seedReference: false, seedDemo: true, selections: {} },
     ] });
     // Both booleans round-trip independently per app.
     expect(body.apps).toEqual([
-      { name: "erp", seedReference: true, seedDemo: false },
-      { name: "web", seedReference: false, seedDemo: true },
+      { name: "erp", seedReference: true, seedDemo: false, selections: {} },
+      { name: "web", seedReference: false, seedDemo: true, selections: {} },
     ]);
+  });
+
+  it("carries every further selection under selections, and the two seed selections as fields", () => {
+    // What the wizard composes per checked app: the catalog's selections, the two known ones onto
+    // their fields, the rest keyed by name — false included, because a key names a selection.
+    const entry = appSelectionsToRequest("erp", { seedReference: true, seedDemo: false, seedPrices: true, seedFixtures: false });
+    expect(entry).toEqual({ name: "erp", seedReference: true, seedDemo: false, selections: { seedPrices: true, seedFixtures: false } });
+    expect(appSelectionsToRequest("web", {})).toEqual({ name: "web", seedReference: false, seedDemo: false, selections: {} });
+    const body = buildCreateTenantBody({ ...base, apps: [entry] });
+    expect(body.apps).toEqual([entry]);
   });
 
   it("carries seedUsers through, and sends nothing that could select a trio member", () => {

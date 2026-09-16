@@ -3,6 +3,8 @@ import { useNavigate } from "react-router";
 import type { Stage } from "../../../shared/enums.ts";
 import { HOST_LABEL_RE } from "../../../shared/unit-host.ts";
 import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "../../../shared/unit-size.ts";
+import { appSelectionsToRequest } from "../../../shared/app-selections.ts";
+import type { AppEntry } from "../../../shared/apps-manifest.ts";
 import { listTenantTargets, listTenantAppCatalog, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
@@ -17,16 +19,13 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
 export function TenantCreate() {
   const nav = useNavigate();
   const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
-  // The app-type catalog (null = still loading) + the operator's multi-selection. The catalog is the
-  // SOLE source of app names — a checkbox can only select a values-<app>.yaml overlay that exists in
-  // catalog, which is exactly what the T4 "apps resolved" gate requires (no free text).
-  const [catalog, setCatalog] = useState<string[] | null>(null);
-  const [selectedApps, setSelectedApps] = useState<Set<string>>(new Set());
-  // Per-app seed tiers — two subsets of selectedApps. An app seeds a tier only when it is
-  // BOTH selected AND in that set; deselecting an app drops it from both (now-hidden) sets.
-  // referenceApps → SEED_APP_DATA_ON_BOOT (roles/nav — operator apps need it); demoApps → SEED_DEMO_DATA_ON_BOOT.
-  const [referenceApps, setReferenceApps] = useState<Set<string>>(new Set());
-  const [demoApps, setDemoApps] = useState<Set<string>>(new Set());
+  // The app catalog (null = still loading) + the operator's choice: app name → selection name →
+  // checked. The catalog is the SOLE source of app names AND of selection names — a checkbox can
+  // only choose what the apps repository's apps.yaml declares, which is exactly what gate T4
+  // requires (no free text, no selection the wizard invented). An app is selected iff it has an
+  // entry here; deselecting it drops its (now-hidden) selections with it.
+  const [catalog, setCatalog] = useState<AppEntry[] | null>(null);
+  const [chosen, setChosen] = useState<Record<string, Record<string, boolean>>>({});
   const [seedUsers, setSeedUsers] = useState(false);
   const [targets, setTargets] = useState<TenantTargetView[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,7 +42,7 @@ export function TenantCreate() {
     // app-types) just disables the picker with an inline note; onboarding without apps stays valid. The
     // server route is itself fail-soft, so this catch only covers a transport/parse failure.
     listTenantAppCatalog()
-      .then((apps) => setCatalog(apps))
+      .then((c) => setCatalog(c.apps))
       .catch(() => setCatalog([]));
   }, []);
 
@@ -55,33 +54,19 @@ export function TenantCreate() {
     const clusterId = e.target.value;
     setForm((f) => ({ ...f, clusterId, stage: (targets ?? []).find((t) => t.id === clusterId)?.stage ?? "" }));
   };
-  const toggleApp = (name: string) => (e: ChangeEvent<HTMLInputElement>) => {
+  // Selecting an app starts every selection at the default its catalog entry declares; deselecting
+  // it drops the whole entry, so a hidden checkbox never leaks into the payload.
+  const toggleApp = (app: AppEntry) => (e: ChangeEvent<HTMLInputElement>) => {
     const checked = e.target.checked;
-    setSelectedApps((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(name);
-      else next.delete(name);
+    setChosen((prev) => {
+      const next = { ...prev };
+      if (checked) next[app.name] = Object.fromEntries(Object.entries(app.selections).map(([k, v]) => [k, v.default]));
+      else delete next[app.name];
       return next;
     });
-    // Deselecting an app clears BOTH seed tiers so a hidden checkbox never leaks into the payload.
-    if (!checked) {
-      const drop = (prev: Set<string>): Set<string> => {
-        const next = new Set(prev);
-        next.delete(name);
-        return next;
-      };
-      setReferenceApps(drop);
-      setDemoApps(drop);
-    }
   };
-  // One toggler for either seed-tier set (reference / demo), by the app name.
-  const toggleTier = (setter: typeof setReferenceApps, name: string) => (e: ChangeEvent<HTMLInputElement>) =>
-    setter((prev) => {
-      const next = new Set(prev);
-      if (e.target.checked) next.add(name);
-      else next.delete(name);
-      return next;
-    });
+  const toggleSelection = (app: string, selection: string) => (e: ChangeEvent<HTMLInputElement>) =>
+    setChosen((prev) => ({ ...prev, [app]: { ...prev[app], [selection]: e.target.checked } }));
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -94,8 +79,8 @@ export function TenantCreate() {
         subdomain: form.subdomain.trim(),
         owner: form.owner.trim(),
         size: form.size as UnitSize,
-        // the checked catalog app-types + their two per-app seed tiers (buildCreateTenantBody trims + de-dupes)
-        apps: [...selectedApps].map((name) => ({ name, seedReference: referenceApps.has(name), seedDemo: demoApps.has(name) })),
+        // the checked catalog apps + their selections, in the request's shape (buildCreateTenantBody trims + de-dupes)
+        apps: Object.entries(chosen).map(([name, selections]) => appSelectionsToRequest(name, selections)),
         seedUsers,
         adminEmail: form.adminEmail.trim(), // empty ⇒ buildCreateTenantBody omits it (no first-admin invite)
       });
@@ -110,7 +95,7 @@ export function TenantCreate() {
   const noTargets = targets !== null && activeTargets.length === 0;
   // Where the tenant lands, derived from the chosen stage and cluster (tenantPlacement.ts). Null until
   // both are chosen, and it changes NOTHING about what is submitted.
-  const placement = tenantPlacement(form.stage, form.clusterId, targets, [...selectedApps]);
+  const placement = tenantPlacement(form.stage, form.clusterId, targets, Object.keys(chosen));
 
   return (
     <section className="page">
@@ -236,8 +221,9 @@ export function TenantCreate() {
           <span className="field__hint">
             Each app becomes a member of its own: namespace and Application{" "}
             <code>&lt;guid&gt;-&lt;name&gt;-&lt;stage&gt;</code>, reached at <code>&lt;name&gt;.&lt;subdomain&gt;.&lt;stage apex&gt;</code>,
-            rendered from the product&apos;s per-app charts in catalog with its own <code>values-&lt;name&gt;.yaml</code> overlay.
-            Pick from the catalog below; the standing members every tenant has are not offered, they are always there.
+            rendered from the product&apos;s per-app charts in catalog. Pick from the catalog below — the apps repository&apos;s
+            own <code>apps.yaml</code>, with the selections each app offers; the standing members every tenant has are not
+            offered, they are always there.
           </span>
           {catalog === null ? (
             <span className="field__hint">Loading the app catalog…</span>
@@ -246,24 +232,22 @@ export function TenantCreate() {
               App catalog unavailable — none selectable. You can still create the tenant with no apps and add them later.
             </span>
           ) : (
-            catalog.map((name) => (
-              <div key={name}>
+            catalog.map((app) => (
+              <div key={app.name}>
                 <label className="checkbox-field">
-                  <input type="checkbox" checked={selectedApps.has(name)} onChange={toggleApp(name)} />
-                  <span className="field__label">{name}</span>
+                  <input type="checkbox" checked={app.name in chosen} onChange={toggleApp(app)} />
+                  <span className="field__label">
+                    {app.title} <code>{app.name}</code>
+                  </span>
                 </label>
-                {selectedApps.has(name) && (
-                  <>
-                    <label className="checkbox-field checkbox-field--nested">
-                      <input type="checkbox" checked={referenceApps.has(name)} onChange={toggleTier(setReferenceApps, name)} />
-                      <span className="field__label">Reference data (roles, navigation — operator apps like buildproject/erp need this to show anything)</span>
+                {app.description && <span className="field__hint">{app.description}</span>}
+                {app.name in chosen &&
+                  Object.entries(app.selections).map(([selection, { title }]) => (
+                    <label key={selection} className="checkbox-field checkbox-field--nested">
+                      <input type="checkbox" checked={chosen[app.name]?.[selection] === true} onChange={toggleSelection(app.name, selection)} />
+                      <span className="field__label">{title}</span>
                     </label>
-                    <label className="checkbox-field checkbox-field--nested">
-                      <input type="checkbox" checked={demoApps.has(name)} onChange={toggleTier(setDemoApps, name)} />
-                      <span className="field__label">Demo data (sample records, e.g. the web home page)</span>
-                    </label>
-                  </>
-                )}
+                  ))}
               </div>
             ))
           )}
