@@ -25,7 +25,8 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
@@ -36,8 +37,6 @@ const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const JOBS_REPO = "https://github.com/acme/example-jobs.git";
 const PLATFORM_REPO = "https://github.com/acme/example-platform.git";
 const APPS = [{ name: "erp" }];
-const APPS_REPO = "https://github.com/acme/example-apps.git";
-const APPS_YAML = "apps:\n  - name: erp\n    title: ERP\n    selections:\n      seedDemo: { title: Demo data }\n";
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
@@ -48,7 +47,7 @@ builds:
   - name: engine
     containerfile: Containerfile
 tenant:
-  buildRepos:
+${TEMPLATE_SPEC}  buildRepos:
     - repo: ${JOBS_REPO}
       builds: [example-jobs]
     - repo: ${PLATFORM_REPO}
@@ -200,8 +199,8 @@ describe("channelReaching — the highest channel whose ceiling admits the stage
 describe("create-tenant planStream — the build units and the PATs it asks for", () => {
   it("lists a build unit per missing image's repository, asks a PAT for the unregistered one, and places its steps before the tenant's writes", async () => {
     seedClusters();
-    const prt = ports({ registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }) });
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const prt = withAppsTemplate(ports({ registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }) }));
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits).toEqual([{ unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false }]);
@@ -214,11 +213,11 @@ describe("create-tenant planStream — the build units and the PATs it asks for"
   });
   it("a registered build-only unit is re-released with its stored credential and asks for nothing", async () => {
     seedClusters();
-    const prt = ports({
+    const prt = withAppsTemplate(ports({
       registryProbe: new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] }),
       buildUnitRegistration: async (unit) => (unit === "example-platform" ? { form: "build-only", repoCredentialId: "cred_platform" } : null),
-    });
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    }));
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits[0]).toMatchObject({ unit: "example-platform", registered: true, repoCredentialId: "cred_platform" });
@@ -227,41 +226,40 @@ describe("create-tenant planStream — the build units and the PATs it asks for"
   it("refuses a render that pulls the apps TEMPLATE (tenant.appsBundle), by name, before the registry is asked — a stale chart is named, never built", async () => {
     seedClusters();
     // The catalog names example-apps as the template; the fixture's engine chart still mounts it.
-    const withTemplate = MANIFEST_YAML.replace("tenant:\n", `tenant:\n  appsBundle: example-apps\n  appsRepo: ${APPS_REPO}\n`);
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-apps:0.9.0` }] } } } } })] } });
     const probe = new FakeRegistryProbe({ missing: [] }); // the registry still carries the template's image
-    const prt = ports({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: withTemplate, "apps.yaml": APPS_YAML, ...APP_OVERLAYS } }), helm, registryProbe: probe });
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const prt = withAppsTemplate(ports({ helm, registryProbe: probe }));
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/example-apps:0\.9\.0.*"example-apps" is the catalogue's apps template \(tenant\.appsBundle\).*never built and never mounted/);
     expect(probe.probes).toEqual([]);
   });
-  it("no image missing ⇒ no build unit, no secret, no refresh step — the plan of today", async () => {
+  it("no image missing ⇒ no build unit and no secret; the refresh step stays, because the tenant's own bundle is built by the run", async () => {
     seedClusters();
-    const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const result = await makeCreateTenantDef(withAppsTemplate(ports())).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits).toEqual([]);
     expect(result.plan.requiredSecrets).toEqual([]);
-    expect(result.plan.steps.map((s) => s.name)).not.toContain("refresh-images");
+    expect(result.plan.steps.map((s) => s.name)).toContain("refresh-images");
   });
   it("refuses a missing image no buildRepos entry names, by name", async () => {
     seedClusters();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-nobody:1` }] } } } } })] } });
-    const prt = ports({ helm, registryProbe: new FakeRegistryProbe({ missing: ["example-nobody:1"] }) });
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const prt = withAppsTemplate(ports({ helm, registryProbe: new FakeRegistryProbe({ missing: ["example-nobody:1"] }) }));
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/tenant\.buildRepos names no repository.*example-nobody:1/);
   });
   it("refuses a missing image of a unit registered as deployable — its release is the unit's own act", async () => {
     seedClusters();
-    const prt = ports({
+    const prt = withAppsTemplate(ports({
       registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }),
-      buildUnitRegistration: async () => ({ form: "deployable", repoCredentialId: "cred_jobs" }),
-    });
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+      buildUnitRegistration: async (unit) => (unit === "example-jobs" ? { form: "deployable", repoCredentialId: "cred_jobs" } : null),
+    }));
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/registered as deployable \(example-jobs\)/);
@@ -278,7 +276,7 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
       buildPlane,
     });
     const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false };
-    const step = buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit, {});
+    const step = buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit);
     const logs: string[] = [];
     await step.run(ctx(params(), logs, { [buildRepoPatSecret("example-jobs")]: "ghp_approved" }));
     // The unit stands registered build-only on the books branch, its release watched at the version
@@ -291,13 +289,13 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     seedClusters();
     const onboard = onboardPorts();
     const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false };
-    const step = buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit, {});
+    const step = buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit);
     await expect(step.run(ctx(params(), []))).rejects.toThrow(/was not given at approve/);
   });
   it("refuses when the consumer onboarding is not wired, naming it", async () => {
     seedClusters();
     const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false };
-    const step = buildUnitStep(() => undefined, { guid: GUID, owner: "team-acme", stage: "prod" }, unit, {});
+    const step = buildUnitStep(() => undefined, { guid: GUID, owner: "team-acme", stage: "prod" }, unit);
     await expect(step.run(ctx(params(), [], { [buildRepoPatSecret("example-jobs")]: "ghp_approved" }))).rejects.toThrow(/consumer onboarding is not wired/);
   });
 });

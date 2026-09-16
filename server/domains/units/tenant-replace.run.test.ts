@@ -20,7 +20,8 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -63,7 +64,7 @@ builds:
   - name: engine
     containerfile: Containerfile
 tenant:
-  members:
+${TEMPLATE_SPEC}  members:
     - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
     - { name: jobs, chart: charts/example-jobs }
     - { name: report, chart: charts/example-report }
@@ -222,17 +223,18 @@ async function runAll(p: CreateTenantParams, prt: TenantOnboardPorts, logs: stri
 // subdomain belt, and record-provisional, which must land the inventory row before the first
 // mutation — and a replace teardown git-rm's a pointer, so it counts as one.
 const ONBOARD_HEAD = ["attest-target", "ensure-subdomain-free", "record-provisional"];
-// The replaces sit BETWEEN the head and this tail, so seed-tenant-crypto belongs to the tail: the
-// fresh guid's crypto entry is written after the old tenant of this subdomain is torn down, and
-// before anything that reads it exists.
-const ONBOARD_TAIL = ["seed-tenant-crypto", "ensure-images", "apply-appprojects", "provision-argo-sync", "provision-dns", "write-registration", "watch-sync-set", "smoke", "record-inventory", "activate"];
+// The replaces sit BETWEEN the head and this tail, so the tenant's own apps repository and
+// seed-tenant-crypto belong to the tail: the fresh guid's repository is created and built, and its
+// crypto entry written, after the old tenant of this subdomain is torn down and before anything that
+// reads them exists.
+const ONBOARD_TAIL = ["create-repository", "write-tree", "onboard-build-only", "seed-tenant-crypto", "refresh-images", "ensure-images", "apply-appprojects", "provision-argo-sync", "provision-dns", "write-registration", "watch-sync-set", "smoke", "record-inventory", "activate"];
 const replaceStepNames = (guid: string): string[] => [`replace-${guid}-remove`, `replace-${guid}-watch-prune`, `replace-${guid}-delete-projects`, `replace-${guid}-record`];
 
 describe("create-tenant idempotent-by-subdomain — planStream resolves the replace set", () => {
   it("no existing subdomain: a plain onboard, NO offboard steps prepended", async () => {
     seedClusters();
-    const def = makeCreateTenantDef(ports(makeRegistrations()));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const def = makeCreateTenantDef(withAppsTemplate(ports(makeRegistrations())));
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.replaces).toEqual([]);
@@ -245,8 +247,8 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     seedOldRow();
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration(), runId: "run_old" });
-    const def = makeCreateTenantDef(ports(registrations));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const def = makeCreateTenantDef(withAppsTemplate(ports(registrations)));
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.replaces).toEqual([
@@ -272,7 +274,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_2", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration({ cluster: "s2" }), runId: "run_old" });
-    await expect(makeCreateTenantDef(ports(registrations)).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx()))
+    await expect(makeCreateTenantDef(withAppsTemplate(ports(registrations))).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx()))
       .rejects.toThrow(`tenant ${OLD} on cluster "s2" (cls_2), not on the target s1.example ("s1", cls_1) — a replace across two clusters of one installation is refused before any teardown`);
     expect(await registrations.readTenant("prod", OLD)).not.toBeNull(); // nothing was torn down
   });
@@ -281,8 +283,8 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     seedClusters(); // no seedOldRow ⇒ orphan
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration(), runId: "run_old" });
-    const def = makeCreateTenantDef(ports(registrations));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const def = makeCreateTenantDef(withAppsTemplate(ports(registrations)));
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // The GitOps pointer scan caught the orphan (clusterId derived from the pointer's slave name).

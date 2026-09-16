@@ -32,7 +32,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
 
 /** The standing members the product under test declares — stated by the fixture, the way a real
  *  tenant's registration states its own. */
@@ -67,7 +67,9 @@ const SHA = "a".repeat(40);
 const SUB = "acme";
 const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
-const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: [{ name: "erp" }], ...TEST_BUNDLE };
+// A zero-app tenant: the abort under test is about the run, and a tenant with an app would first create
+// and build its apps repository through the consumer onboarding, which this harness does not wire.
+const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: [] };
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));

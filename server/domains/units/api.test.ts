@@ -39,7 +39,8 @@ import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "./unit-size.ts";
-import { APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
 
 const SHA = "a".repeat(40);
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
@@ -290,7 +291,7 @@ builds:
   - name: engine
     containerfile: Containerfile
 tenant:
-  members:
+${TEMPLATE_SPEC}  members:
     - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
     - { name: jobs, chart: charts/example-jobs }
     - { name: report, chart: charts/example-report }
@@ -317,7 +318,7 @@ function tenantResolver(): FakeClusterKubeResolver {
 }
 
 function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
-  return {
+  return withAppsTemplate({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: reg,
@@ -332,7 +333,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     consumerHostLabels: async () => [], dns: seededDns(),
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
-  };
+  });
 }
 
 function tenantLifecyclePorts(reg: TenantRegistrations): TenantLifecyclePorts {
@@ -374,7 +375,7 @@ function seedTenant(): void {
 
 // The request targets the seeded slave cls_2. resolveCluster is role-agnostic — it requires only
 // an ACTIVE cluster — so the slave here is test topology, not an enforced law.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }], ...TEST_BUNDLE };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }] };
 
 describe("tenant API", () => {
   it("501 NOT_CONFIGURED on create-tenant when tenant onboarding is not wired", async () => {

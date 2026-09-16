@@ -29,7 +29,7 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { AppEnv } from "../../http/app-env.ts";
-import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -209,7 +209,9 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
 }
 
 // The tenant lands on cls_2 here; placement is free, so this is a fixture choice, not a rule.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }], ...TEST_BUNDLE };
+// A zero-app tenant: these routes read the run's row, and a tenant with an app needs the GitHub App and the
+// catalog's template at the plan, which this harness does not wire.
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [] };
 
 describe("GET /api/tenants/orphans (the pointer scan)", () => {
   it("lists a live pointer with no inventory row, resolved to its cluster row", async () => {

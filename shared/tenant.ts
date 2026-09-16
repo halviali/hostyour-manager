@@ -122,13 +122,12 @@ export const subdomain = z
  *  The tag stands on the registration and not in a pins file because no chart's builds[] can name a
  *  per-tenant image: the release pipeline's bump seeds a chart's pins file from the chart's own
  *  builds[] and rewrites only the entries that stand there. Declared once, for the registration
- *  and for the create-tenant request that hands them in. The REGISTRATION carries all three or none
- *  (`refineAppsBundle`): an image without its tag is nothing the engines can mount. The REQUEST may
- *  carry the repository and the image without the tag (`refineAppsBundleRequest`): a bundle never
- *  built has no tag yet, and its repository is then a build unit of the run. The registration
- *  composer writes the empty string for `appsImage` and `appsImageTag` when the tenant has none, so
- *  the tenants ApplicationSet may read both bare under missingkey=error; `appsRepo` reaches no
- *  chart and is simply absent then. */
+ *  and for the tenant-create params, which carry the first two — the plan derives them from the
+ *  subdomain and the GitHub App's organisation, and the run reads the tag off the release it
+ *  triggers. The REGISTRATION carries all three or none (`refineAppsBundle`): an image without its
+ *  tag is nothing the engines can mount. The registration composer writes the empty string for
+ *  `appsImage` and `appsImageTag` when the tenant has none, so the tenants ApplicationSet may read
+ *  both bare under missingkey=error; `appsRepo` reaches no chart and is simply absent then. */
 export const appsBundleFields = {
   appsRepo: z.string().regex(/^https:\/\/[^ ]+\.git$/).optional(),
   appsImage: z.string().regex(/^([a-z0-9-]+)?$/).optional(),
@@ -140,14 +139,6 @@ export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): voi
   const bundle = [e.appsRepo, e.appsImage, e.appsImageTag].map(has);
   if (bundle.some(Boolean) && !bundle.every(Boolean)) {
     ctx.addIssue({ code: "custom", path: ["appsImage"], message: "a tenant's apps bundle is appsRepo, appsImage and appsImageTag together — the engines mount the image at that tag, and the run rebuilds it from that repository; one without the others can be neither mounted nor rebuilt" });
-  }
-}
-export function refineAppsBundleRequest(e: AppsBundleFields, ctx: z.RefinementCtx): void {
-  if (has(e.appsRepo) !== has(e.appsImage)) {
-    ctx.addIssue({ code: "custom", path: ["appsImage"], message: "a tenant's apps bundle is appsRepo and appsImage together — the engines mount the image, and the run rebuilds it from the repository; one without the other can be neither mounted nor rebuilt" });
-  }
-  if (has(e.appsImageTag) && !has(e.appsImage)) {
-    ctx.addIssue({ code: "custom", path: ["appsImageTag"], message: "appsImageTag names the tag of appsImage — without an image there is nothing the tag can belong to" });
   }
 }
 

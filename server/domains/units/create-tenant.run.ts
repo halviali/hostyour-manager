@@ -5,7 +5,7 @@ import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
 import { STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
-import { appsBundleFields, guid as guidSchema, memberName, refineAppsBundleRequest, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -38,16 +38,21 @@ import { writeRegistrationStep } from "./create-tenant-registration.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
 import { assertReplacesOnTargetCluster, ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
+import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
+import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 
-// The "tenant-create" Run — the tenant analogue of
+// The "tenant-create" Run — the onboarding of a tenant's platform, the tenant analogue of
 // onboard.run.ts. Instead of pinning one consumer chart it fans a single registration out to one
 // SELF-CONTAINED member per trio service and per app: each with its own namespace
-// <guid>-<member>-<stage>, its own AppProject and its own Application. The STAGE is the tenant's
-// own, an input of the request, and it is the target cluster's stage: the tenant's Vault policies
-// and the tenant-eso role are bound to the platform's stage (resolveTenantCluster). Everything not
-// per-member — the tenant's Vault path, its databases, its crypto — is either claimed by the member
-// chart that needs it (ServiceClaims) or written by this run itself (the tenant's crypto entry in
-// Vault).
+// <guid>-<member>-<stage>, its own AppProject and its own Application. A tenant with an app mounts
+// its OWN apps bundle `<subdomain>-apps`: this run creates that repository from the catalog's
+// template, writes the chosen apps into it and builds its first image (tenant-apps-steps.ts) after
+// the platform build units and before its own writes, and the registration carries the three
+// facts. The STAGE is the tenant's own, an input of the request, and it is the target cluster's
+// stage: the tenant's Vault policies and the tenant-eso role are bound to the platform's stage
+// (resolveTenantCluster). Everything not per-member — the tenant's Vault path, its databases, its
+// crypto — is either claimed by the member chart that needs it (ServiceClaims) or written by this
+// run itself (the tenant's crypto entry in Vault).
 // It shares onboard's streaming-plan skeleton: the plan phase runs the long fan-out validation
 // (validate-tenant.ts) gate-by-gate against the approve card, freezes the composed report + resolved
 // pin into params, and settles planned/failed — so plan() is a guard (see planStream).
@@ -202,11 +207,15 @@ export const CreateTenantParams = z.object({
   // must REPLACE (offboard first) — frozen at plan time so steps() prepends the SAME offboard steps at
   // execute/resume. Empty (the normal case) ⇒ no offboard steps, a plain onboard.
   replaces: z.array(ReplaceTargetSchema).default([]),
-  // The tenant's own apps bundle as the request handed it in (shared/tenant.ts appsBundleFields):
-  // the repository, the image, and the tag its last release built — the tag ABSENT when the bundle
-  // was never built, in which case its repository is one of `buildUnits` and the build step reads
-  // the tag off the release; write-registration then carries that one.
-  ...appsBundleFields,
+  // The tenant's own apps bundle, DERIVED at the plan for a tenant with an app: the repository
+  // `<org>/<subdomain>-apps` and the image `<subdomain>-apps` (shared/tenant.ts appsBundleFields).
+  // Never its tag: the run reads that off the release the apps-repo steps trigger, and
+  // write-registration carries it. Both absent for a zero-app tenant.
+  appsRepo: appsBundleFields.appsRepo,
+  appsImage: appsBundleFields.appsImage,
+  // The facts the apps-repo steps need, resolved once at the plan (tenant-apps-steps.ts); present
+  // exactly when the bundle above is.
+  appsUnit: TenantAppsUnitSchema.optional(),
 });
 export type CreateTenantParams = z.infer<typeof CreateTenantParams>;
 
@@ -230,18 +239,8 @@ export const CreateTenantRequest = z.object({
   // OPTIONAL first-admin email (the wizard's "Admin email" field). Empty ⇒ omitted; when present the
   // deploy gains the first-admin invite. Kept out of the registration/inventory — see CreateTenantParams.
   adminEmail: z.string().email().optional(),
-  // The tenant's own apps bundle: its `<subdomain>-apps` repository and image, created by the
-  // tenant-apps-repo run, and the image tag that run's release built — absent when the bundle has
-  // not been built yet, which makes its repository a build unit of this run.
-  ...appsBundleFields,
-}).superRefine((r, ctx) => {
-  refineAppsBundleRequest(r, ctx);
-  // EVERY TENANT WITH AN APP MOUNTS ITS OWN BUNDLE. The catalog's bundle is the template the
-  // tenant-apps-repo run creates `<subdomain>-apps` from, and no tenant mounts it — so a request that
-  // selects an app and names no bundle is refused before anything is rendered.
-  if (r.apps.length > 0 && !r.appsImage) {
-    ctx.addIssue({ code: "custom", path: ["appsImage"], message: `${r.apps.length} app(s) selected and no apps bundle named (appsRepo + appsImage) — every tenant mounts its own ${r.subdomain}-apps bundle, created and built by the tenant-apps-repo run; the catalog's bundle is the template and is mounted by no tenant` });
-  }
+  // No bundle field: the wizard knows neither the organisation nor the tag. EVERY TENANT WITH AN APP
+  // MOUNTS ITS OWN BUNDLE, and the plan derives it from the subdomain and the GitHub App.
 });
 export type CreateTenantRequest = z.infer<typeof CreateTenantRequest>;
 
@@ -366,7 +365,11 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     ...replaceSteps,
     // The build units BEFORE the tenant's own writes: a build that fails leaves a provisioning row and
     // nothing else — no Vault entry, no bucket, no key, no AppProject (the first-write law of #151).
-    ...(p.buildUnits ?? []).map((unit) => buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage, appsImage: p.appsImage }, unit, runtime)),
+    ...(p.buildUnits ?? []).map((unit) => buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit)),
+    // The tenant's own apps repository, after the platform's images and for the same reason: created
+    // through the App, written from the template with the chosen apps, onboarded build-only and built
+    // once — its tag lands in the runtime for refresh-images and write-registration.
+    ...(p.appsUnit ? tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: (p.apps ?? []).map((a) => a.name) }, runtime) : []),
     {
       name: "seed-tenant-crypto",
       title: "Seed the tenant's crypto entry in Vault (create-only)",
@@ -576,13 +579,16 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // tenant's, and every member chart renders with exactly the files its Application layers.
       const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, req.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
-      // The tenant's own bundle, held to the request's law above: a tenant with an app has one.
-      const bundle = req.appsRepo && req.appsImage ? { repo: req.appsRepo, image: req.appsImage } : undefined;
-      // The tag the engines are rendered with: the one the bundle's last release built, or — for a
-      // bundle never built — the platform's own placeholder (global.placeholderTag, the tag a pin
-      // carries before its first release), which no registry holds, so the probe below names the
-      // bundle as missing and its repository becomes a build unit of this run.
-      const appsImageTag = bundle ? (req.appsImageTag ?? placeholderTagFromChain(clusterValueFiles)) : undefined;
+      // The tenant's own bundle: a tenant with an app mounts `<subdomain>-apps`, which this run
+      // creates and builds. The engines are rendered at the platform's placeholder (global
+      // .placeholderTag, the tag a pin carries before its first release) because the bundle is built
+      // by this run and its tag is not known until then; refresh-images renders again at the built
+      // tag. A tenant without an app derives nothing and needs no App.
+      const withApps = req.apps.length > 0;
+      const refuse = (why: string, planJson: unknown) => ({ outcome: "rejected" as const, summary: `Tenant "${req.subdomain}" was rejected — ${why}`, planJson });
+      if (withApps && !ports.githubApp) return refuse(NO_GITHUB_APP, { subdomain: req.subdomain, apps: req.apps.map((a) => a.name) });
+      const appsImage = withApps ? tenantAppsUnit(req.subdomain) : undefined;
+      const appsImageTag = withApps ? placeholderTagFromChain(clusterValueFiles) : undefined;
       const guid = await mintFreeGuid(ports, req.stage);
       // The books branch first: LOG AND CONTINUE on failure, as boot does — a trunk that cannot be
       // carried leaves the branch one product state behind, never a wrong one, and the plan reads
@@ -606,7 +612,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           probeGuid: guid,
           subdomain: req.subdomain,
           seedUsers: req.seedUsers,
-          ...(bundle ? { appsImage: bundle.image, appsImageTag } : {}),
+          ...(appsImage !== undefined ? { appsImage, appsImageTag } : {}),
           clusterValueFiles,
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
@@ -630,11 +636,20 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // images, filtered to the target cluster's registry host. The validated revision is frozen
       // into chartsRef as well, so the set cannot move between plan + execute.
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
+      // The tenant's apps unit, from the catalog's template: the refusals, then the four facts the
+      // apps-repo steps run on, frozen once.
+      let appsUnit: CreateTenantParams["appsUnit"];
+      if (withApps) {
+        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: req.apps.map((a) => a.name), spec: outcome.spec, signal: ctx.signal, log: ctx.log });
+        if (resolved.outcome === "refused") return refuse(resolved.why, outcome.report);
+        appsUnit = resolved.unit;
+      }
       // THE IMAGES THE FAN-OUT LACKS ARE BUILT BY THIS RUN, the way a consumer onboarding builds its
       // own (hostyour-manager#165, tenant-builds.ts): each missing image's repository becomes a build
       // unit the run onboards before the tenant's own writes; a PAT per unregistered unit at approve.
+      // The tenant's own bundle is left out: the apps-repo steps build it, with the App's token.
       const planned = await planBuildUnits({
-        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], ...(bundle ? { bundle } : {}), appsBundle: outcome.spec?.appsBundle, probe: ports.registryProbe,
+        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage, probe: ports.registryProbe,
         registration: ports.buildUnitRegistration ?? (async () => null), stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
@@ -668,9 +683,9 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // Thread the operator's optional admin email into params so the `activate` step can invite the
         // first admin (spread conditionally — exactOptionalPropertyTypes forbids adminEmail: undefined).
         ...(req.adminEmail ? { adminEmail: req.adminEmail } : {}),
-        // The bundle as handed in — the tag only where a release built one; the placeholder the render
-        // used is not a fact about the tenant and is never frozen.
-        ...(bundle ? { appsRepo: bundle.repo, appsImage: bundle.image, ...(req.appsImageTag ? { appsImageTag: req.appsImageTag } : {}) } : {}),
+        // The bundle and its unit, derived — never a tag: the placeholder the render used is not a fact
+        // about the tenant, and the built tag is read by the run.
+        ...(appsUnit && appsImage !== undefined ? { appsRepo: tenantAppsRepoURL(appsUnit.org, req.subdomain), appsImage, appsUnit } : {}),
       };
       const stepDefs = createTenantSteps(ports, params);
       const plan: Plan = {
@@ -680,7 +695,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // The replace sentence carries the SAME data warning tenant-offboard's summary gives, because
         // approving this plan approves the same prune: the replaced tenant's member databases go with
         // its ServiceClaim deletions, and only its identity survives for a purge to reap.
-        summary: `Create tenant ${guid} (${req.subdomain}) at ${req.stage} on ${rc.domain} pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}" at ${req.stage}) before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
+        summary: `Onboard tenant ${guid} (${req.subdomain}) at ${req.stage} on ${rc.domain} pinned at ${outcome.resolvedSha.slice(0, 7)} with ${req.apps.length} app(s): ${stepDefs.length} steps.${appsUnit ? ` The apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with ${req.apps.map((a) => a.name).join(", ")}, onboarded build-only and built; the engines mount it.` : ""}${replaces.length ? ` Replaces existing ${replaces.map((r) => r.guid).join(", ")} (subdomain "${req.subdomain}" at ${req.stage}) before deploying ${guid}. The replaced tenant's member DATABASES are NOT kept: pruning its fan-out deletes every member's ServiceClaim, and the service-provisioner drops a claim's databases together with its user — run a backup first if the data has to come back. Its identity (the Vault crypto entry, the namespaces) survives until a purge reaps it.` : ""}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [], // no host owned — the Manager acts master-locally
         locks: tenantLocks(ports.registrations),

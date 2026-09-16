@@ -25,12 +25,12 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
     name: "write-registration",
     title: "Commit the tenant registration (GitOps deploy)",
     run: async (ctx) => {
-      // The bundle's tag: the one its build unit read off the release in this run, else the one the
-      // request carried. A bundle with neither was not built, and a registration naming an image
-      // without its tag would hand the engines nothing to mount — refused here, never written.
-      const appsImageTag = runtime.appsImageTag ?? p.appsImageTag;
+      // The bundle's tag: the one the apps-repo steps read off the release in this pass. A pass
+      // resumed after them has none, and a registration naming an image without its tag would hand
+      // the engines nothing to mount — refused here, naming the retry, never written.
+      const appsImageTag = runtime.appsImageTag;
       if (p.appsImage && !appsImageTag) {
-        throw errValidation(`the apps bundle ${p.appsImage} has no image tag — its build unit did not run in this run and the request carried none; the registration cannot name an image the engines cannot mount`);
+        throw errValidation(`the tag the apps bundle ${p.appsImage} was built at is not in this pass's memory — onboard-build-only reads it off the release; retry from that step, because the registration cannot name an image the engines cannot mount`);
       }
       const registration: TenantRegistration = TenantRegistrationSchema.parse({
         cluster: p.cluster,

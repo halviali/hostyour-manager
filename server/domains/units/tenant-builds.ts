@@ -19,8 +19,13 @@
 //      and stay when the tenant is gone; their cleanups ride this run, so an aborted tenant leaves no
 //      half unit behind.
 //   3. refreshImagesStep — after the builds the fan-out is rendered again against the books branch,
-//      where every bump wrote its `pins-<stage>.yaml`, so ensure-images probes the tags the cluster
-//      will pull and the argo-sync grant names the units that now attest them.
+//      where every bump wrote its `pins-<stage>.yaml`, and with the tag the tenant's own apps bundle
+//      was just built at (tenant-apps-steps.ts), so ensure-images probes the tags the cluster will
+//      pull and the argo-sync grant names the units that now attest them.
+//
+// The tenant's own apps bundle is NEVER a build unit here: its repository is created and built by
+// the apps-repo steps with the App's token, so its image is left out of the probe and no PAT is
+// asked for it.
 //
 // Boundary: a domain module — it depends on the consumer onboarding's step factories and ports (the
 // one place the release cycle is written), never on an adapter implementation.
@@ -50,6 +55,7 @@ import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { ensureImagesStep } from "./ensure-images.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
+import type { TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
 
 /** One build unit the tenant run onboards or re-releases before it fans out. Frozen into the run
  *  params at plan time; the credential id is present only for a unit already registered, every
@@ -76,23 +82,14 @@ export interface BuildUnitResolution {
   unmapped: RequiredImage[];
 }
 
-/** The tenant's own apps bundle: the image its engines mount and the repository that builds it —
- *  the tenant's, never the catalog's, which is why it stands beside `buildRepos` and wins over it. */
-export interface TenantBundle {
-  image: string;
-  repo: string;
-}
-
 /** The plan-time policy: the missing images grouped by the repository that builds them. */
 export async function resolveBuildUnits(input: {
   missing: readonly RequiredImage[];
   buildRepos: TenantSpec["buildRepos"];
-  bundle?: TenantBundle;
   registration: (unit: string) => Promise<RegisteredUnit | null>;
 }): Promise<BuildUnitResolution> {
   const repoOf = new Map<string, string>();
   for (const entry of input.buildRepos) for (const image of entry.builds) repoOf.set(image, entry.repo);
-  if (input.bundle) repoOf.set(input.bundle.image, input.bundle.repo);
   const byRepo = new Map<string, Set<string>>();
   const unmapped: RequiredImage[] = [];
   for (const img of input.missing) {
@@ -139,13 +136,14 @@ export interface PlannedBuilds {
  *  instance too, which is the unit's own act (its Consumers page), not a tenant's. A render that
  *  pulls the apps TEMPLATE (`tenant.appsBundle`) is refused before the registry is asked: the
  *  template is copied from, never built and never mounted, so a chart still naming it is stale and
- *  is named here rather than built or pulled. */
+ *  is named here rather than built or pulled. The tenant's OWN bundle (`appsImage`) is not probed:
+ *  the apps-repo steps build it in every run, and refresh-images probes it at the tag they read. */
 export async function planBuildUnits(input: {
   requiredImages: readonly RequiredImage[];
   registryHost: string;
   buildRepos: TenantSpec["buildRepos"];
-  bundle?: TenantBundle;
   appsBundle?: TenantSpec["appsBundle"];
+  appsImage?: string | undefined;
   registration: (unit: string) => Promise<RegisteredUnit | null>;
   probe: RegistryProbe;
   stage: Stage;
@@ -162,9 +160,10 @@ export async function planBuildUnits(input: {
   }
   const missing: RequiredImage[] = [];
   for (const img of input.requiredImages) {
+    if (img.repo === input.appsImage) continue;
     if (!(await input.probe.imageExists({ registryHost: input.registryHost, repo: img.repo, tag: img.tag }, { signal: input.signal }))) missing.push(img);
   }
-  const { units, unmapped } = await resolveBuildUnits({ missing, buildRepos: input.buildRepos, ...(input.bundle ? { bundle: input.bundle } : {}), registration: input.registration });
+  const { units, unmapped } = await resolveBuildUnits({ missing, buildRepos: input.buildRepos, registration: input.registration });
   if (unmapped.length > 0) {
     return {
       outcome: "rejected",
@@ -197,13 +196,12 @@ export interface TenantBuildDeps {
 }
 
 /** What the build steps hand the steps after them, in-run memory (the run's own closure): the image
- *  set and the sync units as they stand AFTER the builds wrote their pins, and the image tag the
- *  tenant's own bundle was built at where its build unit ran. Absent while no build unit ran, in
- *  which case the plan's frozen set (and the request's tag) stands. */
-export interface TenantBuildRuntime {
+ *  set and the sync units as they stand AFTER the builds wrote their pins, and — from the apps-repo
+ *  steps — the tag the tenant's own bundle was built at and the credential its token was sealed
+ *  under. Absent while no build ran, in which case the plan's frozen set stands. */
+export interface TenantBuildRuntime extends TenantAppsRepoRuntime {
   requiredImages?: RequiredImage[];
   syncUnits?: string[];
-  appsImageTag?: string;
 }
 
 /** The channel a tenant's build units are released on: the highest channel whose ceiling admits the
@@ -252,9 +250,8 @@ async function nextVersion(ctx: StepCtx, deps: TenantBuildDeps, unit: BuildUnit,
  *  registered build-only skips the registration half and re-runs its release. */
 export function buildUnitStep(
   deps: () => TenantBuildDeps | undefined,
-  p: { guid: string; owner: string; stage: Stage; appsImage?: string | undefined },
+  p: { guid: string; owner: string; stage: Stage },
   unit: BuildUnit,
-  runtime: TenantBuildRuntime,
 ): Step {
   return {
     name: buildUnitStepName(unit.unit),
@@ -310,18 +307,6 @@ export function buildUnitStep(
         ctx.log("meta", `${unit.unit}: ${step.title}`);
         await step.run(ctx);
       }
-      // The tenant's own bundle has no pins file: its tag is what this release's PipelineRun states,
-      // and the registration carries it from here (refresh-images renders with it, write-registration
-      // writes it). A run that states none leaves the engines with no tag to mount — a refusal, never
-      // the request's old tag standing in for a build that just happened.
-      if (p.appsImage !== undefined && unit.images.includes(p.appsImage)) {
-        if (!release.imageTag) {
-          throw errValidation(`the release PipelineRun of build unit "${unit.unit}" states no image-tag result — the tag ${p.appsImage} was pushed under cannot be read, so the registration cannot carry it`);
-        }
-        runtime.appsImageTag = release.imageTag;
-        ctx.checkpoint({ appsImage: p.appsImage, appsImageTag: release.imageTag });
-        ctx.log("meta", `the tenant's apps bundle ${p.appsImage} is built as ${p.appsImage}:${release.imageTag} — the registration will carry that tag`);
-      }
       ctx.log("meta", `build unit ${unit.unit} done — ${unit.images.join(", ")} built and pinned for ${p.stage} on the books branch`);
     },
   };
@@ -346,21 +331,27 @@ export interface RefreshImagesParams {
   seedUsers: boolean;
   registryHost: string;
   requiredImages: readonly RequiredImage[];
+  /** The tenant's own apps bundle, rendered at the tag the apps-repo steps read off its release. */
   appsImage?: string | undefined;
-  appsImageTag?: string | undefined;
 }
 
 /** After the builds: the fan-out rendered again against the books branch, where the bumps wrote the
- *  pins, so the image set ensure-images probes and the sync units the argo-sync grant names are the
- *  ones the cluster will pull and attest. The plan's frozen set was the trunk's for every image not
- *  yet built; the difference is logged tag by tag. */
+ *  pins, and with the bundle at the tag its release stated, so the image set ensure-images probes and
+ *  the sync units the argo-sync grant names are the ones the cluster will pull and attest. The plan's
+ *  frozen set was the trunk's for every image not yet built and the placeholder for the bundle; the
+ *  difference is logged tag by tag. */
 export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesParams, runtime: TenantBuildRuntime): Step {
   return {
     name: "refresh-images",
     title: "Render the fan-out again against the pins the builds wrote",
     run: async (ctx) => {
       const clusterValueFiles = await ports.resolveClusterValueFiles(p.domain, p.stage);
-      const appsImageTag = runtime.appsImageTag ?? p.appsImageTag;
+      const appsImageTag = runtime.appsImageTag;
+      // A pass resumed after onboard-build-only has no tag in memory: the bundle would render at no
+      // tag at all and the probe would name an image that cannot exist. Refused, naming the retry.
+      if (p.appsImage !== undefined && appsImageTag === undefined) {
+        throw errValidation(`the tag the apps bundle ${p.appsImage} was built at is not in this pass's memory — onboard-build-only reads it off the release; retry from that step`);
+      }
       const outcome = await validateTenant(
         {
           repoURL: ports.catalogRepoUrl,
@@ -371,7 +362,6 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           subdomain: p.subdomain,
           seedUsers: p.seedUsers,
           clusterValueFiles,
-          // The bundle at the tag its build unit just read off the release, where one ran.
           ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}),
           ...(appsImageTag !== undefined ? { appsImageTag } : {}),
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
@@ -399,15 +389,17 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
   };
 }
 
-/** The image steps after the build units: the fan-out rendered again where a build unit ran, then the
- *  probe of the set that render left behind — the plan's frozen set where none ran. */
+/** The image steps after the builds: the fan-out rendered again where a build unit or the apps-repo
+ *  steps ran, then the probe of the set that render left behind — the plan's frozen set where
+ *  nothing was built. */
 export function tenantImageSteps(
   ports: RefreshImagesPorts & { registryProbe: RegistryProbe },
   p: RefreshImagesParams & { buildUnits?: readonly BuildUnit[] },
   runtime: TenantBuildRuntime,
 ): Step[] {
+  const built = (p.buildUnits ?? []).length > 0 || p.appsImage !== undefined;
   return [
-    ...((p.buildUnits ?? []).length > 0 ? [refreshImagesStep(ports, p, runtime)] : []),
+    ...(built ? [refreshImagesStep(ports, p, runtime)] : []),
     ensureImagesStep(ports, { registryHost: p.registryHost, get requiredImages() { return runtime.requiredImages ?? p.requiredImages; } }),
   ];
 }

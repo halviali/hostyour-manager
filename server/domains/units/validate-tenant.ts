@@ -67,7 +67,8 @@ export interface ValidateTenantRequest {
    *  mount and the immutable image tag of its last release. Delivered under `tenant:` like the
    *  deploy does, so the render yields the bundle's image ref and ensure-images probes it. Absent
    *  for a tenant without one, which is delivered as the empty pair the registration carries then;
-   *  it reaches no engine, because a tenant with an app names a bundle (CreateTenantRequest). */
+   *  it reaches no engine, because the plan derives a bundle for every tenant with an app
+   *  (create-tenant.run.ts) and renders it at the placeholder until the run has built it. */
   appsImage?: string | undefined;
   appsImageTag?: string | undefined;
   /** The target cluster's values chain off its install branch. The tenant appsets layer exactly

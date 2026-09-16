@@ -55,9 +55,10 @@ export const APP_OVERLAYS: Record<string, string> = Object.fromEntries(["erp", "
 export const TEST_QUOTA = seedQuota("small");
 
 /** The test tenant's OWN apps bundle: every tenant that selects an app mounts its own
- *  `<subdomain>-apps` bundle and the catalog's is mounted by none (hostyour-manager#178), so every
- *  create-tenant request here that selects an app names it, and every seeded registration of a
- *  tenant with an app carries it. The tag is the shape a release's PipelineRun states. */
+ *  `<subdomain>-apps` bundle and the catalog's is mounted by none, so every seeded registration of
+ *  a tenant with an app carries it. A create-tenant request never names it: the plan derives it
+ *  (tenant-apps-repo.fixture.ts withAppsTemplate is what such a plan needs). The tag is the shape a
+ *  release's PipelineRun states. */
 export const TEST_BUNDLE = {
   appsRepo: "https://github.com/acme/acme-apps.git",
   appsImage: "acme-apps",

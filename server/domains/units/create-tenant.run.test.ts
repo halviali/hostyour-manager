@@ -21,7 +21,8 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder, TenantCryptoSeedInput } from "../../adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { TENANT_CRYPTO_PROPERTIES, TENANT_STORAGE_PROPERTIES } from "./tenant-crypto-mint.ts";
@@ -53,7 +54,7 @@ builds:
   - name: engine
     containerfile: Containerfile
 tenant:
-  members:
+${TEMPLATE_SPEC}  members:
     - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
     - { name: jobs, chart: charts/example-jobs }
     - { name: report, chart: charts/example-report }
@@ -319,8 +320,8 @@ describe("create-tenant streaming planner", () => {
 
   it("mints a free guid, validates the fan-out, and freezes a plan (targetKind cluster, catalog lock)", async () => {
     seedClusters();
-    const def = makeCreateTenantDef(ports());
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, size: "large", ...TEST_BUNDLE }, planCtx());
+    const def = makeCreateTenantDef(withAppsTemplate(ports()));
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, size: "large" }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.guid).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/);
@@ -342,7 +343,7 @@ describe("create-tenant streaming planner", () => {
   it("REFUSES a tenant at test on a cluster marked prod before anything is read — the Vault policies are bound to the platform's stage", async () => {
     seedClusters(); // cls_1 is marked prod
     const reader = repoWithManifest();
-    await expect(makeCreateTenantDef(ports({ repo: reader })).planStream!({ clusterId: "cls_1", stage: "test", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx()))
+    await expect(makeCreateTenantDef(ports({ repo: reader })).planStream!({ clusterId: "cls_1", stage: "test", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx()))
       .rejects.toThrow(/tenant at test cannot be created on s1\.example, a prod cluster/);
     expect(reader.clones).toEqual([]); // refused before the catalog was even cloned
   });
@@ -354,19 +355,20 @@ describe("create-tenant streaming planner", () => {
     // the trunk instead would approve a chart the cluster never reads.
     seedClusters();
     const reader = repoWithManifest();
-    const result = await makeCreateTenantDef(ports({ repo: reader }))
-      .planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const result = await makeCreateTenantDef(withAppsTemplate(ports({ repo: reader })))
+      .planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
-    expect(reader.clones.map((c) => c.ref)).toEqual([FAKE_BOOKS_BRANCH]);
+    // The catalog at the books branch and nowhere else; the apps template is the other repository cloned.
+    expect(reader.clones.filter((c) => c.repoURL === DEPLOY_URL).map((c) => c.ref)).toEqual([FAKE_BOOKS_BRANCH]);
     expect(FAKE_BOOKS_BRANCH).not.toBe(PRODUCT_BRANCH);
     expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` });
   });
 
   it("resolves the slave's NAME off clusters.domain and freezes the registryHost the target cluster resolves to", async () => {
     seedClusters(); // s1.example slave + m1.example master
-    const def = makeCreateTenantDef(ports());
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const def = makeCreateTenantDef(withAppsTemplate(ports()));
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.cluster).toBe("s1"); // clusterShortName of clusters.domain
@@ -379,8 +381,8 @@ describe("create-tenant streaming planner", () => {
   it("renders EVERY member — the trio's jobs + report charts among them, unconditionally", async () => {
     seedClusters();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
-    const def = makeCreateTenantDef(ports({ helm }));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    const def = makeCreateTenantDef(withAppsTemplate(ports({ helm })));
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // jobs and report render for EVERY tenant — nothing gates them, not a flag, not the presence of a file.

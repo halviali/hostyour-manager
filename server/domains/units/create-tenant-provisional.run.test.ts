@@ -23,7 +23,8 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -71,7 +72,7 @@ builds:
   - name: engine
     containerfile: Containerfile
 tenant:
-  members:
+${TEMPLATE_SPEC}  members:
     - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
     - { name: jobs, chart: charts/example-jobs }
     - { name: report, chart: charts/example-report }
@@ -443,8 +444,8 @@ describe("the guid mint probes with the TOLERANT scan", () => {
     seedClusters();
     const registrations = new TenantRegistrations(new FakePlatformRepo());
     registrations.readTenant = () => Promise.reject(new AppError("INTERNAL", `tenant file tenants/prod/${GUID}/reset.yaml failed its schema: nonce Invalid input`));
-    const result = await makeCreateTenantDef(ports({ registrations })).planStream!(
-      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, trio: { jobs: false }, ...TEST_BUNDLE },
+    const result = await makeCreateTenantDef(withAppsTemplate(ports({ registrations }))).planStream!(
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, trio: { jobs: false } },
       { db: db.db, log: () => undefined, signal: new AbortController().signal },
     );
     expect(result.outcome).toBe("planned");
