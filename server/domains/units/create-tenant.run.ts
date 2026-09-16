@@ -74,6 +74,11 @@ export interface TenantOnboardPorts {
    *  the sync. */
   platformRepoURL: string;
   catalogCredentialId?: string; // the manager's first-party catalog read credential
+  /** Brings the catalog's trunk into this installation's books branch (adapters/git/git.ts). The plan
+   *  runs it FIRST, because the books branch is what it reads and what every member Application
+   *  reads its chart at — without it a chart fix on the trunk reaches no tenant until the next
+   *  Manager boot, the one other caller (boot/wire.ts). Absent where the Manager writes no books. */
+  carryTrunkToBooksBranch?: () => Promise<void>;
   argoWatchTimeoutMs: number;
   /** The ensure-images gate: probes the target cluster's registrations for every image the pinned fan-out pulls,
    *  BEFORE any pointer/project mutation, so onboarding never fans out to an image that does not
@@ -588,6 +593,17 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, req.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       const guid = await mintFreeGuid(ports, req.stage);
+      // The books branch first: LOG AND CONTINUE on failure, as boot does — a trunk that cannot be
+      // carried leaves the branch one product state behind, never a wrong one, and the plan reads
+      // it as it stands.
+      if (ports.carryTrunkToBooksBranch) {
+        try {
+          await ports.carryTrunkToBooksBranch();
+          ctx.log(`catalog trunk carried into the books branch ${ports.registrations.branch}`);
+        } catch (err) {
+          ctx.log(`the catalog's trunk could not be carried into the books branch ${ports.registrations.branch} — planning over the branch as it stands: ${String(err)}`);
+        }
+      }
       const outcome = await validateTenant(
         {
           repoURL: ports.catalogRepoUrl,

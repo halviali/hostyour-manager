@@ -683,6 +683,7 @@ function buildTenantOnboarding(
     // AppProject must allow it next to catalog.
     platformRepoURL,
     catalogCredentialId: "catalog-read-pat", // activates askpass on the validation clone
+    carryTrunkToBooksBranch,
     argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
     registryProbe,
     buildRbac,

@@ -190,6 +190,27 @@ describe("create-tenant plans the zone before the first write", () => {
     expect(result.params.report.gates.find((g) => g.id === "G27")?.evidence?.[0]?.value).toBe("157.90.201.150");
   });
 
+  it("carries the catalog trunk into the books branch BEFORE it reads it, and says so in the plan stream", async () => {
+    const dns = new FakeDnsProvider();
+    seedClusters(dns);
+    const logs: string[] = [];
+    const prt = { ...ports(dns), carryTrunkToBooksBranch: async () => { logs.push("carried"); } };
+    const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx(logs));
+    expect(result.outcome).toBe("planned");
+    expect(logs[0]).toBe("carried");
+    expect(logs.findIndex((l) => l.startsWith("catalog trunk carried"))).toBeLessThan(logs.findIndex((l) => l.startsWith("G27")));
+  });
+
+  it("a carry that fails is logged with its reason and the plan goes on over the branch as it stands", async () => {
+    const dns = new FakeDnsProvider();
+    seedClusters(dns);
+    const logs: string[] = [];
+    const prt = { ...ports(dns), carryTrunkToBooksBranch: async () => { throw new Error("origin refused the push"); } };
+    const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx(logs));
+    expect(result.outcome).toBe("planned");
+    expect(logs.some((l) => l.includes("could not be carried") && l.includes("origin refused the push"))).toBe(true);
+  });
+
   it("provision-dns writes the ONE wildcard at the cluster's own address, replacing a leftover and saying what stood there", async () => {
     const dns = new FakeDnsProvider();
     seedClusters(dns);
