@@ -10,6 +10,7 @@ import { ConsumerManifestSchema, type ConsumerManifest } from "../../../shared/c
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { MANIFEST_FED_GATE_IDS } from "./gates/compose.ts";
 import { seedQuota } from "../../../shared/unit-size.ts";
+import { RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
 
 const SHA = "a".repeat(40);
 const RELEASE = "1.4.0-stable-20260719120000";
@@ -17,7 +18,7 @@ const RELEASE = "1.4.0-stable-20260719120000";
 /** The gates a passing onboarding is judged by: the sandbox's, then these from the Manager. The
  *  fixtures below emit the sandbox side as one G1, so the assertions on the composed report check
  *  the manager side against this tail. */
-const MANAGER_GATES = ["G17", "G23", "G16", "G18", "G19", "G24"];
+const MANAGER_GATES = ["G17", "G23", "G28", "G16", "G18", "G19", "G24"];
 
 function req(over: Partial<OnboardRequest> = {}): OnboardRequest {
   return { repoURL: "https://github.com/x/acme.git", ref: RELEASE, consumerName: "acme", size: "medium", ...over };
@@ -288,9 +289,9 @@ describe("validateOnboard", () => {
       const outcome = await validateOnboard(req(), target(), deps(repo, runner));
 
       const ids = outcome.report.gates.map((g) => g.id);
-      // The two manager-side gates whose subject the Manager holds itself still stand: the clone it
-      // made, and the name the operator submitted. Neither reads the manifest.
-      expect(ids).toEqual(["G1", "G17", "G23", "G26"]);
+      // The three manager-side gates whose subject the Manager holds itself still stand: the clone it
+      // made, the name the operator submitted, and the workflow file. None reads the manifest.
+      expect(ids).toEqual(["G1", "G17", "G23", "G28", "G26"]);
       expect(MANIFEST_FED_GATE_IDS.length).toBeGreaterThan(0); // the exclusion below is not vacuous
       expect(ids.filter((id) => MANIFEST_FED_GATE_IDS.includes(id))).toEqual([]);
 
@@ -311,7 +312,7 @@ describe("validateOnboard", () => {
       const runner = new FakeGateRunner({ report: report(g1Fail, "fail") });
       const { chartPath: _chartPath, ...buildOnly } = target();
       const outcome = await validateOnboard(req(), buildOnly, deps(repo, runner));
-      expect(outcome.report.gates.map((g) => g.id)).toEqual(["G1", "G17", "G23", "G26"]);
+      expect(outcome.report.gates.map((g) => g.id)).toEqual(["G1", "G17", "G23", "G28", "G26"]);
       expect(outcome.verdict).toBe("fail");
     });
 
@@ -425,6 +426,23 @@ describe("validateOnboard — every poll exit reaps the gate objects", () => {
     const p = validateOnboard(req(), target(), deps(repo(), runner, { pollIntervalMs: 1, pollBudgetMs: 15 }));
     await expect(p).rejects.toThrow(/did not settle within 15ms/);
     expect(runner.cancelled).toEqual(["job_stuck"]);
+  });
+});
+
+// The passing runs above carry no workflow file, so "absent passes" is what every one of them proves;
+// the kit's own bytes and an older kit are release-workflow.test.ts's. This is the wiring: the file
+// is read off the Manager's own clone, and a foreign one rejects the run before anything is written.
+describe("G28 release workflow — the kit's path is read at validation, before anything is written", () => {
+  it("refuses a workflow the unit owns at the kit's path", async () => {
+    const files = { "deploy/chart/values-dev.yaml": pinFile("acme-api"), [RELEASE_KIT_WORKFLOW.path]: "name: Publish\non:\n  push:\n    tags: ['v*.*.*']\njobs: {}\n" };
+    const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
+    const outcome = await validateOnboard(req(), target(), deps(new FakeRepoReader({ resolvedSha: SHA, files }), runner));
+    const g28 = outcome.report.gates.find((g) => g.id === "G28");
+    expect(g28).toMatchObject({ severity: "hard", status: "fail" });
+    expect(g28?.found).toContain(RELEASE_KIT_WORKFLOW.path);
+    expect(g28?.reason).toMatch(/move it to another file/);
+    expect(outcome.verdict).toBe("fail");
+    expect(outcome.builds).toBeNull();
   });
 });
 

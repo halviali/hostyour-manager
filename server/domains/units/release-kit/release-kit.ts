@@ -31,6 +31,10 @@ export interface ReleaseKitFile {
  *  consumer's own workflows, so only the one named kit file is owned there — never the directory. */
 export const RELEASE_KIT_DIR = "release";
 
+/** The one kit file outside RELEASE_KIT_DIR, at a path the consumer may already own for a workflow
+ *  of its own. The release-workflow gate reads the repository there before the kit is written. */
+export const RELEASE_KIT_WORKFLOW: ReleaseKitFile = { path: ".github/workflows/release.yml", content: workflowReleaseYml };
+
 /** The three files the release-kit places in a consumer repo, at their consumer-repo target paths.
  *  onboard's inject-release-kit REPLACES them: each file is written to exactly this content
  *  whenever the repo's copy differs — the kit is platform-owned tooling, and an onboarding must
@@ -38,7 +42,7 @@ export const RELEASE_KIT_DIR = "release";
 export const RELEASE_KIT_FILES: readonly ReleaseKitFile[] = [
   { path: `${RELEASE_KIT_DIR}/release.ps1`, content: releasePs1 },
   { path: `${RELEASE_KIT_DIR}/release.sh`, content: releaseSh },
-  { path: ".github/workflows/release.yml", content: workflowReleaseYml },
+  RELEASE_KIT_WORKFLOW,
 ];
 
 /** The three consumer-repo target paths — the write side's file set, derived from RELEASE_KIT_FILES

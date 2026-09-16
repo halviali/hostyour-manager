@@ -27,6 +27,8 @@ import { AppError } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
 import { consumerUnitHost, type StandingHostReader } from "./unit-dns.ts";
+import { gateReleaseWorkflow } from "./gates/release-workflow.ts";
+import { RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
 import type { UnitComposition, UnitQuota, UnitSize } from "../../../shared/unit-size.ts";
 import { mapBuildsToChartPins, type ChartPinMapping } from "./builds.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -233,18 +235,21 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     // manifest declares an extra fqdn, so the tenant-subdomain clause of G23 always has an object.
     const tenantSubdomains = await deps.tenantSubdomains();
 
-    // The two gates whose subject the Manager holds itself: the clone it just made, and the name the
-    // operator submitted. Neither reads the repository's manifest, so both stand whatever the report
-    // carried. The name goes first: it is the identity every later fact hangs off (namespace,
-    // AppProject, build namespace, host), so a reserved name is refused before uniqueness is asked.
-    // The LABEL is the manifest's to declare, so G23 reads it off the report where one stands and
-    // holds the name alone where none does — the name IS the label then. The other units' labels at
-    // this stage come off the registrations, the same way G16 reads the other units' builds.
+    // The three gates whose subject the Manager holds itself: the clone it just made, the name the
+    // operator submitted, and the workflow file the kit is about to write over. None reads the
+    // repository's manifest, so all three stand whatever the report carried. The name goes first: it
+    // is the identity every later fact hangs off (namespace, AppProject, build namespace, host), so a
+    // reserved name is refused before uniqueness is asked. The LABEL is the manifest's to declare, so
+    // G23 reads it off the report where one stands and holds the name alone where none does — the
+    // name IS the label then. The other units' labels at this stage come off the registrations, the
+    // same way G16 reads the other units' builds.
     const hostLabel = consumerHostLabel({ name: req.consumerName, host: runnerReport.manifest?.host });
     const foreignHostLabels = await deps.registrations.listAttestedHostLabels(target.stage, { unit: req.consumerName });
+    const releaseWorkflow = await deps.repo.readFile(cloned.workdir, RELEASE_KIT_WORKFLOW.path);
     const managerGates: GateResult[] = [
       gateRepoAccess({ ok: true, detail: `cloned ${req.repoURL} at ${cloned.resolvedSha}` }),
       gateUnitName({ unitName: req.consumerName, stage: target.stage, hostLabel, tenantSubdomains, foreignHostLabels }),
+      gateReleaseWorkflow({ found: releaseWorkflow }),
     ];
 
     // THE MANIFEST DECIDES WHETHER THE REST OF THE MANAGER-SIDE GATES RUN AT ALL. Below this branch
