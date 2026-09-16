@@ -37,10 +37,13 @@ const isDkim = (txt: string): boolean => txt.trim().toLowerCase().startsWith("v=
 const isDmarc = (txt: string): boolean => txt.trim().toLowerCase().startsWith("v=dmarc1");
 const joined = (records: readonly string[]): string | null => (records.length === 0 ? null : records.join(" | "));
 
-/** The five rows of one sender domain. Pure over the lookups, so a test scripts DNS and reads verdicts. */
+/** The five rows of one sender domain. Pure over the lookups, so a test scripts DNS and reads verdicts.
+ *  A red row's note is ONE sentence naming the act: publish, remove a record by hand, or set the
+ *  reverse DNS at the provider. What the publish does is the run's summary, not this page's. */
 export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<MailDnsRow[]> {
   const { domain, stage, egress, platformDomain } = need;
-  const noEgress = "the master has no A record at the DNS provider, so no address can be expected here";
+  const noEgress = { note: "give the master an A record at the DNS provider first" };
+  const publish = { note: "publish" };
 
   const txt = await dns.txt(domain);
   const spf = txt.filter(isSpf);
@@ -51,14 +54,14 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     found: joined(spf),
     ok: egress !== null && spf.length === 1 && spf[0]!.includes(`ip4:${egress}`),
     ...(egress === null
-      ? { note: noEgress }
+      ? noEgress
       : spf.length === 0
-        ? { note: "no SPF record — receivers cannot tell the master's mail from anybody's; publish-mail-dns writes one" }
+        ? publish
         : spf.length > 1
-          ? { note: `${spf.length} v=spf1 records — a permanent error receivers fail the domain on; publish-mail-dns refuses the domain until one is removed by hand` }
+          ? { note: `remove ${spf.length - 1} of the ${spf.length} v=spf1 records by hand, then publish` }
           : spf[0]!.includes(`ip4:${egress}`)
             ? {}
-            : { note: `the record does not name ip4:${egress} — publish-mail-dns merges it in and keeps the rest` }),
+            : { note: "publish; the address is merged into the record that stands" }),
   };
 
   const addresses = await dns.a(domain);
@@ -68,7 +71,7 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     expected: egress ?? "the master's egress address",
     found: joined(addresses),
     ok: egress !== null && addresses.includes(egress),
-    ...(egress === null ? { note: noEgress } : addresses.includes(egress) ? {} : { note: "the sending machine greets with this name and receivers resolve it; publish-mail-dns points it at the egress address" }),
+    ...(egress === null ? noEgress : addresses.includes(egress) ? {} : publish),
   };
 
   const dkimName = `${stage}._domainkey.${domain}`;
@@ -76,13 +79,13 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
   const dkimRow: MailDnsRow = {
     record: "dkim",
     name: dkimName,
-    expected: `one v=DKIM1 record carrying the relay's public key (selector ${stage}, the stage the relay signs with)`,
+    expected: "one v=DKIM1 record carrying the relay's public key",
     found: joined(dkim),
     ok: dkim.length === 1,
     ...(dkim.length === 0
-      ? { note: "no key published — the relay signs nothing until a key pair is seeded and its public half published (publish-mail-dns publishes it once the relay holds one)" }
+      ? { note: "publish; the key is published where the relay holds one" }
       : dkim.length > 1
-        ? { note: `${dkim.length} records under one selector — receivers find whichever they find; remove the extras by hand` }
+        ? { note: `remove ${dkim.length - 1} of the ${dkim.length} records under this selector by hand` }
         : {}),
   };
 
@@ -94,7 +97,7 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     expected: "one v=DMARC1 record with a policy and a report mailbox",
     found: joined(dmarc),
     ok: dmarc.length === 1,
-    ...(dmarc.length === 0 ? { note: "no DMARC record — receivers apply no policy and report to nobody; publish-mail-dns writes one" } : dmarc.length > 1 ? { note: `${dmarc.length} DMARC records — one is the rule` } : {}),
+    ...(dmarc.length === 0 ? publish : dmarc.length > 1 ? { note: `remove ${dmarc.length - 1} of the ${dmarc.length} DMARC records by hand, then publish` } : {}),
   };
 
   const ptrNames = egress === null ? [] : await dns.ptr(egress);
@@ -105,10 +108,10 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     found: joined(ptrNames),
     ok: egress !== null && ptrNames.includes(platformDomain),
     ...(egress === null
-      ? { note: noEgress }
+      ? noEgress
       : ptrNames.includes(platformDomain)
         ? {}
-        : { note: `the reverse DNS of ${egress} is set where the address is rented (the hosting provider), not in any zone this manager writes — point it at ${platformDomain}` }),
+        : { note: `set the reverse DNS of ${egress} to ${platformDomain} at the hosting provider` }),
   };
 
   return [spfRow, aRow, dkimRow, dmarcRow, ptrRow];

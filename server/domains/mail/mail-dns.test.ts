@@ -36,26 +36,28 @@ describe("mailDnsRows", () => {
     expect(dns.asked).toEqual(["TXT example.com", "A example.com", "TXT prod._domainkey.example.com", "TXT _dmarc.example.com", `PTR ${EGRESS}`]);
   });
 
-  it("an SPF that names another address is red with the merge as the way out; two SPF records are the permanent error", async () => {
+  it("a red row's note is one sentence naming the act: publish, or remove the extra record by hand", async () => {
     const dns = published();
     dns.seedTxt("example.com", "v=spf1 ip4:198.51.100.7 -all");
-    const spf = (await mailDnsRows(need(), dns)).find((r) => r.record === "spf")!;
-    expect(spf.ok).toBe(false);
-    expect(spf.note).toMatch(/does not name ip4:203\.0\.113\.9 — publish-mail-dns merges it in/);
+    dns.seedTxt("_dmarc.example.com");
+    dns.seedA("example.com");
+    const rows = await mailDnsRows(need(), dns);
+    expect(rows.find((r) => r.record === "spf")).toMatchObject({ ok: false, note: "publish; the address is merged into the record that stands" });
+    expect(rows.find((r) => r.record === "a")).toMatchObject({ ok: false, note: "publish" });
+    expect(rows.find((r) => r.record === "dmarc")).toMatchObject({ ok: false, note: "publish" });
+    for (const row of rows) expect(row.note ?? "x").not.toMatch(/\. /); // one sentence
     dns.seedTxt("example.com", "v=spf1 ip4:198.51.100.7 -all", `v=spf1 ip4:${EGRESS} -all`);
     const two = (await mailDnsRows(need(), dns)).find((r) => r.record === "spf")!;
-    expect(two.ok).toBe(false);
-    expect(two.note).toMatch(/2 v=spf1 records — a permanent error/);
+    expect(two).toMatchObject({ ok: false, note: "remove 1 of the 2 v=spf1 records by hand, then publish" });
   });
 
-  it("no DKIM record reads as 'no key published', and a foreign PTR names the provider as the place to set it", async () => {
+  it("no DKIM record says publish, and a foreign PTR names the provider as the place to set it", async () => {
     const dns = published();
     dns.seedTxt("prod._domainkey.example.com");
     dns.seedPtr(EGRESS, "static.9.113.0.203.clients.example-hosting.net");
     const rows = await mailDnsRows(need(), dns);
-    expect(rows.find((r) => r.record === "dkim")).toMatchObject({ ok: false, found: null });
-    expect(rows.find((r) => r.record === "dkim")?.note).toMatch(/no key published/);
-    expect(rows.find((r) => r.record === "ptr")?.note).toMatch(/set where the address is rented .* point it at example\.com/);
+    expect(rows.find((r) => r.record === "dkim")).toMatchObject({ ok: false, found: null, note: "publish; the key is published where the relay holds one" });
+    expect(rows.find((r) => r.record === "ptr")?.note).toBe(`set the reverse DNS of ${EGRESS} to example.com at the hosting provider`);
   });
 
   it("without an egress address every address-bound row is red for that ONE reason, and no PTR is asked", async () => {
@@ -64,7 +66,7 @@ describe("mailDnsRows", () => {
     for (const record of ["spf", "a", "ptr"] as const) {
       const row = rows.find((r) => r.record === record)!;
       expect(row.ok).toBe(false);
-      expect(row.note).toMatch(/the master has no A record at the DNS provider/);
+      expect(row.note).toBe("give the master an A record at the DNS provider first");
     }
     expect(dns.asked.some((q) => q.startsWith("PTR"))).toBe(false);
   });

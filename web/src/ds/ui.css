@@ -351,6 +351,34 @@
   cursor: pointer;
 }
 
+/* ---- Tables (one line per record: a fact per cell, a verdict chip, one act) ---- */
+
+.table__wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  font-size: var(--fs-2);
+  border-collapse: collapse;
+}
+
+.table th {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-3);
+  font-size: var(--fs-0);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: var(--sp-2) var(--sp-3);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  border-top: 1px solid var(--border);
+}
+
 /* ---- Forms ---- */
 
 .field {

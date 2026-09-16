@@ -18,17 +18,14 @@ function reportMailboxOf(rows: MailDnsRow[]): string {
 
 function RecordRow({ row }: { row: MailDnsRow }) {
   return (
-    <li>
-      <div className="row">
-        <span className="mono">{RECORD_LABEL[row.record]}</span>
-        <span className="mono">{row.name}</span>
-        <span className={row.ok ? "chip chip--ok" : "chip chip--warn"}>{row.ok ? "ok" : "missing"}</span>
-        <span className="row__meta">
-          expected: {row.expected} · found: {row.found === null ? "none" : row.found}
-          {row.note ? ` — ${row.note}` : ""}
-        </span>
-      </div>
-    </li>
+    <tr>
+      <td>{RECORD_LABEL[row.record]}</td>
+      <td className="mono">{row.name}</td>
+      <td><span className={row.ok ? "chip chip--ok" : "chip chip--warn"}>{row.ok ? "ok" : "missing"}</span></td>
+      <td className="mono">{row.found ?? "none"}</td>
+      <td className="mono">{row.expected}</td>
+      <td>{row.ok ? "" : row.note}</td>
+    </tr>
   );
 }
 
@@ -58,9 +55,16 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
         {view.domain} <span className="muted">— {view.role}</span>{" "}
         <span className={green === view.rows.length ? "chip chip--ok" : "chip chip--warn"}>{green}/{view.rows.length} records</span>
       </h3>
-      <ul className="rows">
-        {view.rows.map((row) => <RecordRow key={row.record} row={row} />)}
-      </ul>
+      <div className="table__wrap">
+        <table className="table">
+          <thead>
+            <tr><th>Record</th><th>Name</th><th>Verdict</th><th>Found</th><th>Expected</th><th>To do</th></tr>
+          </thead>
+          <tbody>
+            {view.rows.map((row) => <RecordRow key={row.record} row={row} />)}
+          </tbody>
+        </table>
+      </div>
       <div className="form-grid">
         <label className="field">
           <span className="field__label">DMARC policy</span>
@@ -79,10 +83,6 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
           <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void publish()}>
             {busy ? "Planning…" : `Publish the mail DNS of ${view.domain}`}
           </button>
-          <span className="field__hint">
-            A run on the master: the catalogue&apos;s publish-mail-dns merges the egress address into the SPF (keeping what stands), writes the address
-            record, publishes the DKIM key where the relay holds one, and sets DMARC. The PTR is set at the hosting provider, not here.
-          </span>
         </div>
       </div>
     </section>
@@ -106,10 +106,6 @@ export function Mail() {
       <header className="page__head">
         <div>
           <h2 className="page__title">Mail</h2>
-          <p className="page__desc">
-            What receivers of this installation&apos;s mail look up — measured now at public resolvers, never at the machine&apos;s own — held against
-            what the master&apos;s map and address say they must find. Customer mail leaves as the platform domain, alerts as the unit apex.
-          </p>
         </div>
       </header>
       {error && <div className="alert alert--danger">{error}</div>}
