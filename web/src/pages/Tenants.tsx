@@ -235,7 +235,7 @@ export function Tenants() {
             {scanning ? "Scanning…" : "Scan for orphaned tenants"}
           </button>
           <Link className="btn btn--primary" to="/tenants/create">
-            Create a tenant
+            Onboard tenant
           </Link>
         </div>
       </header>
@@ -319,7 +319,7 @@ export function Tenants() {
           <div className="empty">
             <p>No active tenants.</p>
             <Link className="btn btn--primary" to="/tenants/create">
-              Create the first one
+              Onboard the first one
             </Link>
           </div>
         ) : (
@@ -454,7 +454,7 @@ export function Tenants() {
       </div>
 
       <div role="tabpanel" id="panel-runs" aria-labelledby="tab-runs" hidden={tab !== "runs"}>
-        <SectionRuns kinds={TENANT_RUN_KINDS} empty="No tenant runs yet — create a tenant to start one." />
+        <SectionRuns kinds={TENANT_RUN_KINDS} empty="No tenant runs yet — onboard a tenant to start one." />
       </div>
 
       {purgeFor && (

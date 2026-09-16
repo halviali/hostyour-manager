@@ -8,14 +8,16 @@ import type { AppEntry } from "../../../shared/apps-manifest.ts";
 import { listTenantTargets, listTenantAppCatalog, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
-/** Create-tenant wizard — the tenant analogue of
+/** Onboard-tenant wizard — the tenant analogue of
  *  ConsumerOnboard. Unlike a consumer it does NOT point at an external repo: a tenant's charts
  *  always live in the fixed catalog repo, so the operator only declares WHAT to fan out —
  *  a subdomain, an owner, the target cluster (any active one, whose stage the tenant takes) and
- *  the optional per-app rows. The trio auth/jobs/report is NOT offered: every tenant has those three
- *  members, always. There is NO secret field (v1 seeds no secrets; charts pull from Vault via
- *  ExternalSecret). Submit hands off to the Run screen, where the T1..T4 fan-out gates stream
- *  gate-by-gate and the operator approves the deploy. */
+ *  the optional per-app rows. The apps chosen live in the tenant's own repository
+ *  `<org>/<subdomain>-apps`, which the run creates from the catalog's template and builds; the
+ *  wizard names neither the organisation nor the tag, the server derives both. The trio
+ *  auth/jobs/report is NOT offered: every tenant has those three members, always. There is NO secret
+ *  field (v1 seeds no secrets; charts pull from Vault via ExternalSecret). Submit hands off to the
+ *  Run screen, where the T1..T4 fan-out gates stream gate-by-gate and the operator approves. */
 export function TenantCreate() {
   const nav = useNavigate();
   const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
@@ -102,15 +104,16 @@ export function TenantCreate() {
       <header className="page__head">
         <div>
           <span className="page__eyebrow">Tenant · step 1 of 2</span>
-          <h2 className="page__title">Create a tenant</h2>
+          <h2 className="page__title">Onboard tenant</h2>
         </div>
       </header>
 
       <p className="callout">
         A tenant fans one registration out to one self-contained member per service — auth, jobs and report always, plus
         one per app you declare — each with its own namespace <code>&lt;guid&gt;-&lt;member&gt;-&lt;stage&gt;</code> and its own
-        AppProject, all rendered from the fixed catalog repo. The Manager renders and validates the entire
-        fan-out (T1..T4) before anything is deployed; you approve on the next screen.
+        AppProject, all rendered from the fixed catalog repo. The apps you choose live in the tenant&apos;s own repository{" "}
+        <code>&lt;subdomain&gt;-apps</code>, created from the catalog and built by the same run. The Manager renders and
+        validates the entire fan-out (T1..T4) before anything is deployed; you approve on the next screen.
       </p>
 
       {error && (
@@ -120,7 +123,7 @@ export function TenantCreate() {
       )}
       {noTargets && (
         <p role="alert" className="alert alert--warn">
-          No active clusters to create a tenant on yet — deploy a slave (or bring the master up) first.
+          No active clusters to onboard a tenant on yet — deploy a slave (or bring the master up) first.
         </p>
       )}
 
