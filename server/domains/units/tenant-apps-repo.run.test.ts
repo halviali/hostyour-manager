@@ -219,7 +219,7 @@ describe("write-tree — the tree from the template into the tenant's repository
     expect(files["package.json"]).toBe(TEMPLATE_FILES["package.json"]);
     // The manifest: a build-only unit named after the tenant, one build, the template's envs and containerfile.
     const manifest = ConsumerManifestSchema.parse(parseYaml(files["deploy/platform.yaml"]!));
-    expect(manifest).toMatchObject({ name: UNIT, owner: SUBDOMAIN, envs: ["dev", "test", "prod"], builds: [{ name: UNIT, containerfile: "docker/Dockerfile" }] });
+    expect(manifest).toMatchObject({ name: UNIT, owner: SUBDOMAIN, envs: ["dev", "test", "prod"], builds: [{ name: UNIT, containerfile: "docker/Dockerfile" }], appsBundle: UNIT });
     expect(manifest.chart).toBeUndefined();
     // apps.yaml: only the chosen entry, as the template spells it, under the template's header.
     const apps = parseAppsManifest(files["apps.yaml"]!);

@@ -75,6 +75,8 @@ export function tenantAppsManifest(input: { unit: string; owner: string; envs: r
     owner: input.owner,
     envs: [...input.envs],
     builds: [{ name: input.unit, containerfile: input.containerfile, ...(input.context ? { context: input.context } : {}) }],
+    // The pipeline's word that this build's pin is the tenant registration (shared/consumer.ts).
+    appsBundle: input.unit,
   };
   ConsumerManifestSchema.parse(manifest);
   return stringifyYaml(manifest);

@@ -355,8 +355,25 @@ export const ConsumerManifestSchema = z.object({
   // v1.3 — an OPTIONAL manifest-declared post-onboard activation. Absent
   // ⇒ no activation step, the onboard is unchanged. OPTIONAL so zod does NOT strip a declared block.
   activation: ConsumerActivationSchema.optional(),
+  // A TENANT'S OWN APPS BUNDLE: this build is the bundle a tenant's engines mount, and its pin is
+  // `appsImageTag` on every tenant registration whose `appsImage` names it — never a chart's
+  // builds[] and never a pins file. Written by the Manager into `<subdomain>-apps` (tenant-apps-tree.ts
+  // tenantAppsManifest) and read by the release pipeline's bump, which pins the image on those
+  // registrations (class d) and accepts a release no registration names yet, because the run
+  // creating the tenant reads the tag off that release's PipelineRun (hostyour-cloud#225). The same
+  // word as the catalog's `tenant.appsBundle`, which names the TEMPLATE's build; here it names one of
+  // this manifest's own builds[]. Build-only by nature: refused beside `chart` or `tenant`.
+  appsBundle: z.string().regex(/^[a-z0-9-]+$/).optional(),
 })
   .superRefine((m, ctx) => {
+    if (m.appsBundle !== undefined) {
+      if (!m.builds.some((b) => b.name === m.appsBundle)) {
+        ctx.addIssue({ code: "custom", path: ["appsBundle"], message: `appsBundle "${m.appsBundle}" names no build of this manifest — it says which of builds[] is the tenant's apps bundle` });
+      }
+      if (m.chart || m.tenant) {
+        ctx.addIssue({ code: "custom", path: ["appsBundle"], message: "appsBundle is declared by a build-only manifest — a tenant's apps bundle deploys no chart of its own and fans nothing out" });
+      }
+    }
     // C1 — a manifest must deploy: a chart (self-contained), a non-empty builds[], OR a tenant: fan-out
     // block (a pure fan-out repo like catalog carries neither chart nor builds — the tenant block
     // IS its deploy). A file with none of the three is inert.

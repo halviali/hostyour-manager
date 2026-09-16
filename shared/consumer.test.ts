@@ -2,6 +2,23 @@ import { describe, it, expect } from "vitest";
 import { seedQuota } from "./unit-size.ts";
 import { consumerArgoAppName, consumerArgocdUrl, ConsumerManifestSchema, ConsumerRegistrationSchema, TenantSpecSchema, tenantAppsOrg, GITHUB_ACCOUNT_RE } from "./consumer.ts";
 
+describe("ConsumerManifestSchema appsBundle — a tenant's apps bundle declares itself", () => {
+  const buildOnly = {
+    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", name: "acme-apps", owner: "acme", envs: ["prod"],
+    builds: [{ name: "acme-apps", containerfile: "docker/Dockerfile" }],
+  };
+  const why = (m: unknown) => ConsumerManifestSchema.safeParse(m).error?.issues.map((i) => i.message).join("; ") ?? "";
+  it("admits appsBundle naming one of builds[], and a manifest without it parses unchanged", () => {
+    expect(ConsumerManifestSchema.parse({ ...buildOnly, appsBundle: "acme-apps" }).appsBundle).toBe("acme-apps");
+    expect(ConsumerManifestSchema.parse(buildOnly).appsBundle).toBeUndefined();
+  });
+  it("refuses appsBundle naming no build, and one beside a chart or a tenant block", () => {
+    expect(why({ ...buildOnly, appsBundle: "other" })).toMatch(/appsBundle "other" names no build/);
+    expect(why({ ...buildOnly, appsBundle: "acme-apps", chart: { path: "deploy/chart" } })).toMatch(/declared by a build-only manifest/);
+    expect(why({ ...buildOnly, appsBundle: "acme-apps", tenant: { members: [{ name: "auth", chart: "charts/auth", identityProvider: true }], perApp: { engine: { chart: "charts/engine" }, front: { chart: "charts/ui" } } } })).toMatch(/declared by a build-only manifest/);
+  });
+});
+
 describe("ConsumerManifestSchema activation block", () => {
   const base = {
     apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",
