@@ -40,6 +40,9 @@ export async function boot(): Promise<void> {
     logger.info({ port: info.port }, "break-glass listener up (127.0.0.1 only)");
   });
   wired.serveEmergencySocket();
+  // The one slow act of boot runs behind the listening server, so /healthz answers from the first
+  // second and the liveness probe has nothing to kill (#166).
+  void wired.carryCatalogTrunk();
 
   const shutdown = (signal: string): void => {
     logger.info({ signal }, "shutting down");
