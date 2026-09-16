@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { seedQuota } from "./unit-size.ts";
-import { consumerArgoAppName, consumerArgocdUrl, ConsumerManifestSchema, ConsumerRegistrationSchema } from "./consumer.ts";
+import { consumerArgoAppName, consumerArgocdUrl, ConsumerManifestSchema, ConsumerRegistrationSchema, TenantSpecSchema, tenantAppsOrg, GITHUB_ACCOUNT_RE } from "./consumer.ts";
 
 describe("ConsumerManifestSchema activation block", () => {
   const base = {
@@ -264,5 +264,33 @@ describe("consumerArgocdUrl", () => {
 
   it("returns null when the master FQDN is unknown, so the caller renders no link", () => {
     expect(consumerArgocdUrl(null, "argocd", "example-auth-prod")).toBeNull();
+  });
+});
+
+describe("TenantSpecSchema appsOrg (the organisation a tenant's own repository is created in)", () => {
+  // The smallest valid tenant block: one member carrying the IdP flag and the two per-app sources.
+  const spec = (over: Record<string, unknown> = {}): unknown => ({
+    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+    perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui" } },
+    ...over,
+  });
+
+  it("is optional — a catalog that names none parses, and the reader answers undefined", () => {
+    const parsed = TenantSpecSchema.parse(spec());
+    expect(parsed.appsOrg).toBeUndefined();
+    expect(tenantAppsOrg(parsed)).toBeUndefined();
+  });
+
+  it("carries a GitHub organisation name through, and the ONE reader answers it", () => {
+    expect(tenantAppsOrg(TenantSpecSchema.parse(spec({ appsOrg: "example-org" })))).toBe("example-org");
+  });
+
+  it("refuses what GitHub itself refuses as an account name", () => {
+    for (const bad of ["", "-leading", "trailing-", "two--hyphens", "has space", "under_score", "a".repeat(40)]) {
+      expect(TenantSpecSchema.safeParse(spec({ appsOrg: bad })).success, `accepted ${JSON.stringify(bad)}`).toBe(false);
+    }
+    for (const good of ["a", "digitaplatform", "Example-Org-1", "a".repeat(39)]) {
+      expect(GITHUB_ACCOUNT_RE.test(good), `refused ${JSON.stringify(good)}`).toBe(true);
+    }
   });
 });

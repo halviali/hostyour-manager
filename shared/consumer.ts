@@ -13,6 +13,10 @@ import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
  *  (domains/units/first-master.ts). A second literal would let the two ask for different files. */
 export const CONSUMER_MANIFEST_PATH = "deploy/platform.yaml";
 
+/** A GitHub account name (a user or an organisation) as GitHub itself admits it: alphanumeric, a
+ *  hyphen only between two alphanumerics, at most 39 characters. */
+export const GITHUB_ACCOUNT_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+
 /** DNS-1123 label, <= 40 chars. The identity law (G1) requires
  *  manifest name == chart name == repo name == unit, and the namespace is `<unit>-<stage>`
  *  (consumerNamespace below). */
@@ -124,6 +128,12 @@ export const TenantSpecSchema = z.object({
     repo: z.string().regex(/^https:\/\/[^ ]+\.git$/),
     builds: z.array(z.string().regex(/^[a-z0-9-]+$/)).min(1),
   })).default([]),
+  /** THE GITHUB ORGANISATION A TENANT'S OWN REPOSITORY IS CREATED IN, stated by the catalog because
+   *  the catalog is the customer's: the platform's GitHub App is installed in exactly one
+   *  organisation (adapters/github-app installationOrg), and a plan whose catalog names another is
+   *  refused rather than creating a repository where the App has no rights. GitHub's own grammar for
+   *  an account name: letters, digits and single hyphens between them, at most 39 characters. */
+  appsOrg: z.string().regex(GITHUB_ACCOUNT_RE, "appsOrg must be a GitHub organisation name: letters, digits and single hyphens, at most 39 characters").optional(),
 }).superRefine((spec, ctx) => {
   // Two invariants the list form has to carry that a keyed map would carry for free.
   const names = spec.members.map((m) => m.name);
@@ -152,6 +162,13 @@ export const TenantSpecSchema = z.object({
   }
 });
 export type TenantSpec = z.infer<typeof TenantSpecSchema>;
+
+/** The organisation the tenant repositories of this catalog are created in, or undefined where the
+ *  catalog states none — the ONE reader of `appsOrg`, so a run kind and a gate ask the same question
+ *  the same way. Nothing reads it yet: the run kind that creates a tenant repository is the first. */
+export function tenantAppsOrg(spec: Pick<TenantSpec, "appsOrg">): string | undefined {
+  return spec.appsOrg;
+}
 
 /** The unit a repository names — its basename without `.git` — the identity law every registration
  *  holds (`name == basename(repoURL)` below) and the name a tenant's build unit is registered under. */
