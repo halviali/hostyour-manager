@@ -74,10 +74,11 @@ export interface DnsInventoryView {
   readAt: string;
 }
 
-/** POST /api/runs {kind: "dns-remove"} — take back ONE record the inventory names as removable. */
+/** POST /api/runs {kind: "dns-remove"} — take back the listed records, every one a row the
+ *  inventory names as removable, in ONE run with one step per record. At least one; a record
+ *  listed twice is refused. */
 export interface DnsRemoveInput {
-  name: string;
-  type: DnsRecordType;
+  records: { name: string; type: DnsRecordType }[];
 }
 
 /** ONE row of the book: the record a run of this Manager wrote, what the write did, whose record it

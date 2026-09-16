@@ -62,25 +62,35 @@ export function ownerSentence(row: DnsRecordRow): string {
   return `the ${row.owner.kind} "${row.owner.name}"${stage}`;
 }
 
-/** The row for one (name, type), REFUSED unless this installation owns it and may take it back. The
- *  two refusals are deliberately different sentences: a name nobody here wrote and a record this
- *  platform lists but does not own are two different mistakes, and one message for both would send
- *  the operator looking in the wrong place. */
+/** The rows for a LIST of (name, type), REFUSED AS A WHOLE unless this installation owns every one
+ *  and may take every one back. The operator ticked a set, and a plan that quietly dropped the
+ *  records it may not touch and deleted the rest would remove something other than what was asked.
+ *  The one sentence counts the refused records and names each with its own reason, because a name
+ *  nobody here wrote and a record this platform lists but does not own are two different mistakes,
+ *  and one reason for both would send the operator looking in the wrong place. */
+export function removableRecords(rows: DnsRecordRow[], records: ReadonlyArray<{ name: string; type: DnsRowType }>): RemovableRecordRow[] {
+  const mine: RemovableRecordRow[] = [];
+  const refused: string[] = [];
+  for (const { name, type } of records) {
+    const row = rows.find((r) => r.name === name && r.type === type);
+    if (!row) refused.push(`this installation owns no ${type} record ${name}`);
+    else if (!row.removable || row.type === "PTR") refused.push(`the ${type} record ${name} is listed read-only: it is ${ownerSentence(row)}'s`);
+    else mine.push({ ...row, type: row.type });
+  }
+  if (refused.length > 0) {
+    throw errValidation(
+      `${refused.length} of the ${records.length} record(s) cannot be taken back, so none is: ${refused.join("; ")}. ` +
+        `The DNS inventory names ${rows.length} record(s); a name not among them belongs to somebody — the installer, the customer's own mail ` +
+        "service, or an installation this one knows nothing about — and a read-only row is one no run of this Manager wrote: the sender " +
+        "domain's address record is the installer's and the reverse DNS is set where the egress address is rented",
+    );
+  }
+  return mine;
+}
+
+/** The row for ONE (name, type): the list of one. */
 export function removableRecord(rows: DnsRecordRow[], name: string, type: DnsRowType): RemovableRecordRow {
-  const row = rows.find((r) => r.name === name && r.type === type);
-  if (!row) {
-    throw errValidation(
-      `this installation owns no ${type} record ${name}: the DNS inventory names ${rows.length} record(s), and a record that is not among them belongs to somebody — ` +
-        "the installer, the customer's own mail service, or an installation this one knows nothing about",
-    );
-  }
-  if (!row.removable || row.type === "PTR") {
-    throw errValidation(
-      `the ${type} record ${name} is listed read-only: it is ${ownerSentence(row)}'s, not a record any run of this Manager wrote — ` +
-        "the sender domain's address record is the installer's and the reverse DNS is set where the egress address is rented",
-    );
-  }
-  return { ...row, type: row.type };
+  return removableRecords(rows, [{ name, type }])[0]!;
 }
 
 const isPublished = (record: DnsRecordRow["record"]): record is PublishedMailRecord =>

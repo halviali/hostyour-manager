@@ -168,9 +168,9 @@ export const unpublishMailDns = (domain: string): Promise<{ runId: string }> => 
 export const getDnsInventory = (): Promise<DnsInventoryView> => req("/api/dns");
 /** The book of the records a run of this Manager actually wrote, each read at the provider now. */
 export const getDnsWrites = (): Promise<DnsWritesView> => req("/api/dns/writes");
-/** Take ONE of those records back. The run refuses any name the inventory does not carry as
- *  removable, so what this sends is always a row the page listed. */
-export const removeDnsRecord = (input: DnsRemoveInput): Promise<{ runId: string }> =>
+/** Take the listed records back in ONE run. The run refuses the whole list on any name the
+ *  inventory does not carry as removable, so what this sends is always rows the page listed. */
+export const removeDnsRecords = (input: DnsRemoveInput): Promise<{ runId: string }> =>
   planRun("dns-remove", input as unknown as Record<string, unknown>);
 /** Take a slave OUT of the installation: the master's whole per-slave management plane, the
  *  cluster's map, then the rows. It takes ONLY the server for the same reason redeploy does. Every
