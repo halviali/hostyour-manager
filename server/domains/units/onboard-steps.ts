@@ -366,6 +366,8 @@ export function provisionDnsStep(ports: OnboardPorts, p: DeployableOnboardParams
       await provisionUnitDns(ctx, {
         dns: ports.dns,
         unit: p.consumerName,
+        kind: "consumer",
+        stage: p.stage,
         recordName: consumerUnitHost(p.host, p.stage, p.unitApex),
         clusterFqdn: p.domain,
         runKind: "consumer-onboard",

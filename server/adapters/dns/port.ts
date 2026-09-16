@@ -32,6 +32,11 @@ export interface DnsProvider {
   /** Read one record's content, or null when no such record exists. provision-dns reads the target
    *  cluster's own A record with this — the unit record's content IS that address. */
   readRecordContent(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string | null>;
+  /** EVERY record of that name and type, in the provider's order; empty when none stands. The
+   *  reading for a TXT name, because a sender domain's apex carries other services' TXT beside the
+   *  SPF and the first record answers about the wrong one — the book of DNS writes picks the record
+   *  by its version tag (shared/mail.ts MAIL_RECORD_TAG) and judges its rows against the whole list. */
+  listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]>;
 }
 
 /** Any DNS API failure — a transport error, a non-2xx, or a body whose `success` flag is false.

@@ -503,3 +503,15 @@ export type LockResource = (typeof LOCK_RESOURCE)[number];
  *  the reports show only the installation's own mail. */
 export const DMARC_POLICY = ["none", "quarantine", "reject"] as const;
 export type DmarcPolicy = (typeof DMARC_POLICY)[number];
+
+/** What ONE write of this Manager did to a DNS record, as the book of DNS writes (dns_writes)
+ *  records it: `inserted` where no record stood under the name, `updated` where one stood with other
+ *  content. A write that found the same content already standing is not a write and is not recorded. */
+export const DNS_WRITE_ACT = ["inserted", "updated"] as const;
+export type DnsWriteAct = (typeof DNS_WRITE_ACT)[number];
+
+/** Whose record a DNS write was made for: a consumer's host, a tenant's wildcard, or a sender
+ *  domain's mail record. The inventory's owner kinds (shared/dns.ts) are these plus `installer`,
+ *  which names a record no run of this Manager writes and the book therefore never carries. */
+export const DNS_WRITE_OWNER_KIND = ["consumer", "tenant", "mail"] as const;
+export type DnsWriteOwnerKind = (typeof DNS_WRITE_OWNER_KIND)[number];

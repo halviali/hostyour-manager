@@ -19,9 +19,9 @@ import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts } f
 // the inventory lists them read-only, and this run kind removes only what it lists as removable.
 //
 // WHAT IT DELETES IS THE INVENTORY'S OWN LIST. The three record names are composed in exactly one
-// place (server/domains/mail/mail-dns.ts, the rows the Mail page measures), so this run kind reads
-// them off the inventory rather than composing a second spelling of `<stage>._domainkey.<domain>`
-// that could drift from the one the publish writes.
+// place (shared/mail.ts mailRecordNames, which the rows the Mail page measures are named by), so
+// this run kind reads them off the inventory rather than composing a second spelling of
+// `<stage>._domainkey.<domain>` that could drift from the one the publish writes.
 
 export const MailDnsUnpublishParams = z.object({
   /** One of the two domains this installation sends as, as the Mail page names it. */

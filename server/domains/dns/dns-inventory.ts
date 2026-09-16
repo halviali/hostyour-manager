@@ -1,7 +1,9 @@
 // The DNS inventory: every record this installation is responsible for at the DNS provider, with
-// what stands there now. The Manager writes records and keeps no book of them — a consumer's host
-// at onboarding, a tenant's wildcard at create-tenant, the mail records of a sender domain — so the
-// list is DERIVED from the state that does exist and then READ, name by name, at the provider.
+// what stands there now — a consumer's host at every stage, a tenant's wildcard, the mail records
+// of a sender domain — DERIVED from the state that does exist and then READ, name by name, at the
+// provider. The book of DNS writes (db/dns-writes.ts) is the other list, and the DNS page shows it
+// first: it carries only what a run of THIS Manager inserted or updated, so it cannot answer for a
+// record an earlier installation wrote, which is exactly the leftover this inventory exists to name.
 //
 // WHY DERIVED AND NOT LISTED. The provider port can upsert, delete and read ONE record; it cannot
 // list a zone, and a zone listing would anyway answer with records nobody here wrote (the

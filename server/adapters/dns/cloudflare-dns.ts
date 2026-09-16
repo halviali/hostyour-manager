@@ -75,9 +75,12 @@ export class CloudflareDns implements DnsProvider {
   }
 
   async readRecordContent(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string | null> {
+    return (await this.listRecordContents(input))[0] ?? null;
+  }
+
+  async listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]> {
     const zone = await this.zoneId(input.name, input.signal);
-    const existing = await this.listRecords(zone, input.name, input.type, input.signal);
-    return existing[0]?.content ?? null;
+    return (await this.listRecords(zone, input.name, input.type, input.signal)).map((r) => r.content);
   }
 
   private async listRecords(zone: string, name: string, type: DnsRecordType, signal?: AbortSignal): Promise<CfRecord[]> {

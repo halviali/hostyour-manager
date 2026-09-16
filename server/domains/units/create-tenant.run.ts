@@ -458,7 +458,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // the replacing tenant carries the SAME subdomain on the SAME cluster (a replace across two
         // clusters is refused at the plan, tenant-replace.ts), so this upsert re-points the record.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
-        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
+        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantWildcardHost(p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },
     },
     {

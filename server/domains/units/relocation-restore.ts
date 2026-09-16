@@ -134,7 +134,7 @@ export function switchDnsStep(ports: RelocationPorts, worldOf: WorldOf, targetCl
       const recordName = await w.dnsRecordName(ctx, target);
       // The one caller that overwrites a foreign address: the record answers with the SOURCE cluster
       // until this step, and moving it onto the target is the whole of the switch.
-      await provisionUnitDns(ctx, { dns: ports.dns, unit: w.unit, recordName, clusterFqdn: target.domain, runKind, overwriteAddress: true });
+      await provisionUnitDns(ctx, { dns: ports.dns, unit: w.unit, kind: w.kindWord, stage: w.stage, recordName, clusterFqdn: target.domain, runKind, overwriteAddress: true });
     },
   };
 }

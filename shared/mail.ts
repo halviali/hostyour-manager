@@ -47,3 +47,23 @@ export interface MailDnsView {
   domains: MailDnsDomainView[];
   measuredAt: string;
 }
+
+/** The three records this platform PUBLISHES for a sender domain and can take back: the SPF at the
+ *  apex, the DKIM key under the relay's selector (the stage), the DMARC policy. The address record
+ *  and the reverse DNS are not here because no run of this Manager owns them. */
+export const PUBLISHED_MAIL_RECORD = ["spf", "dkim", "dmarc"] as const satisfies readonly MailDnsRecord[];
+export type PublishedMailRecord = (typeof PUBLISHED_MAIL_RECORD)[number];
+
+/** The NAME each published record stands under — composed here and nowhere else, so the Mail page's
+ *  measurement, the DNS inventory and the book of DNS writes ask about one spelling. */
+export function mailRecordNames(domain: string, stage: Stage): Record<PublishedMailRecord, string> {
+  return { spf: domain, dkim: `${stage}._domainkey.${domain}`, dmarc: `_dmarc.${domain}` };
+}
+
+/** Which TXT at a name IS the published record: the apex carries other services' TXT beside the
+ *  SPF, and a receiver picks the record by its version tag, so every reader here does the same. */
+export const MAIL_RECORD_TAG: Record<PublishedMailRecord, (txt: string) => boolean> = {
+  spf: (txt) => txt.trim().toLowerCase().startsWith("v=spf1"),
+  dkim: (txt) => txt.trim().toLowerCase().startsWith("v=dkim1"),
+  dmarc: (txt) => txt.trim().toLowerCase().startsWith("v=dmarc1"),
+};

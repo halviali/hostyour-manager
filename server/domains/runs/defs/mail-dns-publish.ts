@@ -1,7 +1,9 @@
 import { z } from "zod";
-import type { Step, RunDefinition } from "../../../executor/types.ts";
+import type { Step, StepCtx, RunDefinition } from "../../../executor/types.ts";
 import { errValidation } from "../../../kernel/errors.ts";
-import { DMARC_POLICY, isMasterRole } from "../../../../shared/enums.ts";
+import { recordDnsWrite } from "../../../db/dns-writes.ts";
+import { DMARC_POLICY, isMasterRole, type Stage } from "../../../../shared/enums.ts";
+import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, mailRecordNames, type PublishedMailRecord } from "../../../../shared/mail.ts";
 import type { DnsProvider } from "../../../adapters/dns/port.ts";
 import { resolveClusterMarking } from "../../inventory/cluster-marking.ts";
 import { activeClusterTarget, requirePlatformRepo, type DeploySlavePorts } from "./deploy-slave.kit.ts";
@@ -32,6 +34,16 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 //
 // WHAT THIS DOES NOT DO. The reverse DNS of the egress address is set where the address is rented;
 // the plan says so in its warning and the Mail page shows the value to set.
+//
+// WHAT THE BOOK OF DNS WRITES LEARNS. The Manager writes none of these records itself, so the only
+// way it can say what the program did is the DIFFERENCE: what stood under the three published names
+// before the program and what stands after it. A record absent before and standing after was
+// inserted, one standing with other content was updated, and each enters the book (db/dns-writes.ts)
+// with the sender domain as its owner. Both readings are taken AT THE PROVIDER and not at public
+// resolvers, although the Mail page measures there: a resolver answers from its cache for the
+// record's TTL, and a reading before the program would prime that cache with the old content, so a
+// public reading after it could not see the write. The address record is not diffed — the inventory
+// lists it as the installer's, and the book carries only what a run of this Manager may take back.
 
 export const MAIL_DNS_PROGRAM = "publish-mail-dns";
 
@@ -87,10 +99,7 @@ export function mailDnsAnswers(params: MailDnsPublishParams, ports: MailDnsPubli
     if (role === undefined) {
       throw errValidation(`${params.senderDomain} is not a sender domain of ${cluster.domain} — its map names ${sender.platformDomain} (customer mail) and ${sender.unitApex} (alert mail)`);
     }
-    if (!ports.dns) {
-      throw errValidation("no DNS provider is wired into this manager — the egress address is read off the master's own A record there, and nothing else may state it");
-    }
-    const egress = await ports.dns.readRecordContent({ name: cluster.domain, type: "A", signal: ctx.signal });
+    const egress = await requireMailDns(ports).readRecordContent({ name: cluster.domain, type: "A", signal: ctx.signal });
     if (egress === null) {
       throw errValidation(
         `${cluster.domain} has no A record at the DNS provider — the egress address the SPF names is read off that record, ` +
@@ -111,16 +120,76 @@ export function mailDnsAnswers(params: MailDnsPublishParams, ports: MailDnsPubli
   };
 }
 
+/** What stands under the three published names at the provider, each picked by its version tag
+ *  among the TXT of the name (the apex carries other services' TXT beside the SPF) — null where no
+ *  such record stands. */
+export async function readPublishedRecords(dns: DnsProvider, domain: string, stage: Stage, signal: AbortSignal): Promise<Record<PublishedMailRecord, string | null>> {
+  const names = mailRecordNames(domain, stage);
+  const standing: Record<PublishedMailRecord, string | null> = { spf: null, dkim: null, dmarc: null };
+  for (const record of PUBLISHED_MAIL_RECORD) {
+    standing[record] = (await dns.listRecordContents({ name: names[record], type: "TXT", signal })).find(MAIL_RECORD_TAG[record]) ?? null;
+  }
+  return standing;
+}
+
+/** The program step's checkpoint and, beside it, the reading this decoration took before the
+ *  program ran — one slot, because a step has one. */
+interface BookedCheckpoint {
+  before?: Record<PublishedMailRecord, string | null>;
+  program?: unknown;
+}
+
+/** The program step with the book around it: the three published names are read before the program
+ *  and after it, and every record the program changed enters the book of DNS writes. The reading
+ *  before is checkpointed the moment it is taken and the program's own checkpoint is kept under
+ *  `program`, so a step re-entered after a crash judges against what stood before the FIRST attempt
+ *  rather than against what the program has already written. */
+export function bookedProgramStep(params: MailDnsPublishParams, ports: MailDnsPublishPorts, program: Step): Step {
+  return {
+    name: program.name,
+    title: program.title,
+    run: async (ctx: StepCtx) => {
+      const dns = requireMailDns(ports);
+      const { cluster } = loadActiveCluster(ctx.db, params.serverId);
+      const names = mailRecordNames(params.senderDomain, cluster.stage);
+      const cp = ctx.readCheckpoint<BookedCheckpoint>() ?? {};
+      const before = cp.before ?? (await readPublishedRecords(dns, params.senderDomain, cluster.stage, ctx.signal));
+      cp.before = before;
+      ctx.checkpoint(cp);
+      await program.run({
+        ...ctx,
+        checkpoint: (data) => { cp.program = data; ctx.checkpoint(cp); },
+        readCheckpoint: <T>() => cp.program as T | undefined,
+      });
+      const after = await readPublishedRecords(dns, params.senderDomain, cluster.stage, ctx.signal);
+      for (const record of PUBLISHED_MAIL_RECORD) {
+        const stands = after[record];
+        if (stands === null || stands === before[record]) continue;
+        const act = before[record] === null ? "inserted" : "updated";
+        recordDnsWrite(ctx.db, { name: names[record], type: "TXT", content: stands, act, owner: { kind: "mail", name: params.senderDomain }, runId: ctx.runId });
+        ctx.log("meta", `TXT ${names[record]} ${act === "inserted" ? "inserted" : `updated from ${before[record]}`} → ${stands} — entered into the book of DNS writes`);
+      }
+    },
+  };
+}
+
+function requireMailDns(ports: MailDnsPublishPorts): DnsProvider {
+  if (!ports.dns) {
+    throw errValidation("no DNS provider is wired into this manager — the egress address is read off the master's own A record there, and nothing else may state it");
+  }
+  return ports.dns;
+}
+
 function mailDnsPublishSteps(params: MailDnsPublishParams, ports: MailDnsPublishPorts): Step[] {
   const target = activeClusterTarget(params.serverId);
   return [
     attestClusterStep(target),
-    ansiwiseProgramStep(target, MAIL_DNS_PROGRAM, ports, {
+    bookedProgramStep(params, ports, ansiwiseProgramStep(target, MAIL_DNS_PROGRAM, ports, {
       extra: mailDnsAnswers(params, ports),
       // Silent degradation this run may not produce: a program that dropped one of these would
       // publish a record for the wrong domain, a wrong address, or reports to nobody.
       requiredAnswers: ["mail_domain", "egress_address", "dmarc_mailbox"],
-    }),
+    })),
   ];
 }
 

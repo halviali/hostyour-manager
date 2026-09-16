@@ -1,10 +1,17 @@
-// The DNS vocabulary both ends share: every record this installation is responsible for at the DNS
-// provider, and the verdict each one carries. The Manager keeps no book of the records it writes —
-// a consumer's host, a tenant's wildcard, the mail records of a sender domain — so the inventory is
-// DERIVED from the state that does exist (the registrations and the cluster rows) and every row is
-// then READ at the provider. A stored list would go on naming records a hand at the provider has
-// long since changed, which is the very leftover this surface exists to show.
-import type { Stage } from "./enums.ts";
+// The DNS vocabulary both ends share, in two lists that answer two different questions.
+//
+// THE INVENTORY answers "which records is this installation responsible for": it is DERIVED from
+// the state that does exist (the registrations, the cluster rows, the sender domains) and every row
+// is then READ at the provider — a consumer's host, a tenant's wildcard, the mail records of a
+// sender domain, standing or absent. A stored list could not answer this, because it would go on
+// naming records a hand at the provider has long since changed.
+//
+// THE BOOK answers "which records did this Manager actually write": one row per record a run of
+// this Manager inserted or updated, kept in the `dns_writes` table until the run kind that takes the
+// record back deletes it. The inventory lists everything the installation could own; the book lists
+// only what a run here changed, which is what an operator tearing an installation down or checking
+// a day's work wants to see first (hostyour-manager#171).
+import type { DnsWriteAct, DnsWriteOwnerKind, Stage } from "./enums.ts";
 
 /** The record types the DnsProvider port writes and reads: A for the unit records the onboarding
  *  run kinds provision, TXT for the mail records of a sender domain (SPF, DKIM, DMARC). Nothing
@@ -23,7 +30,7 @@ export type DnsRowType = DnsRecordType | "PTR";
  *   - installer        — a record of the installation that no run of this Manager wrote: the sender
  *                        domain's own address record, and the reverse DNS of the egress address,
  *                        which is set where the address is rented. Listed read-only. */
-export type DnsOwnerKind = "consumer" | "tenant" | "mail" | "installer";
+export type DnsOwnerKind = DnsWriteOwnerKind | "installer";
 
 /** Who a record belongs to, in the words the operator knows the thing by: a consumer's unit name, a
  *  tenant's subdomain, a sender domain. `stage` is carried where the owner HAS one — a unit stands
@@ -67,4 +74,31 @@ export interface DnsInventoryView {
 export interface DnsRemoveInput {
   name: string;
   type: DnsRecordType;
+}
+
+/** ONE row of the book: the record a run of this Manager wrote, what the write did, whose record it
+ *  is, which run wrote it and when, and what stands under the name at the provider NOW — `found`
+ *  is every record of that name and type, `verdict` judges it against the content the book holds.
+ *  Both are null where the reading could not be taken (no DNS provider wired), and the view's
+ *  `skipped` says so; a row is never dropped for it, because the book is the Manager's own record
+ *  and stands whether or not the zone can be asked. */
+export interface DnsWriteRow {
+  name: string;
+  type: DnsRecordType;
+  content: string;
+  act: DnsWriteAct;
+  owner: { kind: DnsWriteOwnerKind; name: string; stage?: Stage };
+  runId: string;
+  writtenAt: string;
+  found: string | null;
+  verdict: DnsVerdict | null;
+}
+
+/** GET /api/dns/writes — the book, read against the provider at `readAt`. Only removable records
+ *  ever enter it, so every row may be taken back with `dns-remove`; the run still resolves the name
+ *  in the inventory first, which is the permission. */
+export interface DnsWritesView {
+  rows: DnsWriteRow[];
+  skipped: string[];
+  readAt: string;
 }

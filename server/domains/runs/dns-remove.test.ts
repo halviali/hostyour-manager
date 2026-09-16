@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { openDb, type DbHandle } from "../../db/client.ts";
+import { listDnsWrites, recordDnsWrite } from "../../db/dns-writes.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -10,6 +12,12 @@ import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
 // dns-remove takes ONE record back at the provider. What these tests hold is the refusal: the run
 // deletes only what the DNS inventory names as this installation's and removable, so a typed name
 // and a row this platform merely depends on both end the plan with a sentence instead of a deletion.
+// The steps run against a real database, because the deletion takes the record's row out of the
+// book of DNS writes beside it.
+
+let db: DbHandle;
+beforeEach(() => { db = openDb(":memory:"); });
+afterEach(() => { db.sqlite.close(); });
 
 const CONSUMER_ROW: DnsRecordRow = {
   owner: { kind: "consumer", name: "post", stage: "prod" },
@@ -28,7 +36,7 @@ const ports = (dns?: FakeDnsProvider, rows: DnsRecordRow[] = [CONSUMER_ROW, INST
 
 function ctx(logs: string[], params: DnsRemoveParams): StepCtx {
   return {
-    runId: "run_dns", stepName: "remove-record", db: {} as unknown as StepCtx["db"], creds: {} as unknown as CredentialStore, params: { ...params },
+    runId: "run_dns", stepName: "remove-record", db: db.db, creds: {} as unknown as CredentialStore, params: { ...params },
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
@@ -71,9 +79,11 @@ describe("dns-remove plan", () => {
 });
 
 describe("dns-remove steps", () => {
-  it("attests the record is still ours, then deletes it at the provider and says what stood there", async () => {
+  it("attests the record is still ours, then deletes it at the provider, says what stood there, and forgets it in the book", async () => {
     const dns = new FakeDnsProvider();
     dns.seed("post.example.net", "A", "198.51.100.4");
+    recordDnsWrite(db.db, { name: "post.example.net", type: "A", content: "198.51.100.4", act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_old" });
+    recordDnsWrite(db.db, { name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", act: "inserted", owner: { kind: "mail", name: "example.com" }, runId: "run_old" });
     const logs: string[] = [];
     const steps = makeDnsRemoveDef(ports(dns)).steps(PARAMS);
     for (const step of steps) await step.run(ctx(logs, PARAMS));
@@ -81,6 +91,8 @@ describe("dns-remove steps", () => {
     expect(dns.deletes).toEqual([{ name: "post.example.net", type: "A", deleted: 1 }]);
     expect(logs[0]).toContain('belongs to the consumer "post" at prod');
     expect(logs[1]).toBe("A post.example.net stood at 198.51.100.4 and is gone (1 removed)");
+    // ONE row leaves the book: the record this run took back, and no other.
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual(["_dmarc.example.com"]);
   });
 
   it("is a no-op on a record that is already absent — a resumed run deletes nothing twice", async () => {

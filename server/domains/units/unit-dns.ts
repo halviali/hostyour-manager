@@ -34,11 +34,18 @@
 // removal run kinds too: "no address is left pointing nowhere" holds without exception, and purge is the
 // run kind that runs after failed offboards, exactly where the leftovers would appear. Absent records
 // are the idempotent no-op (delete-by-(name,type) resolves 0).
+//
+// EVERY WRITE AND EVERY REMOVAL IS ENTERED INTO THE BOOK OF DNS WRITES (db/dns-writes.ts), which is
+// what the DNS page shows first: a record inserted or updated here is a row, and the removal takes
+// the row out beside the record. A write that found the target address already standing changed
+// nothing and enters nothing — the book says what this Manager changed, not what it was asked.
 import type { StepCtx } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
+import { forgetDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
+import type { DnsWriteOwnerKind, Stage } from "../../../shared/enums.ts";
 
 // A CONSUMER'S HOST LABEL AND A TENANT SUBDOMAIN ARE ONE NAME SPACE. Both stand as a single DNS
 // label directly under a stage zone: the consumer serves `<label>.<stage apex>`, and the tenant's
@@ -142,7 +149,13 @@ export async function provisionUnitDns(
   ctx: StepCtx,
   opts: {
     dns: DnsProvider | undefined;
+    /** The unit's one identity, which is also the owner name the book records: a consumer's name,
+     *  a tenant's guid. */
     unit: string;
+    /** Which kind of unit the record belongs to, and the stage it stands at — the owner the book
+     *  carries beside the record, so the DNS page can say whose write a row is. */
+    kind: Extract<DnsWriteOwnerKind, "consumer" | "tenant">;
+    stage: Stage;
     recordName: string;
     clusterFqdn: string;
     /** The run kind the refusal message names. REQUIRED and never defaulted: this step is shared by
@@ -158,10 +171,14 @@ export async function provisionUnitDns(
 ): Promise<void> {
   const dns = requireDns(opts.dns, opts.unit, opts.runKind);
   const address = await resolveClusterAddress(dns, opts.clusterFqdn, ctx.signal);
-  if (!opts.overwriteAddress) {
-    // Read before write, because upsertRecord overwrites the first match in place and reports it as
-    // the benign "updated in place": a takeover would leave no trace anywhere in the run, and a
-    // leftover replaced without a word would leave none either.
+  // Read before write, in every case: upsertRecord overwrites the first match in place and answers
+  // only whether it created, so what stood there is known nowhere else — a takeover would leave no
+  // trace in the run, a leftover replaced without a word would leave none, and the book could not
+  // tell a write that changed the record from one that found the address already there.
+  let standing: string | null;
+  if (opts.overwriteAddress) {
+    standing = await dns.readRecordContent({ name: opts.recordName, type: "A", signal: ctx.signal });
+  } else {
     const judged = await readStandingHost(dns, ctx.db, { recordName: opts.recordName, clusterFqdn: opts.clusterFqdn, signal: ctx.signal });
     if (judged.kind === "collision") {
       throw errValidation(standingHostRefusal(opts.recordName, opts.unit, judged));
@@ -172,6 +189,7 @@ export async function provisionUnitDns(
         `the host ${opts.recordName} stood at ${judged.standing}, an address no cluster of this installation has — what an installation that is gone left in the zone; replaced with ${address}`,
       );
     }
+    standing = judged.kind === "free" ? null : judged.kind === "ours" ? address : judged.standing;
   }
   const { created } = await dns.upsertRecord({ name: opts.recordName, type: "A", content: address, signal: ctx.signal });
   ctx.checkpoint({ record: opts.recordName, content: address, created });
@@ -179,6 +197,12 @@ export async function provisionUnitDns(
     "meta",
     `DNS record ${opts.recordName} → ${address} ${created ? "created" : "updated in place"} — the unit's address is its own, and a move is a content update of exactly this record`,
   );
+  if (standing !== address) {
+    recordDnsWrite(ctx.db, {
+      name: opts.recordName, type: "A", content: address, act: created ? "inserted" : "updated",
+      owner: { kind: opts.kind, name: opts.unit, stage: opts.stage }, runId: ctx.runId,
+    });
+  }
 }
 
 /** Remove the unit's ONE record (offboard + both purge run kinds). Fail-closed on the API, absent=ok:
@@ -189,6 +213,7 @@ export async function removeUnitDns(
 ): Promise<void> {
   const dns = requireDns(opts.dns, opts.unit, "remove");
   const { deleted } = await dns.deleteRecord({ name: opts.recordName, type: "A", signal: ctx.signal });
+  forgetDnsWrite(ctx.db, { name: opts.recordName, type: "A" });
   ctx.checkpoint({ record: opts.recordName, deleted });
   ctx.log(
     "meta",

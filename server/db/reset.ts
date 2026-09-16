@@ -22,6 +22,11 @@ const WIPE_ORDER = [
   // human public keys it would go on offering to place on machines it no longer knows is exactly the
   // kind of standing access a reset exists to end. Re-adding one is a paste.
   "operator_keys",
+  // dns_writes references nothing by FK; its run_id column names runs by convention, and those rows
+  // go above. It is WIPED with them: the book says what THIS manager's runs wrote, and after a reset
+  // there are no such runs — a row pointing at a run the wipe removed would be a link to nothing.
+  // The records themselves stay in the zone, as every leftover of a reset does.
+  "dns_writes",
   "audit",
 ] as const;
 

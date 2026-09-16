@@ -3,7 +3,7 @@ import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound } from "../../kernel/errors.ts";
 import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
-import type { MailDnsDomainView, MailDnsRow, MailDnsView, SenderRole } from "../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, mailRecordNames, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type SenderRole } from "../../../shared/mail.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
@@ -32,9 +32,6 @@ export interface MailDnsNeed {
   platformDomain: string;
 }
 
-const isSpf = (txt: string): boolean => txt.trim().toLowerCase().startsWith("v=spf1");
-const isDkim = (txt: string): boolean => txt.trim().toLowerCase().startsWith("v=dkim1");
-const isDmarc = (txt: string): boolean => txt.trim().toLowerCase().startsWith("v=dmarc1");
 const joined = (records: readonly string[]): string | null => (records.length === 0 ? null : records.join(" | "));
 
 /** The five rows of one sender domain. Pure over the lookups, so a test scripts DNS and reads verdicts.
@@ -45,11 +42,11 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
   const noEgress = { note: "give the master an A record at the DNS provider first" };
   const publish = { note: "publish" };
 
-  const txt = await dns.txt(domain);
-  const spf = txt.filter(isSpf);
+  const names = mailRecordNames(domain, stage);
+  const spf = (await dns.txt(names.spf)).filter(MAIL_RECORD_TAG.spf);
   const spfRow: MailDnsRow = {
     record: "spf",
-    name: domain,
+    name: names.spf,
     expected: egress === null ? "one v=spf1 record naming the master's egress address" : `one v=spf1 record naming ip4:${egress}`,
     found: joined(spf),
     ok: egress !== null && spf.length === 1 && spf[0]!.includes(`ip4:${egress}`),
@@ -74,11 +71,10 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     ...(egress === null ? noEgress : addresses.includes(egress) ? {} : publish),
   };
 
-  const dkimName = `${stage}._domainkey.${domain}`;
-  const dkim = (await dns.txt(dkimName)).filter(isDkim);
+  const dkim = (await dns.txt(names.dkim)).filter(MAIL_RECORD_TAG.dkim);
   const dkimRow: MailDnsRow = {
     record: "dkim",
-    name: dkimName,
+    name: names.dkim,
     expected: "one v=DKIM1 record carrying the relay's public key",
     found: joined(dkim),
     ok: dkim.length === 1,
@@ -89,11 +85,10 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
         : {}),
   };
 
-  const dmarcName = `_dmarc.${domain}`;
-  const dmarc = (await dns.txt(dmarcName)).filter(isDmarc);
+  const dmarc = (await dns.txt(names.dmarc)).filter(MAIL_RECORD_TAG.dmarc);
   const dmarcRow: MailDnsRow = {
     record: "dmarc",
-    name: dmarcName,
+    name: names.dmarc,
     expected: "one v=DMARC1 record with a policy and a report mailbox",
     found: joined(dmarc),
     ok: dmarc.length === 1,

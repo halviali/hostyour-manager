@@ -13,6 +13,7 @@
 // (.dependency-cruiser.cjs domains-no-crosstalk). server/boot/wire.ts binds it.
 import type { StepCtx } from "../../../executor/types.ts";
 import { errValidation } from "../../../kernel/errors.ts";
+import { forgetDnsWrite } from "../../../db/dns-writes.ts";
 import type { DnsProvider } from "../../../adapters/dns/port.ts";
 import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsRowType } from "../../../../shared/dns.ts";
 
@@ -71,10 +72,12 @@ export function removableRecord(rows: DnsRecordRow[], name: string, type: DnsRow
 
 /** Delete ONE record and say what stood there. The content is read BEFORE the deletion, because
  *  afterwards nothing anywhere can say what the zone carried — the run log is the only record of it.
- *  Absent is the idempotent no-op (delete-by-(name,type) resolves 0), so a resumed run is safe. */
+ *  Absent is the idempotent no-op (delete-by-(name,type) resolves 0), so a resumed run is safe. The
+ *  book of DNS writes loses its row of the record here, the one place both run kinds delete through. */
 export async function deleteRecord(ctx: StepCtx, dns: DnsProvider, record: { name: string; type: DnsRecordType }): Promise<void> {
   const stood = await dns.readRecordContent({ name: record.name, type: record.type, signal: ctx.signal });
   const { deleted } = await dns.deleteRecord({ name: record.name, type: record.type, signal: ctx.signal });
+  forgetDnsWrite(ctx.db, { name: record.name, type: record.type });
   ctx.checkpoint({ record: record.name, type: record.type, stood, deleted });
   ctx.log(
     "meta",

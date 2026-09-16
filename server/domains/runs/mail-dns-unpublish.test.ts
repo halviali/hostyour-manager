@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { openDb, type DbHandle } from "../../db/client.ts";
+import { listDnsWrites, recordDnsWrite } from "../../db/dns-writes.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -10,7 +12,12 @@ import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
 // mail-dns-unpublish is the inverse of mail-dns-publish: the SPF, the DKIM key and the DMARC policy
 // of ONE sender domain go in one act, and the two records this platform does not own stay — the
 // domain's address record, which answers for the machine, and the reverse DNS, which is set where
-// the egress address is rented. Both facts are asserted against the FakeDnsProvider's own store.
+// the egress address is rented. Both facts are asserted against the FakeDnsProvider's own store,
+// and the book of DNS writes loses exactly the three rows, read back from a real database.
+
+let db: DbHandle;
+beforeEach(() => { db = openDb(":memory:"); });
+afterEach(() => { db.sqlite.close(); });
 
 const EGRESS = "203.0.113.9";
 
@@ -31,7 +38,7 @@ const ports = (dns?: FakeDnsProvider, rows: DnsRecordRow[] = MAIL_ROWS): DnsReco
 
 function ctx(logs: string[], params: MailDnsUnpublishParams): StepCtx {
   return {
-    runId: "run_mail_unpublish", stepName: "remove-records", db: {} as unknown as StepCtx["db"], creds: {} as unknown as CredentialStore, params: { ...params },
+    runId: "run_mail_unpublish", stepName: "remove-records", db: db.db, creds: {} as unknown as CredentialStore, params: { ...params },
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
@@ -67,10 +74,15 @@ describe("mail-dns-unpublish plan", () => {
 });
 
 describe("mail-dns-unpublish steps", () => {
-  it("deletes the SPF, the DKIM key and the DMARC policy, and leaves the address record standing", async () => {
+  it("deletes the SPF, the DKIM key and the DMARC policy, forgets the three in the book, and leaves the address record standing", async () => {
     const dns = published();
+    for (const row of MAIL_ROWS.filter((r) => r.removable)) {
+      recordDnsWrite(db.db, { name: row.name, type: "TXT", content: row.found!, act: "inserted", owner: { kind: "mail", name: "example.com" }, runId: "run_publish" });
+    }
+    recordDnsWrite(db.db, { name: "post.example.net", type: "A", content: EGRESS, act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_onboard" });
     const logs: string[] = [];
     for (const step of makeMailDnsUnpublishDef(ports(dns)).steps(PARAMS)) await step.run(ctx(logs, PARAMS));
+    expect(listDnsWrites(db.db).map((r) => `${r.type} ${r.name}`)).toEqual(["A post.example.net"]);
     expect(dns.deletes.map((d) => `${d.type} ${d.name}`)).toEqual(["TXT example.com", "TXT prod._domainkey.example.com", "TXT _dmarc.example.com"]);
     expect(dns.record("example.com", "TXT")).toBeUndefined();
     expect(dns.record("prod._domainkey.example.com", "TXT")).toBeUndefined();
