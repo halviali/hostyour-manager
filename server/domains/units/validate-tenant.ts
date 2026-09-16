@@ -22,7 +22,7 @@ import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
-import { readAppCatalog, type UnitRepoAccess } from "./app-catalog.ts";
+import { readAppCatalog } from "./app-catalog.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import { stageApex, tenantWildcardHost, tenantZone } from "../../../shared/unit-host.ts";
 import { catalogPinFile } from "../../../shared/pin.ts";
@@ -95,9 +95,6 @@ export interface ValidateTenantDeps {
    *  then fails the plan, where provision-dns would have failed at step eight after the Vault entry,
    *  the bucket, the key, the AppProjects and the admission policies were written. */
   standingHost?: StandingHostReader;
-  /** How the apps repository is reached when it is a registered unit (app-catalog.ts). Absent ⇒ the
-   *  catalog's own read credential clones it, which is the stated fallback, not a skip. */
-  unitRepo?: UnitRepoAccess;
 }
 
 export interface TenantValidationOutcome {
@@ -226,7 +223,6 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       const catalog = await readAppCatalog({
         spec: t1.spec,
         catalog: { repo: deps.repo, workdir: cloned.workdir, ...(req.credentialId ? { credentialId: req.credentialId } : {}) },
-        ...(deps.unitRepo ? { unit: deps.unitRepo } : {}),
         warn: deps.log,
         signal: deps.signal,
       });

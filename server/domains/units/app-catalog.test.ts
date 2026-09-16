@@ -8,8 +8,7 @@ import {
   listTenantAppCatalog,
   makeAppCatalogProvider,
   readAppCatalog,
-  unitRepoAccess,
-  type UnitRepoAccess,
+  readAppsManifest,
 } from "./app-catalog.ts";
 
 /** The engine chart the fixture product declares — the stand-in reads it out of the manifest, so
@@ -18,8 +17,8 @@ const ENGINE_CHART = "charts/example-engine";
 const APPS_REPO = "https://github.com/acme/acme-apps.git";
 const REPO_URL = "https://github.com/acme/acme-catalog.git";
 
-/** The product's manifest WITH an apps bundle: the buildRepos entry that builds it is the apps
- *  repository the catalog is read from. */
+/** The product's manifest WITH an apps template: `appsRepo` is the repository the catalog is read
+ *  from, and no buildRepos entry builds it. */
 const MANIFEST = (appsBundle: string | null): string => `apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
 name: catalog
@@ -29,9 +28,9 @@ builds:
   - name: example-engine
     containerfile: Dockerfile
 tenant:
-${appsBundle === null ? "" : `  appsBundle: ${appsBundle}\n`}  buildRepos:
-    - repo: ${APPS_REPO}
-      builds: [acme-apps]
+${appsBundle === null ? "" : `  appsBundle: ${appsBundle}\n  appsRepo: ${APPS_REPO}\n`}  buildRepos:
+    - repo: https://github.com/acme/acme-engine.git
+      builds: [acme-engine]
   members:
     - { name: auth, chart: charts/example-auth, identityProvider: true }
     - { name: jobs, chart: charts/example-jobs }
@@ -66,8 +65,7 @@ const files = (over: { bundle?: string | null; appsYaml?: string; overlays?: str
 
 const spec = (bundle: string | null): ReturnType<typeof TenantSpecSchema.parse> =>
   TenantSpecSchema.parse({
-    ...(bundle === null ? {} : { appsBundle: bundle }),
-    buildRepos: [{ repo: APPS_REPO, builds: ["acme-apps"] }],
+    ...(bundle === null ? {} : { appsBundle: bundle, appsRepo: APPS_REPO }),
     members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
     perApp: { engine: { chart: ENGINE_CHART }, front: { chart: "charts/example-ui" } },
   });
@@ -88,12 +86,27 @@ describe("fallbackCatalog (the overlay stand-in, pure)", () => {
   });
 });
 
-describe("readAppCatalog (the manifest of the apps repository, else the stand-in)", () => {
-  const warns: string[] = [];
-  const catalogOf = (repo: RepoReader, s = spec("acme-apps"), unit?: UnitRepoAccess) =>
-    readAppCatalog({ spec: s, catalog: { repo, workdir: "/w", credentialId: "catalog-read-pat" }, ...(unit ? { unit } : {}), warn: (m) => warns.push(m) });
+describe("readAppsManifest (the primitive: one apps repository, one credential)", () => {
+  it("clones the repository at its default branch head with the credential given and parses apps.yaml", async () => {
+    const repo = new FakeRepoReader({ files: { [APPS_MANIFEST_PATH]: APPS_YAML } });
+    const m = await readAppsManifest({ repo, repoURL: APPS_REPO, credentialId: "cred_tenant" });
+    expect(m?.apps.map((a) => a.name)).toEqual(["erp", "web"]);
+    expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "cred_tenant" }]);
+  });
 
-  it("reads apps.yaml off the apps repository at its default branch head, with the catalog's credential when the unit is not registered, and says so", async () => {
+  it("answers null where the repository carries no apps.yaml, and clones without a credential where none is given", async () => {
+    const repo = new FakeRepoReader({ files: {} });
+    expect(await readAppsManifest({ repo, repoURL: APPS_REPO })).toBeNull();
+    expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD" }]);
+  });
+});
+
+describe("readAppCatalog (the manifest of the apps template, else the stand-in)", () => {
+  const warns: string[] = [];
+  const catalogOf = (repo: RepoReader, s = spec("acme-apps")) =>
+    readAppCatalog({ spec: s, catalog: { repo, workdir: "/w", credentialId: "catalog-read-pat" }, warn: (m) => warns.push(m) });
+
+  it("reads apps.yaml off the template repository (tenant.appsRepo) at its default branch head, with the catalog's credential, and warns of nothing", async () => {
     warns.length = 0;
     const repo = new FakeRepoReader({ files: files({ appsYaml: APPS_YAML }) });
     const c = await catalogOf(repo);
@@ -102,31 +115,10 @@ describe("readAppCatalog (the manifest of the apps repository, else the stand-in
     expect(c.apps[0]!.selections.seedReference).toEqual({ title: "Reference data", default: true });
     expect(c.apps[1]!.selections).toEqual({});
     expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "catalog-read-pat" }]);
-    expect(warns).toEqual([`apps repository ${APPS_REPO} is not a registered unit — cloned with the catalog's read credential`]);
-  });
-
-  it("clones a REGISTERED unit's repository with its stored credential through the reader that opens stored credentials", async () => {
-    warns.length = 0;
-    const catalogRepo = new FakeRepoReader({ files: files() });
-    const unitRepo = new FakeRepoReader({ files: { [APPS_MANIFEST_PATH]: APPS_YAML } });
-    const unit: UnitRepoAccess = { registration: async (u) => (u === "acme-apps" ? { repoCredentialId: "cred_apps" } : null), reader: () => unitRepo };
-    const c = await catalogOf(catalogRepo, spec("acme-apps"), unit);
-    expect(c.apps.map((a) => a.name)).toEqual(["erp", "web"]);
-    expect(unitRepo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "cred_apps" }]);
-    expect(catalogRepo.clones).toEqual([]); // the catalog's reader was not asked
     expect(warns).toEqual([]);
   });
 
-  it("falls back to the catalog's credential for a registered unit while the reader of stored credentials is not wired, and says so", async () => {
-    warns.length = 0;
-    const repo = new FakeRepoReader({ files: files({ appsYaml: APPS_YAML }) });
-    const unit: UnitRepoAccess = { registration: async () => ({ repoCredentialId: "cred_apps" }), reader: () => undefined };
-    await catalogOf(repo, spec("acme-apps"), unit);
-    expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "catalog-read-pat" }]);
-    expect(warns[0]).toMatch(/registered without a stored credential the tenant family can open — cloned with the catalog's read credential/);
-  });
-
-  it("serves the overlay stand-in, with a warning, where the apps repository carries no apps.yaml", async () => {
+  it("serves the overlay stand-in, with a warning, where the template carries no apps.yaml", async () => {
     warns.length = 0;
     const repo = new FakeRepoReader({ files: files({ overlays: ["values.yaml", "values-prod.yaml", "values-web.yaml", "values-erp.yaml"] }) });
     const c = await catalogOf(repo);
@@ -159,23 +151,8 @@ describe("readAppCatalog (the manifest of the apps repository, else the stand-in
   });
 });
 
-describe("unitRepoAccess", () => {
-  it("answers null for every unit and no reader where the ports carry neither", async () => {
-    const access = unitRepoAccess({});
-    expect(await access.registration("acme-apps")).toBeNull();
-    expect(access.reader()).toBeUndefined();
-  });
-
-  it("hands the ports' registration reader and the late-bound consumer reader through", async () => {
-    const repo = new FakeRepoReader();
-    const access = unitRepoAccess({ buildUnitRegistration: async () => ({ form: "build-only", repoCredentialId: "cred_1" }), onboard: () => ({ ports: { repo } }) });
-    expect(await access.registration("x")).toEqual({ form: "build-only", repoCredentialId: "cred_1" });
-    expect(access.reader()).toBe(repo);
-  });
-});
-
 describe("listTenantAppCatalog (the provider's clone of the catalog)", () => {
-  it("clones the catalog at ref with the read credential, then the apps repository, and returns the manifest", async () => {
+  it("clones the catalog at ref with the read credential, then the template with the same credential, and returns the manifest", async () => {
     const repo = new FakeRepoReader({ files: files({ appsYaml: APPS_YAML }) });
     const c = await listTenantAppCatalog({ repo, repoURL: REPO_URL, ref: "master", credentialId: "catalog-read-pat", warn: () => {} });
     expect(c.apps.map((a) => a.name)).toEqual(["erp", "web"]);

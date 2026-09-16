@@ -103,6 +103,9 @@ export const TenantMemberSchema = TenantSourceSchema.extend({
   namespaceLabels: z.record(z.string(), z.string()).optional(),
 });
 
+/** An https clone URL ending in `.git` — the shape every repository the tenant catalog names has. */
+const gitRepoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
+
 export const TenantSpecSchema = z.object({
   // The members every tenant always has, one namespace + one AppProject each. No flag and no file
   // gates them: a tenant's apps require these services to exist.
@@ -125,7 +128,7 @@ export const TenantSpecSchema = z.object({
    *  unit a repository names is its basename (unitNameFromRepoURL), the identity every registration
    *  holds. */
   buildRepos: z.array(z.object({
-    repo: z.string().regex(/^https:\/\/[^ ]+\.git$/),
+    repo: gitRepoURL,
     builds: z.array(z.string().regex(/^[a-z0-9-]+$/)).min(1),
   })).default([]),
   /** THE GITHUB ORGANISATION A TENANT'S OWN REPOSITORY IS CREATED IN, stated by the catalog because
@@ -134,15 +137,23 @@ export const TenantSpecSchema = z.object({
    *  refused rather than creating a repository where the App has no rights. GitHub's own grammar for
    *  an account name: letters, digits and single hyphens between them, at most 39 characters. */
   appsOrg: z.string().regex(GITHUB_ACCOUNT_RE, "appsOrg must be a GitHub organisation name: letters, digits and single hyphens, at most 39 characters").optional(),
-  /** WHICH build is the APPS BUNDLE every engine mounts. The `buildRepos` entry that builds it is the
-   *  apps repository: its `apps.yaml` is the app catalog the wizard offers and T4 judges
-   *  (shared/apps-manifest.ts), and it is the template a tenant's own apps repository is created
-   *  from. Absent ⇒ the catalog is the engine chart's `values-<app>.yaml` overlays, as before the
-   *  manifest existed (server/domains/units/app-catalog.ts). */
+  /** THE APPS TEMPLATE: the name and the repository of the apps bundle a tenant's own apps
+   *  repository is COPIED from. `appsRepo` is read with the catalog's own credential; its `apps.yaml`
+   *  is the app catalog the wizard offers and T4 judges (shared/apps-manifest.ts). The template is
+   *  NEVER a unit: the platform never builds it and no tenant mounts it, so a `buildRepos` entry
+   *  that builds `appsBundle` is refused. Both absent ⇒ the catalog is the engine chart's
+   *  `values-<app>.yaml` overlays, as before the manifest existed (server/domains/units/app-catalog.ts). */
   appsBundle: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  appsRepo: gitRepoURL.optional(),
 }).superRefine((spec, ctx) => {
-  if (spec.appsBundle !== undefined && !spec.buildRepos.some((b) => b.builds.includes(spec.appsBundle!))) {
-    ctx.addIssue({ code: "custom", path: ["appsBundle"], message: `appsBundle "${spec.appsBundle}" is built by no buildRepos entry — the apps repository, whose apps.yaml is the app catalog, cannot be resolved` });
+  if ((spec.appsBundle === undefined) !== (spec.appsRepo === undefined)) {
+    ctx.addIssue({ code: "custom", path: [spec.appsBundle === undefined ? "appsBundle" : "appsRepo"], message: spec.appsBundle === undefined
+      ? `appsRepo ${spec.appsRepo} names no template — appsBundle is the template's name and is declared beside it`
+      : `appsBundle "${spec.appsBundle}" has no appsRepo — the template's repository, whose apps.yaml is the app catalog, is declared beside it` });
+  }
+  const templateBuild = spec.buildRepos.find((b) => spec.appsBundle !== undefined && b.builds.includes(spec.appsBundle));
+  if (templateBuild !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["buildRepos"], message: `buildRepos entry ${templateBuild.repo} builds "${spec.appsBundle}", the apps template — the platform never builds the template and no tenant mounts it; a tenant's own apps repository is copied from it` });
   }
   // Two invariants the list form has to carry that a keyed map would carry for free.
   const names = spec.members.map((m) => m.name);
@@ -171,6 +182,14 @@ export const TenantSpecSchema = z.object({
   }
 });
 export type TenantSpec = z.infer<typeof TenantSpecSchema>;
+
+/** The apps template of a catalog — the bundle's name and the repository it is copied from — or
+ *  null where the catalog declares none. The catalog reader (server/domains/units/app-catalog.ts)
+ *  resolves the template through it; the plan holds the rendered images against the name alone
+ *  (server/domains/units/tenant-builds.ts planBuildUnits). */
+export function tenantAppsTemplate(spec: Pick<TenantSpec, "appsBundle" | "appsRepo">): { name: string; repo: string } | null {
+  return spec.appsBundle !== undefined && spec.appsRepo !== undefined ? { name: spec.appsBundle, repo: spec.appsRepo } : null;
+}
 
 /** The organisation the tenant repositories of this catalog are created in, or undefined where the
  *  catalog states none — the ONE reader of `appsOrg`, so a run kind and a gate ask the same question

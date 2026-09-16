@@ -9,7 +9,6 @@ import { appsBundleFields, guid as guidSchema, memberName, refineAppsBundleReque
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
-import { unitRepoAccess } from "./app-catalog.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
 import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
 import { assertDeployState } from "./lifecycle.ts";
@@ -612,7 +611,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
-        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, unitRepo: unitRepoAccess(ports), ...standingHostFrom(ports.dns, ctx.db, ctx.signal) },
+        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, ...standingHostFrom(ports.dns, ctx.db, ctx.signal) },
       );
       if (outcome.verdict !== "pass") {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");
@@ -635,7 +634,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // own (hostyour-manager#165, tenant-builds.ts): each missing image's repository becomes a build
       // unit the run onboards before the tenant's own writes; a PAT per unregistered unit at approve.
       const planned = await planBuildUnits({
-        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], ...(bundle ? { bundle } : {}), probe: ports.registryProbe,
+        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], ...(bundle ? { bundle } : {}), appsBundle: outcome.spec?.appsBundle, probe: ports.registryProbe,
         registration: ports.buildUnitRegistration ?? (async () => null), stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };

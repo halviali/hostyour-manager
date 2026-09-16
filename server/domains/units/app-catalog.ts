@@ -1,23 +1,27 @@
 // The tenant APP CATALOG — what the create-tenant wizard offers and what gate T4 judges the chosen
 // apps and their selections against. The catalog is the apps manifest (shared/apps-manifest.ts) of
-// the APPS REPOSITORY: the catalog's `tenant.buildRepos` entry that builds `tenant.appsBundle`, read
-// at its default branch. Titles, descriptions and selections come from that file; the platform
-// carries no list of apps and no list of selections.
+// the APPS TEMPLATE: the repository `tenant.appsRepo` names, read at its default branch with the
+// catalog's own credential. Titles, descriptions and selections come from that file; the platform
+// carries no list of apps and no list of selections. The template is the repository a tenant's own
+// apps repository is copied from, never a unit: the platform does not build it and no tenant mounts
+// it, so nothing here reaches for a registration or a unit's credential. readAppsManifest is the
+// primitive: one apps repository, one credential — a tenant's OWN bundle is read through it with
+// the tenant's credential by whoever offers a standing tenant its own catalog.
 //
-// WHERE NO MANIFEST STANDS — the catalog declares no `appsBundle`, or the apps repository carries no
-// apps.yaml yet — the catalog is what it was before the manifest existed: the engine chart's
+// WHERE NO MANIFEST STANDS — the catalog declares no template, or the template carries no apps.yaml
+// yet — the catalog is what it was before the manifest existed: the engine chart's
 // `values-<app>.yaml` overlays, one app per overlay, with the two seed selections the registration
 // names as fields (SEED_SELECTIONS). That stand-in is logged as one every time it is served, so an
 // installation running on it can see that it is.
 //
 // Boundary: a domain module. It depends on the git RepoReader PORT, on shared/ and on nothing that
 // does IO of its own; the clone/read/dispose is the port's job. fallbackCatalog is pure.
-import type { ClonedRepo, RepoReader } from "../../adapters/git/port.ts";
+import type { RepoReader } from "../../adapters/git/port.ts";
 import { parse as parseYaml } from "yaml";
 import { appName } from "../../../shared/tenant.ts";
 import { SEED_SELECTIONS } from "../../../shared/app-selections.ts";
 import { APPS_MANIFEST_PATH, parseAppsManifest, type AppEntry, type AppsManifest } from "../../../shared/apps-manifest.ts";
-import { ConsumerManifestSchema, unitNameFromRepoURL, type TenantSpec } from "../../../shared/consumer.ts";
+import { ConsumerManifestSchema, tenantAppsTemplate, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
@@ -51,77 +55,63 @@ export function fallbackCatalog(entries: string[]): AppsManifest {
   return { apps: [...names].sort().map((name) => ({ name, title: name, description: "", selections: { ...FALLBACK_SELECTIONS } })) };
 }
 
-/** How a unit the installation REGISTERED is reached: its registration's stored credential, opened
- *  by the reader that opens stored credentials (the consumer family's). */
-export interface UnitRepoAccess {
-  /** The registration of a unit, or null for one the installation has not registered. */
-  registration: (unit: string) => Promise<{ repoCredentialId?: string } | null>;
-  /** The reader whose opener resolves a STORED credential id; undefined while that family is not wired. */
-  reader: () => RepoReader | undefined;
+export interface ReadAppsManifestInput {
+  repo: RepoReader;
+  repoURL: string;
+  /** The stored credential the clone opens; absent for a repository the reader reaches without one. */
+  credentialId?: string;
+  signal?: AbortSignal;
 }
 
-/** Compose UnitRepoAccess out of the tenant onboarding's ports — structural, so the three callers of
- *  validateTenant hand the same two things in without this module naming their port type. */
-export function unitRepoAccess(ports: {
-  buildUnitRegistration?: (unit: string) => Promise<{ repoCredentialId?: string } | null>;
-  onboard?: () => { ports: { repo: RepoReader } } | undefined;
-}): UnitRepoAccess {
-  return { registration: ports.buildUnitRegistration ?? (async () => null), reader: () => ports.onboard?.()?.ports.repo };
+/** THE PRIMITIVE: the apps manifest of ONE apps repository, cloned at its default branch head with
+ *  the credential given, or null where it carries no apps.yaml there. THROWS on a clone that fails
+ *  and on an apps.yaml that does not parse; the throwaway checkout is always disposed. */
+export async function readAppsManifest(input: ReadAppsManifestInput): Promise<AppsManifest | null> {
+  const cloned = await input.repo.cloneAtRef({
+    repoURL: input.repoURL,
+    ref: DEFAULT_BRANCH_HEAD,
+    ...(input.credentialId ? { credentialId: input.credentialId } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  try {
+    const text = await input.repo.readFile(cloned.workdir, APPS_MANIFEST_PATH);
+    return text === null ? null : parseAppsManifest(text);
+  } finally {
+    await input.repo.dispose(cloned.workdir);
+  }
 }
 
 export interface ReadAppCatalogInput {
   spec: TenantSpec;
   /** The catalog checkout already made (validateTenant's, or listTenantAppCatalog's) and the
-   *  credential it was cloned with: the stand-in lists its engine chart, and an apps repository
-   *  the installation has not registered is cloned with the same credential. */
+   *  credential it was cloned with: the stand-in lists its engine chart, and the template is cloned
+   *  with the same credential. That credential reaches the template only where the installation's
+   *  catalog PAT was granted it; where it was not, the clone fails and the plan says so. */
   catalog: { repo: RepoReader; workdir: string; credentialId?: string };
-  unit?: UnitRepoAccess;
-  /** Where a stand-in and a dropped credential are said: the run's log, or pino. */
+  /** Where a stand-in is said: the run's log, or pino. */
   warn: (msg: string) => void;
   signal?: AbortSignal;
 }
 
-/** Clone the apps repository at its default branch head. A REGISTERED unit is cloned as itself: with
- *  the credential its registration stores, through the reader that opens stored credentials. A unit
- *  the installation has not registered — or one registered while the consumer family is not wired —
- *  is cloned with the CATALOG'S read credential instead. That credential reaches the apps repository
- *  only where the installation's catalog PAT was granted it; where it was not, the clone fails and
- *  the plan says so, rather than this module inventing a credential it does not hold. */
-async function cloneAppsRepo(repoURL: string, input: ReadAppCatalogInput): Promise<{ repo: RepoReader; cloned: ClonedRepo }> {
-  const unit = unitNameFromRepoURL(repoURL);
-  const registered = await input.unit?.registration(unit);
-  const unitReader = input.unit?.reader();
-  const signal = input.signal ? { signal: input.signal } : {};
-  if (registered?.repoCredentialId !== undefined && unitReader !== undefined) {
-    return { repo: unitReader, cloned: await unitReader.cloneAtRef({ repoURL, ref: DEFAULT_BRANCH_HEAD, credentialId: registered.repoCredentialId, ...signal }) };
-  }
-  input.warn(`apps repository ${repoURL} is ${registered ? "registered without a stored credential the tenant family can open" : "not a registered unit"} — cloned with the catalog's read credential`);
-  const repo = input.catalog.repo;
-  return { repo, cloned: await repo.cloneAtRef({ repoURL, ref: DEFAULT_BRANCH_HEAD, ...(input.catalog.credentialId ? { credentialId: input.catalog.credentialId } : {}), ...signal }) };
-}
-
-/** The catalog for ONE catalog checkout: the apps manifest of the apps repository the spec names,
- *  else the overlay stand-in, each stand-in logged. THROWS on a clone that fails and on an apps.yaml
- *  that does not parse — the caller decides whether that is a preflight rejection (the gates) or a
- *  fail-soft fallback (the wizard route). */
+/** The catalog for ONE catalog checkout: the apps manifest of the template the spec names, else the
+ *  overlay stand-in, each stand-in logged. THROWS on a clone that fails and on an apps.yaml that does
+ *  not parse — the caller decides whether that is a preflight rejection (the gates) or a fail-soft
+ *  fallback (the wizard route). */
 export async function readAppCatalog(input: ReadAppCatalogInput): Promise<AppsManifest> {
   const { spec, catalog } = input;
   const standIn = async (why: string): Promise<AppsManifest> => {
     input.warn(`${why} — the app catalog is the ${spec.perApp.engine.chart}/values-<app>.yaml overlays, with the two seed selections and no titles`);
     return fallbackCatalog(await catalog.repo.listDir(catalog.workdir, spec.perApp.engine.chart));
   };
-  if (spec.appsBundle === undefined) return standIn(`${TENANT_MANIFEST_PATH} declares no tenant.appsBundle`);
-  const entry = spec.buildRepos.find((b) => b.builds.includes(spec.appsBundle!));
-  // TenantSpecSchema refuses a bundle no entry builds; this belt only names the gap a hand-built spec leaves.
-  if (!entry) throw errValidation(`tenant.appsBundle "${spec.appsBundle}" is built by no tenant.buildRepos entry — the apps repository cannot be resolved`);
-  const { repo, cloned } = await cloneAppsRepo(entry.repo, input);
-  try {
-    const text = await repo.readFile(cloned.workdir, APPS_MANIFEST_PATH);
-    if (text === null) return standIn(`${entry.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
-    return parseAppsManifest(text);
-  } finally {
-    await repo.dispose(cloned.workdir);
-  }
+  const template = tenantAppsTemplate(spec);
+  if (template === null) return standIn(`${TENANT_MANIFEST_PATH} declares no tenant.appsBundle`);
+  const manifest = await readAppsManifest({
+    repo: catalog.repo,
+    repoURL: template.repo,
+    ...(catalog.credentialId ? { credentialId: catalog.credentialId } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  return manifest ?? standIn(`the apps template ${template.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
 }
 
 /** What a single catalog fetch needs: the same catalog ref + read credential validateTenant clones
@@ -133,7 +123,6 @@ export interface ListAppCatalogDeps {
   repoURL: string;
   ref: string;
   credentialId?: string;
-  unit?: UnitRepoAccess;
   warn: (msg: string) => void;
   signal?: AbortSignal;
 }
@@ -156,7 +145,6 @@ export async function listTenantAppCatalog(deps: ListAppCatalogDeps): Promise<Ap
     return readAppCatalog({
       spec: manifest.tenant,
       catalog: { repo: deps.repo, workdir: cloned.workdir, ...(deps.credentialId ? { credentialId: deps.credentialId } : {}) },
-      ...(deps.unit ? { unit: deps.unit } : {}),
       warn: deps.warn,
       ...(deps.signal ? { signal: deps.signal } : {}),
     });
@@ -183,7 +171,6 @@ export interface AppCatalogProviderDeps {
   repoURL: string;
   ref: string;
   credentialId?: string;
-  unit?: UnitRepoAccess;
   warn: CatalogWarn;
   /** Cache freshness window; defaults to 5 min. */
   ttlMs?: number;
@@ -208,7 +195,6 @@ export function makeAppCatalogProvider(deps: AppCatalogProviderDeps): AppCatalog
           repoURL: deps.repoURL,
           ref: deps.ref,
           ...(deps.credentialId ? { credentialId: deps.credentialId } : {}),
-          ...(deps.unit ? { unit: deps.unit } : {}),
           warn: (msg) => deps.warn({ repoURL: deps.repoURL, ref: deps.ref }, msg),
           ...(signal ? { signal } : {}),
         });

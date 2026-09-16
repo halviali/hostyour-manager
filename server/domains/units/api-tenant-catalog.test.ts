@@ -26,7 +26,7 @@ const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";
 
-/** The catalog's manifest, naming the apps bundle and the repository that builds it. */
+/** The catalog's manifest, naming the apps template: the bundle's name and its repository. */
 const TENANT_MANIFEST = `apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
 name: catalog
@@ -36,9 +36,7 @@ builds:
   - { name: example-engine, containerfile: Dockerfile }
 tenant:
   appsBundle: acme-apps
-  buildRepos:
-    - repo: https://github.com/acme/acme-apps.git
-      builds: [acme-apps]
+  appsRepo: https://github.com/acme/acme-apps.git
   members:
     - { name: auth, chart: charts/example-auth, identityProvider: true }
   perApp:
@@ -73,13 +71,13 @@ async function makeTenant(appCatalog?: AppCatalogProvider): Promise<{ app: Hono<
 }
 
 describe("GET /api/tenants/app-catalog", () => {
-  it("serves the apps repository's apps.yaml as-is (route→provider→clone→parse)", async () => {
+  it("serves the template repository's apps.yaml as-is (route→provider→clone→parse)", async () => {
     const repo = new FakeRepoReader({ files: { "deploy/platform.yaml": TENANT_MANIFEST, "apps.yaml": APPS_YAML } });
     const { app, cookie } = await makeTenant(makeAppCatalogProvider({ repo, repoURL: DEPLOY_URL, ref: "master", credentialId: "catalog-read-pat", warn: () => {} }));
     expect(await (await app.request("/api/tenants/app-catalog", authed(cookie))).json()).toEqual({
       apps: [{ name: "erp", title: "ERP", description: "Orders and stock.", selections: { seedDemo: { title: "Demo data", default: true } } }],
     });
-    // The catalog at the books ref, then the apps repository at its default branch head.
+    // The catalog at the books ref, then the template at its default branch head.
     expect(repo.clones.map((c) => [c.repoURL, c.ref])).toEqual([[DEPLOY_URL, "master"], ["https://github.com/acme/acme-apps.git", "HEAD"]]);
   });
 

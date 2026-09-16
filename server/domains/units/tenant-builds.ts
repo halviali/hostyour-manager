@@ -45,7 +45,6 @@ import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
 import { validateTenant, type ValidateTenantRequest } from "./validate-tenant.ts";
-import { unitRepoAccess } from "./app-catalog.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
@@ -137,12 +136,16 @@ export interface PlannedBuilds {
 /** THE PLAN'S HALF, in one call: probe every required image, map the missing ones to their build units,
  *  and say what the run will do. An image no `buildRepos` entry names is a refusal — nothing can be
  *  built for it — and so is a unit registered as DEPLOYABLE: its release deploys its own standing
- *  instance too, which is the unit's own act (its Consumers page), not a tenant's. */
+ *  instance too, which is the unit's own act (its Consumers page), not a tenant's. A render that
+ *  pulls the apps TEMPLATE (`tenant.appsBundle`) is refused before the registry is asked: the
+ *  template is copied from, never built and never mounted, so a chart still naming it is stale and
+ *  is named here rather than built or pulled. */
 export async function planBuildUnits(input: {
   requiredImages: readonly RequiredImage[];
   registryHost: string;
   buildRepos: TenantSpec["buildRepos"];
   bundle?: TenantBundle;
+  appsBundle?: TenantSpec["appsBundle"];
   registration: (unit: string) => Promise<RegisteredUnit | null>;
   probe: RegistryProbe;
   stage: Stage;
@@ -150,6 +153,13 @@ export async function planBuildUnits(input: {
   signal: AbortSignal;
   log: (line: string) => void;
 }): Promise<{ outcome: "planned"; builds: PlannedBuilds } | { outcome: "rejected"; summary: string }> {
+  const template = input.requiredImages.filter((img) => img.repo === input.appsBundle);
+  if (template.length > 0) {
+    return {
+      outcome: "rejected",
+      summary: `Tenant "${input.subdomain}" was rejected — the rendered members pull ${template.map((m) => `${m.repo}:${m.tag}`).join(", ")}, and "${input.appsBundle}" is the catalogue's apps template (tenant.appsBundle): the template is copied from, never built and never mounted, so a member chart still lists it as a build and needs to mount the tenant's own bundle instead`,
+    };
+  }
   const missing: RequiredImage[] = [];
   for (const img of input.requiredImages) {
     if (!(await input.probe.imageExists({ registryHost: input.registryHost, repo: img.repo, tag: img.tag }, { signal: input.signal }))) missing.push(img);
@@ -325,10 +335,6 @@ export interface RefreshImagesPorts {
   catalogCredentialId?: string;
   resolveClusterValueFiles: (domain: string, stage: Stage) => Promise<ClusterValueFile[]>;
   attestedBuilds: () => Promise<{ unit: string; build: string }[]>;
-  /** The two the re-render reaches the apps repository through when it is a registered unit
-   *  (app-catalog.ts unitRepoAccess) — the same two the plan's validation used. */
-  buildUnitRegistration?: (unit: string) => Promise<RegisteredUnit | null>;
-  onboard?: () => TenantBuildDeps | undefined;
 }
 
 export interface RefreshImagesParams {
@@ -370,7 +376,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           ...(appsImageTag !== undefined ? { appsImageTag } : {}),
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
-        { repo: ports.repo, helm: ports.helm, log: (l) => ctx.log("meta", l), signal: ctx.signal, unitRepo: unitRepoAccess(ports) },
+        { repo: ports.repo, helm: ports.helm, log: (l) => ctx.log("meta", l), signal: ctx.signal },
       );
       if (outcome.verdict !== "pass") {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass").map((g) => g.id);

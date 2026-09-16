@@ -46,7 +46,7 @@ import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/c
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
-import { makeAppCatalogProvider, unitRepoAccess, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
+import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
@@ -720,18 +720,17 @@ function buildTenantOnboarding(
     ...(githubApp ? { githubApp } : {}),
   };
   // The create-tenant wizard's app catalog: the SAME reader + read credential validateTenant clones
-  // the catalog with, on the books branch, and the SAME unit access the plan reaches the apps
-  // repository through (a registered unit's stored credential, else the catalog's), cached with a
-  // short TTL and fail-soft (a fetch error logs + serves no apps or the stale set, so the wizard
-  // never blank-screens). The branch and not the trunk, so the wizard offers what this
-  // installation can actually deploy: a chart that reached the catalog's trunk after the last carry
-  // is not on the branch the member Application would read it from.
+  // the catalog with, on the books branch, and the apps template (tenant.appsRepo) read with that
+  // same credential (app-catalog.ts), cached with a short TTL and fail-soft (a fetch error logs +
+  // serves no apps or the stale set, so the wizard never blank-screens). The branch and not the
+  // trunk, so the wizard offers what this installation can actually deploy: a chart that reached
+  // the catalog's trunk after the last carry is not on the branch the member Application would read
+  // it from.
   const appCatalog = makeAppCatalogProvider({
     repo,
     repoURL,
     ref: books,
     ...(onboardPorts.catalogCredentialId ? { credentialId: onboardPorts.catalogCredentialId } : {}),
-    unit: unitRepoAccess(onboardPorts),
     warn: (fields, msg) => logger.warn(fields, msg),
   });
   // remove-app + tenant-suspend/-resume/-offboard only flip/drop the pointer + watch the fan-out — no

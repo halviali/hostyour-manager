@@ -8,7 +8,7 @@ import { buildRepoPatSecret } from "../../../shared/approve.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
-import { resolveBuildUnits, buildUnitSecrets, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildDeps, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { resolveBuildUnits, buildUnitSecrets, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -36,6 +36,8 @@ const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const JOBS_REPO = "https://github.com/acme/example-jobs.git";
 const PLATFORM_REPO = "https://github.com/acme/example-platform.git";
 const APPS = [{ name: "erp" }];
+const APPS_REPO = "https://github.com/acme/example-apps.git";
+const APPS_YAML = "apps:\n  - name: erp\n    title: ERP\n    selections:\n      seedDemo: { title: Demo data }\n";
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
@@ -222,23 +224,18 @@ describe("create-tenant planStream — the build units and the PATs it asks for"
     expect(result.params.buildUnits[0]).toMatchObject({ unit: "example-platform", registered: true, repoCredentialId: "cred_platform" });
     expect(result.plan.requiredSecrets).toEqual([]);
   });
-  it("reads the app catalog off a REGISTERED apps repository with its stored credential, through the consumer family's reader — the two ports the build units use", async () => {
+  it("refuses a render that pulls the apps TEMPLATE (tenant.appsBundle), by name, before the registry is asked — a stale chart is named, never built", async () => {
     seedClusters();
-    // The catalog names the platform repository as the apps bundle's builder, and the apps
-    // repository carries an apps.yaml naming erp with one selection.
-    const withBundle = MANIFEST_YAML.replace("tenant:\n", "tenant:\n  appsBundle: example-engine\n");
-    const appsRepo = new FakeRepoReader({ resolvedSha: SHA, files: { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n    selections:\n      seedDemo: { title: Demo data }\n" } });
-    const prt = ports({
-      repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: withBundle } }),
-      buildUnitRegistration: async (unit) => (unit === "example-platform" ? { form: "build-only", repoCredentialId: "cred_platform" } : null),
-      onboard: () => ({ ports: { repo: appsRepo } as unknown as TenantBuildDeps["ports"] }),
-    });
-    const refused = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp", seedReference: true }], ...TEST_BUNDLE }, planCtx());
-    expect(refused.outcome).toBe("rejected");
-    expect(refused.outcome === "rejected" && refused.summary).toMatch(/T4/);
-    expect(appsRepo.clones).toEqual([{ repoURL: PLATFORM_REPO, ref: "HEAD", credentialId: "cred_platform" }]);
-    const planned = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp", seedDemo: true }], ...TEST_BUNDLE }, planCtx());
-    expect(planned.outcome).toBe("planned");
+    // The catalog names example-apps as the template; the fixture's engine chart still mounts it.
+    const withTemplate = MANIFEST_YAML.replace("tenant:\n", `tenant:\n  appsBundle: example-apps\n  appsRepo: ${APPS_REPO}\n`);
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-apps:0.9.0` }] } } } } })] } });
+    const probe = new FakeRegistryProbe({ missing: [] }); // the registry still carries the template's image
+    const prt = ports({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: withTemplate, "apps.yaml": APPS_YAML, ...APP_OVERLAYS } }), helm, registryProbe: probe });
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, ...TEST_BUNDLE }, planCtx());
+    expect(result.outcome).toBe("rejected");
+    if (result.outcome !== "rejected") return;
+    expect(result.summary).toMatch(/example-apps:0\.9\.0.*"example-apps" is the catalogue's apps template \(tenant\.appsBundle\).*never built and never mounted/);
+    expect(probe.probes).toEqual([]);
   });
   it("no image missing ⇒ no build unit, no secret, no refresh step — the plan of today", async () => {
     seedClusters();

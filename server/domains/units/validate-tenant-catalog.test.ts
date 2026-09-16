@@ -135,11 +135,11 @@ describe("gateT4Apps", () => {
 
 describe("validateTenant — the app catalog", () => {
   const APPS_REPO = "https://github.com/acme/acme-apps.git";
-  /** The fixture manifest with an apps bundle whose repository is the apps repository, and a
-   *  `{databases}` token where the product wants the app's database list. */
+  /** The fixture manifest with an apps template (the bundle's name and its repository, built by no
+   *  buildRepos entry), and a `{databases}` token where the product wants the app's database list. */
   const WITH_BUNDLE = MANIFEST_YAML.replace(
     "tenant:\n",
-    `tenant:\n  appsBundle: acme-apps\n  buildRepos:\n    - repo: ${APPS_REPO}\n      builds: [acme-apps]\n`,
+    `tenant:\n  appsBundle: acme-apps\n  appsRepo: ${APPS_REPO}\n`,
   ).replace(
     "    engine: { chart: charts/example-engine }",
     "    engine: { chart: charts/example-engine, valueFiles: [\"values-{app}.yaml\"], values: { databases: { mongodb: { databases: \"{databases}\" } } } }",
@@ -153,10 +153,9 @@ describe("validateTenant — the app catalog", () => {
     const lines: string[] = [];
     const outcome = await validateTenant(req({ apps: [{ name: "erp", seedDemo: true }, app("crm")], credentialId: "cred_deploy" }), deps(repo, helm, (l) => lines.push(l)));
     expect(outcome.verdict).toBe("pass");
-    // The apps repository was cloned after the catalog, at its default branch head, with the
-    // catalog's credential — nothing registered the unit, and the log says so.
+    // The template was cloned after the catalog, at its default branch head, with the catalog's
+    // credential — the template is no unit, so no registration and no unit credential is asked for.
     expect(repo.clones).toEqual([{ repoURL: REPO_OF_REQ, ref: "master", credentialId: "cred_deploy" }, { repoURL: APPS_REPO, ref: "HEAD", credentialId: "cred_deploy" }]);
-    expect(lines.some((l) => l.includes("not a registered unit — cloned with the catalog's read credential"))).toBe(true);
     // erp's engine: the list from the manifest, and its overlay, which stands; crm's engine: no
     // databases key at all (the token's key is gone) and no overlay (absent, and said).
     const erp = helm.requests.find((r) => r.releaseName === `${PROBE}-erp-1`);
@@ -185,20 +184,7 @@ describe("validateTenant — the app catalog", () => {
     expect(unknownSelection.report.gates.find((g) => g.id === "T4")?.found).toMatch(/chooses "seedReference", which the catalog does not declare for it \(declared: seedDemo\)/);
   });
 
-  it("reaches a REGISTERED apps repository as that unit, with its stored credential, through the reader of stored credentials", async () => {
-    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
-    const catalogRepo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE } });
-    const unitRepo = new FakeRepoReader({ resolvedSha: SHA, files: { [APPS_MANIFEST_PATH]: APPS_YAML } });
-    const outcome = await validateTenant(req({ apps: [app("crm")] }), {
-      ...deps(catalogRepo, helm),
-      unitRepo: { registration: async (u) => (u === "acme-apps" ? { repoCredentialId: "cred_apps" } : null), reader: () => unitRepo },
-    });
-    expect(outcome.verdict).toBe("pass");
-    expect(unitRepo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "cred_apps" }]);
-    expect(catalogRepo.clones.map((c) => c.repoURL)).toEqual([REPO_OF_REQ]);
-  });
-
-  it("falls back to the overlay stand-in where the apps repository carries no apps.yaml, and says so in the log", async () => {
+  it("falls back to the overlay stand-in where the template carries no apps.yaml, and says so in the log", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE, "charts/example-engine/values-erp.yaml": "" } });
     const lines: string[] = [];

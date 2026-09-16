@@ -9,7 +9,6 @@ import { guid as guidSchema, appName, TenantMemberRecordSchema, TenantValidation
 import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
-import { unitRepoAccess } from "./app-catalog.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { RequiredImageSchema, requiredImagesFrom, ensureImagesStep } from "./ensure-images.ts";
 import { assertDeployState, loadTenantCluster } from "./lifecycle.ts";
@@ -345,7 +344,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           clusterValueFiles,
           ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}),
         },
-        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, unitRepo: unitRepoAccess(ports) },
+        { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal },
       );
       if (outcome.verdict !== "pass") {
         const failed = outcome.report.gates.filter((g) => g.status !== "pass");

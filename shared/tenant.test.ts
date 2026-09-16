@@ -11,7 +11,7 @@ import {
 } from "./tenant.ts";
 import { SEED_SELECTIONS, chosenSelections, appSelectionsToRequest } from "./app-selections.ts";
 import { RESERVED_HOST_LABELS } from "./unit-host.ts";
-import { ConsumerManifestSchema } from "./consumer.ts";
+import { ConsumerManifestSchema, tenantAppsTemplate } from "./consumer.ts";
 
 /** The members a tenant of the test product has: three standing services, then one per app carrying
  *  the two sources a selected app renders. Spelled out here rather than imported from the onboarding
@@ -303,15 +303,38 @@ describe("ConsumerManifest tenant: fan-out block", () => {
     expect(ConsumerManifestSchema.safeParse(bad).success).toBe(false);
   });
 
-  it("appsBundle names a build some buildRepos entry builds — the apps repository the catalog is read from", () => {
+  describe("the apps template — appsBundle + appsRepo, never a build", () => {
+    const APPS_REPO = "https://github.com/acme/acme-apps.git";
     const tenant = (deployManifest() as { tenant: Record<string, unknown> }).tenant;
-    const withBundle = (bundle: string, builds: string[]) => deployManifest({ tenant: { ...tenant, appsBundle: bundle, buildRepos: [{ repo: "https://github.com/acme/acme-apps.git", builds }] } });
-    expect(ConsumerManifestSchema.parse(withBundle("acme-apps", ["acme-apps"])).tenant?.appsBundle).toBe("acme-apps");
-    const r = ConsumerManifestSchema.safeParse(withBundle("acme-apps", ["acme-engine"]));
-    expect(r.success).toBe(false);
-    expect(r.error?.issues.map((i) => i.message).join("; ")).toMatch(/appsBundle "acme-apps" is built by no buildRepos entry/);
-    // Absent is a valid manifest: the catalog then falls back to the engine chart's overlays.
-    expect(ConsumerManifestSchema.parse(deployManifest()).tenant?.appsBundle).toBeUndefined();
+    const withTemplate = (over: Record<string, unknown>) => deployManifest({ tenant: { ...tenant, ...over } });
+    const messages = (m: unknown): string => { const r = ConsumerManifestSchema.safeParse(m); return r.success ? "" : r.error.issues.map((i) => i.message).join("; "); };
+
+    it("parses appsBundle beside appsRepo, and the helper answers both", () => {
+      const parsed = ConsumerManifestSchema.parse(withTemplate({ appsBundle: "acme-apps", appsRepo: APPS_REPO }));
+      expect(parsed.tenant?.appsBundle).toBe("acme-apps");
+      expect(parsed.tenant?.appsRepo).toBe(APPS_REPO);
+      expect(tenantAppsTemplate(parsed.tenant!)).toEqual({ name: "acme-apps", repo: APPS_REPO });
+      // Absent is a valid manifest: the catalog then falls back to the engine chart's overlays.
+      const bare = ConsumerManifestSchema.parse(deployManifest()).tenant!;
+      expect(bare.appsBundle).toBeUndefined();
+      expect(tenantAppsTemplate(bare)).toBeNull();
+    });
+
+    it("refuses appsBundle without appsRepo, and appsRepo without appsBundle", () => {
+      expect(messages(withTemplate({ appsBundle: "acme-apps" }))).toMatch(/appsBundle "acme-apps" has no appsRepo/);
+      expect(messages(withTemplate({ appsRepo: APPS_REPO }))).toMatch(/appsRepo .* names no template/);
+    });
+
+    it("refuses a buildRepos entry that builds the template — the platform never builds it", () => {
+      const m = messages(withTemplate({ appsBundle: "acme-apps", appsRepo: APPS_REPO, buildRepos: [{ repo: APPS_REPO, builds: ["acme-apps"] }] }));
+      expect(m).toMatch(/buildRepos entry .* builds "acme-apps", the apps template — the platform never builds the template/);
+      // A buildRepos entry for another image stands beside the template.
+      expect(messages(withTemplate({ appsBundle: "acme-apps", appsRepo: APPS_REPO, buildRepos: [{ repo: "https://github.com/acme/acme-engine.git", builds: ["acme-engine"] }] }))).toBe("");
+    });
+
+    it("holds appsRepo to the https .git shape", () => {
+      expect(ConsumerManifestSchema.safeParse(withTemplate({ appsBundle: "acme-apps", appsRepo: "git@github.com:acme/acme-apps.git" })).success).toBe(false);
+    });
   });
 });
 
