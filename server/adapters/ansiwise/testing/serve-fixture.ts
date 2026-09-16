@@ -31,6 +31,7 @@ import { spawn } from "node:child_process";
 import { copyFileSync, statSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
+import { acquireServeLock, serveLockPath } from "./serve-lock.ts";
 
 /** The variable a person sets to be let through WITHOUT the binaries — the one way past the refusal
  *  below, and deliberately the only one. Somebody who cannot build the sibling Dart checkout has to
@@ -174,6 +175,10 @@ export async function placeInstallation(
   programs: Record<string, string>,
 ): Promise<ServeFixture> {
   const dir = mkdtempSync(join(tmpdir(), "ansiwise-serve-"));
+  // ONE REAL SERVE PER DRIVE AT A TIME, across processes: the run root below is shared by every
+  // fixture on the drive, whichever vitest process it runs in (serve-lock.ts, #186). Held until
+  // close() has removed the root, so nothing of this fixture is left for the next holder to read.
+  const releaseLock = await acquireServeLock(serveLockPath(runRoot(dir)));
   clearLeakedRunRecords(dir);
   const suffix = process.platform === "win32" ? ".exe" : "";
   // BESIDE EACH OTHER, under their own names. The serving binary looks for `ansiwise` in the
@@ -215,6 +220,7 @@ export async function placeInstallation(
       // which on Windows lands on the drive of the process's working directory — this fixture's
       // temp dir. Removing it un-does everything the detached run children wrote.
       rmSync(runRoot(dir), { recursive: true, force: true });
+      releaseLock();
     },
   };
 }

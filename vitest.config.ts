@@ -50,7 +50,8 @@ export default defineConfig({
           // ALONE, AND ONE FILE AT A TIME. Two files that each start a serve fixture cannot run
           // together: the engine's run root is per-drive and a fixture's close() removes the whole
           // of it, so they would delete each other's records. This is what a file joining this
-          // project is given rather than what it has to remember.
+          // project is given rather than what it has to remember. Across PROCESSES — two worktrees
+          // checking at once — the fixture's own lock keeps them apart (serve-lock.ts).
           fileParallelism: false,
           sequence: { groupOrder: 1 },
         },
