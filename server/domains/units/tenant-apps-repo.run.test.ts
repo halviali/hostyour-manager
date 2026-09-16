@@ -10,7 +10,8 @@ import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeTenantAppsRepoDef, type TenantAppsRepoParams } from "./tenant-apps-repo.run.ts";
-import { mergeAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
+import { mergeAppsManifest } from "./tenant-apps-tree.ts";
+import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, catalogManifest } from "./tenant-apps-repo.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -29,77 +30,6 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 
-const SHA = "a".repeat(40);
-const GUID = "zsjs023ctne0";
-const ORG = "acme-org";
-const SUBDOMAIN = "acme";
-const UNIT = tenantAppsUnit(SUBDOMAIN); // acme-apps
-const TENANT_URL = tenantAppsRepoURL(ORG, SUBDOMAIN);
-const CATALOG_URL = "https://github.com/acme/acme-catalog.git";
-const TEMPLATE_URL = `https://github.com/${ORG}/example-apps.git`;
-const TEMPLATE_CREDENTIAL = "cred_template";
-
-const catalogManifest = (over: { appsOrg?: string; appsBundle?: string } = { appsOrg: ORG, appsBundle: "example-apps" }): string => `
-apiVersion: hostyour.cloud/v1
-kind: ConsumerManifest
-name: acme-catalog
-owner: platform
-envs: [dev, prod]
-tenant:
-  ${over.appsOrg ? `appsOrg: ${over.appsOrg}` : ""}
-  ${over.appsBundle ? `appsBundle: ${over.appsBundle}` : ""}
-  buildRepos:
-    - repo: ${TEMPLATE_URL}
-      builds: [example-apps]
-  members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
-  perApp:
-    engine: { chart: charts/example-engine }
-    front: { chart: charts/example-ui }
-`;
-
-const TEMPLATE_APPS_YAML = `# The app catalog of this bundle.
-apps:
-  - name: erp
-    title: ERP
-    description: >-
-      Enterprise resource planning,
-      split per domain.
-    selections:
-      seedReference: { title: "Reference data", default: true }
-    databases: [core, sales]
-  - name: web
-    title: Website content
-    selections:
-      seedDemo: { title: "Demo data", default: false }
-`;
-const TEMPLATE_MANIFEST = `
-apiVersion: hostyour.cloud/v1
-kind: ConsumerManifest
-name: example-apps
-owner: platform
-envs: [dev, test, prod]
-builds:
-  - name: example-apps
-    containerfile: docker/Dockerfile
-`;
-/** The template as the reader lists it: root files, the kit (never copied), two app folders. */
-const TEMPLATE_FILES: Record<string, string> = {
-  "apps.yaml": TEMPLATE_APPS_YAML,
-  "deploy/platform.yaml": TEMPLATE_MANIFEST,
-  "package.json": '{ "name": "example-apps" }\n',
-  ".dockerignore": ".git\n",
-  "docker/Dockerfile": "FROM busybox\n",
-  ".github/CODEOWNERS": "* @acme\n",
-  ".github/workflows/release.yml": "name: an old kit\n",
-  "release/release.sh": "#!/bin/sh\necho old kit\n",
-  "erp/package.json": '{ "name": "erp" }\n',
-  "erp/seeds/roles.json": "[]\n",
-  "web/site.json": "{}\n",
-};
-
 let db: DbHandle;
 beforeEach(() => {
   db = openDb(":memory:");
@@ -116,7 +46,9 @@ function fakeTenantSeeder(): VaultSeeder {
 interface Harness {
   ports: TenantOnboardPorts;
   githubApp: FakeGitHubApp;
-  /** The consumer family's reader: serves the registered template, and the tenant's repository once a test scripts it. */
+  /** The catalog's reader: serves the catalog's manifest and the template (ports.repo). */
+  catalogReader: FakeRepoReader;
+  /** The consumer family's reader: serves the tenant's repository once a test scripts it. */
   unitReader: FakeRepoReader;
   consumerRepo: FakeConsumerRepo;
   github: FakeGitHubConsumer;
@@ -127,15 +59,17 @@ interface Harness {
 function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; noApp?: boolean } = {}): Harness {
   const githubApp = new FakeGitHubApp();
   githubApp.org = ORG;
-  const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: TEMPLATE_FILES });
+  const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
+  const catalogReader = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.catalog ?? catalogManifest() } });
+  catalogReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: TEMPLATE_FILES });
   const consumerRepo = new FakeConsumerRepo();
   const github = new FakeGitHubConsumer();
   const buildPlane = new FakeBuildPlane();
-  buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+  buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true, imageTag: IMAGE_TAG });
   const onboard = onboardPorts({ repo: unitReader, consumerRepo, github, buildPlane });
   const ports: TenantOnboardPorts = {
     seeder: fakeTenantSeeder(),
-    repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.catalog ?? catalogManifest() } }),
+    repo: catalogReader,
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: [] } }),
     registrations: new TenantRegistrations(new FakePlatformRepo()),
     resolver: new FakeClusterKubeResolver({
@@ -154,12 +88,11 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
     attestedBuilds: async () => [],
     consumerHostLabels: async () => [],
     onboard: () => ({ ports: onboard }),
-    // The template is a registered build unit with a stored credential — read as itself.
-    buildUnitRegistration: async (unit) => (unit === "example-apps" ? { form: "build-only", repoCredentialId: TEMPLATE_CREDENTIAL } : null),
+    buildUnitRegistration: async () => null,
     ...(over.noApp ? {} : { githubApp }),
     ...over.ports,
   };
-  return { ports, githubApp, unitReader, consumerRepo, github, seeder: onboard.seeder as FakeSeeder, buildPlane };
+  return { ports, githubApp, catalogReader, unitReader, consumerRepo, github, seeder: onboard.seeder as FakeSeeder, buildPlane };
 }
 
 /** A credential store that keeps what it sealed, so the chain's opens read the App's token back. */
@@ -244,7 +177,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     expect(r.summary).toMatch(/tenant\.appsOrg is "acme-org" and the GitHub App is installed in "other-org"/);
   });
   it("refuses a unit registered as deployable under the tenant's apps name", async () => {
-    const h = harness({ ports: { buildUnitRegistration: async (unit) => (unit === UNIT ? { form: "deployable" } : { form: "build-only", repoCredentialId: TEMPLATE_CREDENTIAL }) } });
+    const h = harness({ ports: { buildUnitRegistration: async (unit) => (unit === UNIT ? { form: "deployable" } : null) } });
     const r = await plan(h);
     expect(r.outcome).toBe("rejected");
     if (r.outcome !== "rejected") return;
@@ -253,7 +186,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
 });
 
 describe("tenant-apps-repo planStream — the plan", () => {
-  it("freezes the organisation, the template and the master, and reads the template as the registered unit", async () => {
+  it("freezes the organisation, the template and the master, and reads the template with the catalog's credential", async () => {
     const h = harness();
     const r = await plan(h);
     expect(r.outcome).toBe("planned");
@@ -263,8 +196,9 @@ describe("tenant-apps-repo planStream — the plan", () => {
     expect(r.plan.requiredSecrets).toEqual([]);
     expect(r.plan.targetId).toBe("cls_m");
     expect(r.plan.summary).toContain(`${ORG}/${UNIT}`);
-    // The template was cloned through the consumer family's reader with the credential its registration stores.
-    expect(h.unitReader.clones).toEqual([{ repoURL: TEMPLATE_URL, ref: "HEAD", credentialId: TEMPLATE_CREDENTIAL }]);
+    // The template was cloned through the catalog's reader with the catalog's read credential — it is no unit.
+    expect(h.catalogReader.clones).toContainEqual({ repoURL: TEMPLATE_URL, ref: "HEAD", credentialId: "catalog-read-pat" });
+    expect(h.unitReader.clones).toEqual([]);
   });
   it("marks a unit already registered build-only, so its release is re-run", async () => {
     const h = harness({ ports: { buildUnitRegistration: async () => ({ form: "build-only", repoCredentialId: "cred_any" }) } });
@@ -370,10 +304,20 @@ describe("create-repository and onboard-build-only — the App's token as the un
     // The token was sealed ONCE for the whole pass, and the PAT scope preflight was not run on it.
     expect(creds.seals).toHaveLength(1);
     expect(logs.some((l) => l.includes("Pre-flight"))).toBe(false);
-    expect(logs.at(-1)).toContain(`${UNIT} built and pinned for prod`);
+    expect(logs.at(-1)).toContain(`${UNIT} built as ${UNIT}:${IMAGE_TAG} for prod`);
+  });
+  it("refuses a release run that states no image-tag result — the registration could name no tag", async () => {
+    const h = harness();
+    h.buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+    const p = await planned(h);
+    const creds = fakeCreds();
+    const run = pass(h, p);
+    await run("write-tree").run(ctx(p, [], creds.store));
+    h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": h.consumerRepo.filesFor(TENANT_URL)["deploy/platform.yaml"]! } });
+    await expect(run("onboard-build-only").run(ctx(p, [], creds.store))).rejects.toThrow(/states no image-tag result/);
   });
   it("re-runs the release of a unit already registered build-only instead of registering it again", async () => {
-    const h = harness({ ports: { buildUnitRegistration: async (unit) => (unit === UNIT ? { form: "build-only", repoCredentialId: "cred_old" } : { form: "build-only", repoCredentialId: TEMPLATE_CREDENTIAL }) } });
+    const h = harness({ ports: { buildUnitRegistration: async (unit) => (unit === UNIT ? { form: "build-only", repoCredentialId: "cred_old" } : null) } });
     const p = await planned(h);
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
     const creds = fakeCreds();
@@ -384,28 +328,44 @@ describe("create-repository and onboard-build-only — the App's token as the un
   });
 });
 
-describe("record-apps-repo — the registration carries repo and image", () => {
+describe("record-apps-repo — the registration carries repo, image and tag", () => {
   const registration = () => TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: SUBDOMAIN, apps: [{ name: "erp" }], members: testMembers(["erp"]), identityProvider: "auth",
     quota: seedQuota("small"), seedUsers: false, resetNonce: "1", suspended: false, quiesced: false,
   });
-  it("writes appsRepo and appsImage onto a standing registration, and leaves it alone the second time", async () => {
+  /** One pass up to the build: the tag the release built is in the pass's memory after it. */
+  async function built(h: Harness, p: TenantAppsRepoParams, logs: string[]): Promise<(name: string) => Step> {
+    const creds = fakeCreds();
+    const run = pass(h, p);
+    await run("write-tree").run(ctx(p, logs, creds.store));
+    h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": h.consumerRepo.filesFor(TENANT_URL)["deploy/platform.yaml"]! } });
+    await run("onboard-build-only").run(ctx(p, logs, creds.store));
+    return run;
+  }
+  it("writes appsRepo, appsImage and the tag the build read onto a standing registration, and leaves it alone the second time", async () => {
     const h = harness();
     const p = await planned(h);
     await h.ports.registrations.commitTenant({ stage: "prod", guid: GUID, registration: registration(), runId: "run_0" });
     const logs: string[] = [];
-    await step(h, p, "record-apps-repo").run(ctx(p, logs, fakeCreds().store));
+    const run = await built(h, p, logs);
+    await run("record-apps-repo").run(ctx(p, logs, fakeCreds().store));
     const after = await h.ports.registrations.readTenant("prod", GUID);
-    expect(after?.entry).toMatchObject({ appsRepo: TENANT_URL, appsImage: UNIT, apps: [{ name: "erp" }] });
-    await step(h, p, "record-apps-repo").run(ctx(p, logs, fakeCreds().store));
+    expect(after?.entry).toMatchObject({ appsRepo: TENANT_URL, appsImage: UNIT, appsImageTag: IMAGE_TAG, apps: [{ name: "erp" }] });
+    await run("record-apps-repo").run(ctx(p, logs, fakeCreds().store));
     expect(logs.at(-1)).toContain("nothing to commit");
   });
   it("says so when the tenant has no registration yet, and writes nothing", async () => {
     const h = harness();
     const p = await planned(h);
     const logs: string[] = [];
-    await step(h, p, "record-apps-repo").run(ctx(p, logs, fakeCreds().store));
+    const run = await built(h, p, logs);
+    await run("record-apps-repo").run(ctx(p, logs, fakeCreds().store));
     expect(logs.at(-1)).toMatch(/no registration at prod yet/);
     expect(await h.ports.registrations.readTenant("prod", GUID)).toBeNull();
+  });
+  it("refuses in a pass that did not build — a resumed pass has no tag in memory", async () => {
+    const h = harness();
+    const p = await planned(h);
+    await expect(step(h, p, "record-apps-repo").run(ctx(p, [], fakeCreds().store))).rejects.toThrow(/not in this pass's memory/);
   });
 });

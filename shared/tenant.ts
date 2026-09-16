@@ -201,12 +201,6 @@ export const TenantRegistrationSchema = z
     // gets rather than a word to look up.
     quota: UnitQuotaSchema,
     seedUsers: z.boolean().default(false), // flips the IdP's user boot-seed
-    // The tenant's OWN apps repository and the image it builds (hostyour-manager#174): written by
-    // tenant-apps-repo once the repository stands and its first release is built, read by the fan-out
-    // that mounts the tenant's bundle instead of the catalog's. Both absent on a tenant that has no
-    // apps repository, which is a valid tenant that mounts nothing.
-    appsRepo: z.string().regex(/^https:\/\/[^ ]+\.git$/).optional(),
-    appsImage: z.string().regex(/^[a-z0-9-]+$/).optional(), // the build name, which IS the image name
     resetNonce: z.string().min(1).default("1"), // bump + commit triggers a tenant reset (Tenant CR annotation)
     suspended: z.boolean().default(false), // tenant-wide pause: replicas 0, no Ingress
     quiesced: z.boolean().default(false), // the deeper pause a removal-in-flight holds a tenant in

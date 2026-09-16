@@ -292,10 +292,11 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, quota }, `size(${guid}) ${trailer(runId)}`);
   }
 
-  /** Write the tenant's own apps repository and the image it builds — the two fields the fan-out
-   *  mounts the tenant's bundle from. One field pair of one file, like the flips above; writing the
-   *  same values commits nothing. tenant-apps-repo. */
-  async setTenantAppsRepo(stage: Stage, guid: string, apps: { appsRepo: string; appsImage: string }, runId: string): Promise<{ commit: string }> {
+  /** Write the tenant's own apps bundle — the repository, the image it builds and the tag its last
+   *  release built (shared/tenant.ts appsBundleFields), the three the fan-out mounts the tenant's
+   *  bundle from. One field triple of one file, like the flips above; writing the same values
+   *  commits nothing. tenant-apps-repo. */
+  async setTenantAppsRepo(stage: Stage, guid: string, apps: { appsRepo: string; appsImage: string; appsImageTag: string }, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, ...apps }, `tenant-apps-repo(${guid}): ${apps.appsImage} ${trailer(runId)}`);

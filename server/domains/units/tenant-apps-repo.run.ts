@@ -3,7 +3,7 @@ import { parse as parseYaml } from "yaml";
 import type { RunDefinition, Step, StepCtx, Plan, PlanStreamCtx } from "../../executor/types.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { appName, guid as guidSchema, subdomain as subdomainSchema } from "../../../shared/tenant.ts";
-import { CONSUMER_MANIFEST_PATH, ConsumerManifestSchema, consumerName, type ConsumerManifest, type TenantSpec } from "../../../shared/consumer.ts";
+import { CONSUMER_MANIFEST_PATH, ConsumerManifestSchema, consumerName, tenantAppsTemplate, type ConsumerManifest, type TenantSpec } from "../../../shared/consumer.ts";
 import { APPS_MANIFEST_PATH, parseAppsManifest } from "../../../shared/apps-manifest.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import { fingerprintSecret } from "../../security/fingerprint.ts";
@@ -11,7 +11,6 @@ import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { assertDeployState } from "./lifecycle.ts";
 import { resolveMasterCluster } from "./tenant-values.ts";
-import { cloneAppsRepo, unitRepoAccess } from "./app-catalog.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
 import { buildOnlySteps, type BuildOnlyOnboardParams } from "./onboard.run.ts";
@@ -29,12 +28,12 @@ import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepo
 // of the catalog's shared bundle. Five steps: attest the build plane; create the private repository
 // through the platform's GitHub App; write the tree from the template; run the consumer Build-only
 // onboarding of the new unit with the App's installation token as the unit's credential; record
-// `appsRepo` and `appsImage` on the tenant's registration.
+// `appsRepo`, `appsImage` and `appsImageTag` on the tenant's registration.
 //
 // IDEMPOTENT, by construction of each step: a repository that stands is found, not failed on; a
 // second run adds the folders and entries the repository lacks and removes nothing, committing only
 // when something changed; a unit already registered build-only has its release re-run rather than
-// being onboarded again; a registration that already carries the two fields is left alone.
+// being onboarded again; a registration that already carries the three fields is left alone.
 //
 // mutating: true ⇒ steps()[0] MUST be attest-target (executor/guards.ts). The target is the master —
 // the build plane the unit's `<unit>-build` namespace lives on — as it is for every build-only form.
@@ -65,9 +64,8 @@ export const TenantAppsRepoParams = z.object({
   // The organisation the App is installed in — the catalog's `tenant.appsOrg` where it names one,
   // held equal to the installation's at the plan. The repository is `<org>/<subdomain>-apps`.
   org: z.string().min(1),
-  // The template: the catalog's `tenant.buildRepos` entry that builds `tenant.appsBundle`, and that
-  // bundle's build name — the entry of the template's manifest whose containerfile the tenant's own
-  // build takes.
+  // The template: the catalog's `tenant.appsRepo` and `tenant.appsBundle` — the repository the tree
+  // is copied from, and the entry of its manifest whose containerfile the tenant's own build takes.
   templateRepoURL: repoURL,
   templateBuild: z.string().regex(/^[a-z0-9-]+$/),
   // The unit already stands registered build-only on this installation (a second run): its release
@@ -79,10 +77,13 @@ export const TenantAppsRepoParams = z.object({
 });
 export type TenantAppsRepoParams = z.infer<typeof TenantAppsRepoParams>;
 
-/** In-run memory of one execute() pass: the credential id the App's token was sealed under. A
- *  resumed pass seals afresh — the token sealed before has expired by then. */
+/** In-run memory of one execute() pass: the credential id the App's token was sealed under, and the
+ *  image tag the bundle's release built (read off its PipelineRun, onboard-release-cycle.ts). A
+ *  resumed pass seals afresh — the token sealed before has expired by then — and carries no tag,
+ *  which record-apps-repo refuses rather than guessing one. */
 interface AppsRepoRuntime {
   credentialId?: string;
+  imageTag?: string;
 }
 
 function requireGitHubApp(ports: TenantOnboardPorts): GitHubApp {
@@ -107,14 +108,12 @@ async function sealAppToken(ctx: StepCtx, app: GitHubApp, unit: string, runtime:
 }
 
 /** The template's two files this run reads: its apps.yaml (which apps it offers) and its manifest
- *  (how its bundle is built). Read off the same clone the catalog reads (app-catalog.ts). */
-async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, log: (l: string) => void, signal: AbortSignal): Promise<{ appsYaml: string; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<{ path: string; content: string }[]>; dispose: () => Promise<void> }> {
-  const { repo, cloned } = await cloneAppsRepo(templateRepoURL, {
-    catalog: { repo: ports.repo, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}) },
-    unit: unitRepoAccess(ports),
-    warn: log,
-    signal,
-  });
+ *  (how its bundle is built). Cloned the way the catalog reads it (app-catalog.ts readAppsManifest):
+ *  at its default branch head, with the catalog's own credential — the template is no unit and has
+ *  no credential of its own. */
+async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<{ path: string; content: string }[]>; dispose: () => Promise<void> }> {
+  const repo = ports.repo;
+  const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), signal });
   try {
     const appsYaml = await repo.readFile(cloned.workdir, APPS_MANIFEST_PATH);
     if (appsYaml === null) throw errValidation(`${templateRepoURL} carries no ${APPS_MANIFEST_PATH} at its default branch — nothing says which apps the template offers`);
@@ -137,7 +136,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
 }
 
 /** The catalog's tenant spec off this installation's books branch — where `appsOrg`, `appsBundle`
- *  and `buildRepos` are stated (the same clone validateTenant makes). */
+ *  and `appsRepo` are stated (the same clone validateTenant makes). */
 async function readTenantSpec(ports: TenantOnboardPorts, ctx: PlanStreamCtx): Promise<TenantSpec | null> {
   const cloned = await ports.repo.cloneAtRef({ repoURL: ports.catalogRepoUrl, ref: ports.registrations.branch, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), signal: ctx.signal });
   try {
@@ -182,7 +181,7 @@ function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsRepoParams)
         const writer = ports.onboard?.()?.ports.consumerRepo;
         if (!writer) throw errValidation(`${unit} needs the consumer repository writer to commit its tree, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
         const credentialId = await sealAppToken(ctx, requireGitHubApp(ports), unit, runtime);
-        const template = await readTemplate(ports, p.templateRepoURL, (l) => ctx.log("meta", l), ctx.signal);
+        const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
         let files: { path: string; content: string }[];
         try {
           files = await template.tree(chosen);
@@ -253,37 +252,47 @@ function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsRepoParams)
         // workflows, webhooks), not a PAT's scopes: GitHub answers no X-OAuth-Scopes for an
         // installation token, which preflight-scopes reads as a fine-grained token and refuses. It is
         // left out by name; a permission the App lacks fails loud at the step that needs it.
+        const release: ReleaseCycleRuntime = {};
         const chain: Step[] = p.registered
-          ? (() => {
-              const release: ReleaseCycleRuntime = {};
-              return [triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)];
-            })()
-          : buildOnlySteps(onboard, params).filter((s) => s.name !== "preflight-scopes");
+          ? [triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]
+          : buildOnlySteps(onboard, params, release).filter((s) => s.name !== "preflight-scopes");
         ctx.log("meta", `${unit}: version ${version}, channel ${channel}, release run on ${p.stage}, build plane ${p.domain} — ${p.registered ? "registered build-only, its release is re-run" : "onboarded build-only by this run"}`);
         for (const step of chain) {
           ctx.log("meta", `${unit}: ${step.title}`);
           await step.run(ctx);
         }
-        ctx.log("meta", `${unit} built and pinned for ${p.stage} on the books branch`);
+        // The bundle's tag is what its release's PipelineRun states (the `image-tag` result), and
+        // nothing else names it: no chart's builds[] pins a tenant's bundle, so the registration
+        // carries the tag (tenant-builds.ts buildUnitStep does the same inside create-tenant).
+        if (!release.imageTag) {
+          throw errValidation(`the release PipelineRun of ${unit} states no image-tag result — the tag ${unit} was pushed under cannot be read, so the registration cannot carry it`);
+        }
+        runtime.imageTag = release.imageTag;
+        ctx.checkpoint({ appsImage: unit, appsImageTag: release.imageTag });
+        ctx.log("meta", `${unit} built as ${unit}:${release.imageTag} for ${p.stage} — the registration will carry that tag`);
       },
     },
     {
       name: "record-apps-repo",
-      title: "Record the apps repository and image on the tenant's registration",
+      title: "Record the apps repository, image and tag on the tenant's registration",
       run: async (ctx) => {
+        const appsImageTag = runtime.imageTag;
+        if (!appsImageTag) {
+          throw errValidation(`the tag ${unit} was built at is not in this pass's memory — onboard-build-only reads it off the release and a resumed pass has none; the registration cannot name an image without its tag`);
+        }
         const current = await ports.registrations.readTenant(p.stage, p.guid);
         if (!current) {
-          ctx.checkpoint({ appsRepo: url, appsImage: unit, registration: "absent" });
-          ctx.log("meta", `tenant ${p.guid} has no registration at ${p.stage} yet — appsRepo ${url} and appsImage ${unit} ride this run's record; the create-tenant that follows writes them`);
+          ctx.checkpoint({ appsRepo: url, appsImage: unit, appsImageTag, registration: "absent" });
+          ctx.log("meta", `tenant ${p.guid} has no registration at ${p.stage} yet — appsRepo ${url}, appsImage ${unit} and appsImageTag ${appsImageTag} ride this run's record; the create-tenant that follows writes them`);
           return;
         }
-        if (current.entry.appsRepo === url && current.entry.appsImage === unit) {
-          ctx.log("meta", `tenant ${p.guid}'s registration already names ${url} and ${unit} — nothing to commit`);
+        if (current.entry.appsRepo === url && current.entry.appsImage === unit && current.entry.appsImageTag === appsImageTag) {
+          ctx.log("meta", `tenant ${p.guid}'s registration already names ${url} and ${unit}:${appsImageTag} — nothing to commit`);
           return;
         }
-        const { commit } = await ports.registrations.setTenantAppsRepo(p.stage, p.guid, { appsRepo: url, appsImage: unit }, ctx.runId);
-        ctx.checkpoint({ commit, appsRepo: url, appsImage: unit });
-        ctx.log("meta", `tenant ${p.guid}'s registration now names ${url} and the image ${unit} (${commit}) — its fan-out mounts the tenant's own bundle from here on`);
+        const { commit } = await ports.registrations.setTenantAppsRepo(p.stage, p.guid, { appsRepo: url, appsImage: unit, appsImageTag }, ctx.runId);
+        ctx.checkpoint({ commit, appsRepo: url, appsImage: unit, appsImageTag });
+        ctx.log("meta", `tenant ${p.guid}'s registration now names ${url} and the image ${unit}:${appsImageTag} (${commit}) — its fan-out mounts the tenant's own bundle from here on`);
       },
     },
   ];
@@ -311,12 +320,11 @@ export function makeTenantAppsRepoDef(ports: TenantOnboardPorts): RunDefinition<
       const spec = await readTenantSpec(ports, ctx);
       if (!spec) return refuse(`the catalog ${ports.catalogRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
       if (spec.appsOrg !== undefined && spec.appsOrg !== org) return refuse(`the catalog's tenant.appsOrg is "${spec.appsOrg}" and the GitHub App is installed in "${org}" — the repository would be created where the App has no rights; install the App in ${spec.appsOrg} or correct the catalog`);
-      const bundle = spec.appsBundle;
-      if (bundle === undefined) return refuse(`the catalog declares no tenant.appsBundle in ${TENANT_MANIFEST_PATH} — the buildRepos entry that builds it is the template a tenant's repository is created from`);
-      const template = spec.buildRepos.find((b) => b.builds.includes(bundle));
-      if (!template) return refuse(`tenant.appsBundle "${bundle}" is built by no tenant.buildRepos entry — the template cannot be resolved`);
+      const template = tenantAppsTemplate(spec);
+      if (!template) return refuse(`the catalog declares no tenant.appsBundle and tenant.appsRepo in ${TENANT_MANIFEST_PATH} — the template a tenant's repository is created from`);
+      const bundle = template.name;
       ctx.log(`template ${template.repo} (${bundle}), organisation ${org}, repository ${tenantAppsRepoURL(org, req.subdomain)}`);
-      const read = await readTemplate(ports, template.repo, ctx.log, ctx.signal);
+      const read = await readTemplate(ports, template.repo, ctx.signal);
       let offered: string[];
       let unfolded: string[];
       try {
