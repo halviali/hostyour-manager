@@ -7,6 +7,12 @@ import type { RepoReader, ClonedRepo, PlatformRepo, BranchScope, CommitInput, Co
 import { CLUSTER_MAP_DIR, PLATFORM_VALUES_COMMON, PLATFORM_VALUES_DIR } from "../../../../shared/cluster-values.ts";
 import { STAGE } from "../../../../shared/enums.ts";
 
+/** The key prefix of the files directly under `relPath`: "" for the root ("" or "."), else "<dir>/". */
+function dirPrefix(relPath: string): string {
+  const dir = relPath.replace(/\/+$/, "");
+  return dir === "" || dir === "." ? "" : `${dir}/`;
+}
+
 /** The scripted content a FakeRepoReader serves for a single clone (the resolved SHA + the files). */
 export interface FakeRepoReaderScript {
   resolvedSha?: string;
@@ -15,11 +21,23 @@ export interface FakeRepoReaderScript {
 
 export class FakeRepoReader implements RepoReader {
   readonly clones: { repoURL: string; ref: string; credentialId?: string }[] = [];
+  /** A script per repository URL, for a test whose one reader clones several repositories (the
+   *  catalog, the apps template, a tenant's own repository); a URL scripted here is served from it,
+   *  every other from the default script. */
+  private readonly byURL = new Map<string, FakeRepoReaderScript>();
 
   constructor(private scripted: FakeRepoReaderScript = {}) {}
 
   setScript(scripted: FakeRepoReaderScript): void {
     this.scripted = scripted;
+  }
+
+  scriptFor(repoURL: string, scripted: FakeRepoReaderScript): void {
+    this.byURL.set(repoURL, scripted);
+  }
+
+  private scriptOf(workdir: string): FakeRepoReaderScript {
+    return this.byURL.get(decodeURIComponent(workdir.slice("/fake/".length).split("@")[0]!)) ?? this.scripted;
   }
 
   async cloneAtRef(input: { repoURL: string; ref: string; credentialId?: string }): Promise<ClonedRepo> {
@@ -28,20 +46,22 @@ export class FakeRepoReader implements RepoReader {
       ref: input.ref,
       ...(input.credentialId ? { credentialId: input.credentialId } : {}),
     });
-    return { workdir: `/fake/${input.ref}`, resolvedSha: this.scripted.resolvedSha ?? "f".repeat(40) };
+    const workdir = `/fake/${encodeURIComponent(input.repoURL)}@${input.ref}`;
+    return { workdir, resolvedSha: this.scriptOf(workdir).resolvedSha ?? "f".repeat(40) };
   }
 
-  async readFile(_workdir: string, relPath: string): Promise<string | null> {
-    return this.scripted.files?.[relPath] ?? null;
+  async readFile(workdir: string, relPath: string): Promise<string | null> {
+    return this.scriptOf(workdir).files?.[relPath] ?? null;
   }
 
   // Immediate children of relPath, DERIVED from the scripted files map (no extra script surface): every
   // file whose path sits under "<relPath>/" contributes its next path segment. Mirrors the real reader's
-  // non-recursive listing (dir names appear once) and its absent-is-empty contract.
-  async listDir(_workdir: string, relPath: string): Promise<string[]> {
-    const prefix = `${relPath.replace(/\/+$/, "")}/`;
+  // non-recursive listing (dir names appear once) and its absent-is-empty contract; "" and "." are the
+  // root, as they are for the real reader's readdir of the workdir itself.
+  async listDir(workdir: string, relPath: string): Promise<string[]> {
+    const prefix = dirPrefix(relPath);
     const names = new Set<string>();
-    for (const p of Object.keys(this.scripted.files ?? {})) {
+    for (const p of Object.keys(this.scriptOf(workdir).files ?? {})) {
       if (!p.startsWith(prefix)) continue;
       const seg = p.slice(prefix.length).split("/")[0];
       if (seg) names.add(seg);
@@ -264,7 +284,7 @@ export class FakeConsumerRepo implements ConsumerRepo {
     // The same non-recursive, absent-is-empty contract as the real adapter: the immediate entry
     // names under relPath, files and subdirs alike, each name once.
     const repo = this.repoOf(workdir);
-    const prefix = `${repo}\0${relPath.replace(/\/$/, "")}/`;
+    const prefix = `${repo}\0${dirPrefix(relPath)}`;
     const names = new Set<string>();
     for (const k of this.store.keys()) {
       if (!k.startsWith(prefix)) continue;
