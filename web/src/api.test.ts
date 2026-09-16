@@ -11,6 +11,7 @@ const base: TenantCreateForm = {
   stage: "prod",
   subdomain: "acme",
   owner: "team-acme",
+  size: "small",
   apps: [],
   seedUsers: false,
 };
@@ -60,6 +61,10 @@ describe("buildCreateTenantBody", () => {
     expect(buildCreateTenantBody({ ...base, seedUsers: true }).seedUsers).toBe(true);
     const body = buildCreateTenantBody(base);
     expect(body.seedUsers).toBe(false);
-    expect(Object.keys(body).sort()).toEqual(["apps", "clusterId", "owner", "seedUsers", "stage", "subdomain"]);
+    expect(Object.keys(body).sort()).toEqual(["apps", "clusterId", "owner", "seedUsers", "size", "stage", "subdomain"]);
+  });
+
+  it("sends the size the operator picked — the run used to take the default whatever the wizard showed", () => {
+    expect(buildCreateTenantBody({ ...base, size: "large" }).size).toBe("large");
   });
 });

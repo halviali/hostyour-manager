@@ -320,10 +320,11 @@ describe("create-tenant streaming planner", () => {
   it("mints a free guid, validates the fan-out, and freezes a plan (targetKind cluster, catalog lock)", async () => {
     seedClusters();
     const def = makeCreateTenantDef(ports());
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, size: "large" }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.guid).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/);
+    expect(result.params.size).toBe("large"); // the wizard's size reaches the run, never the default in its place
     expect(result.params.chartsRef).toBe(SHA);
     expect(result.params.expectedApps).toEqual(tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], result.params.guid, "prod"));
     expect(result.plan.targetKind).toBe("cluster");

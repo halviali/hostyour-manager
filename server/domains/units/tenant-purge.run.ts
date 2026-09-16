@@ -77,10 +77,8 @@ import { tenantKeyName } from "./tenant-storage.ts";
 // together with its user, however the claim dies. delete-tenant-crypto destroys the tenant's Vault
 // entry <stage>/tenants/<guid> through the SAME seeder create-tenant wrote it with — a metadata delete,
 // all versions, so a tenant minted later with this guid can never inherit the purged one's signing key.
-// It is NOT one delete. A cluster-scoped Tenant CR carrying a finalizer that a reconciler releases
-// only once all of that is gone would make deleting the CR the whole cascade, but no manager serves
-// that CR — so a step verifying a cascade nobody runs refuses every time and no tenant reaches
-// "purged".
+// It is NOT one delete: no reconciler on this platform serves a tenant object whose deletion could
+// cascade over all of that, so each thing is deleted by the step that owns it.
 // withdraw-bucket-keys takes back every object-storage key minted under the tenant's name, because
 // the entry that named the live one is gone and the abort of a failed create withdraws none.
 // THE OBJECT-STORAGE BUCKET AND ITS DATA ARE DELIBERATELY KEPT — the plan SUMMARY says so plainly, and
@@ -126,7 +124,7 @@ import { tenantKeyName } from "./tenant-storage.ts";
 // ORDER — the two deletes are the teardown's `cascade`, so they run BEFORE its record step, not after
 // it. The record step flips the tenants + tenant_apps rows to that terminal status, and the flip must be
 // the LAST thing the purge does: a run that recorded the tenant settled and THEN failed its namespace
-// delete would leave the CR, the namespace, the Vault path, the object-storage credential and the Mongo
+// delete would leave the namespace, the Vault path, the object-storage credential and the Mongo
 // databases standing behind a row that says the tenant is gone — and a settled row is off the Tenants
 // list, has no removal on its detail page, and cannot be found by the orphan scan either (the first
 // teardown step already git-rm'd its pointer). That is precisely the settled-but-unfinished state
@@ -312,9 +310,9 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
       name: "delete-tenant-crypto",
       title: "Destroy the tenant's crypto entry in Vault",
       run: async (ctx) => {
-        // The inverse of create-tenant's seed-tenant-crypto. No reconciler's finalizer removes
-        // <stage>/tenants/<guid> when the Tenant CR is deleted, so the entry is destroyed HERE by the
-        // same identity that wrote it — a metadata delete, all versions.
+        // The inverse of create-tenant's seed-tenant-crypto. Nothing on the platform removes
+        // <stage>/tenants/<guid> on its own — no reconciler serves a tenant object — so the entry is
+        // destroyed HERE by the same identity that wrote it — a metadata delete, all versions.
         //
         // ALL VERSIONS, not the soft data delete: cas=0 is allowed only where no version information
         // remains, so a soft delete would leave the next tenant minted with this guid unable to be

@@ -93,7 +93,7 @@ export interface TenantOnboardPorts {
    *  cookies to (unit-dns.ts). */
   consumerHostLabels: () => Promise<string[]>;
   /** Makes the tenant first-admin invite call (create-tenant-activate.ts) over the tenant's public
-   *  example-auth ingress. Optional: only the `activate` step needs it, and only when the operator
+   *  identity-provider ingress. Optional: only the `activate` step needs it, and only when the operator
    *  supplied an admin email — a tenant onboarded without one never touches this port. Supplied WITH an
    *  admin email but absent ⇒ the step fails loud (a wiring gap, never a silent skip). It is the SAME
    *  HttpActivator instance the consumer onboard uses (wire-units.ts). */
@@ -110,8 +110,8 @@ export interface TenantOnboardPorts {
    *  ways: the registry host the fan-out's images are probed in (registryHostFromChain — the
    *  chain's profile carries zot.<build-plane>, so a cluster whose images are built on a foreign
    *  build plane resolves THAT registrations, never the master's), and the values every member chart is
-   *  RENDERED with (the tenant appsets layer this same chain at deploy, and example-lib.image
-   *  requires global.endpoints.registry.host from it — without the chain no member render can even
+   *  RENDERED with (the tenant appsets layer this same chain at deploy, and the member charts
+   *  require global.endpoints.registry.host from it — without the chain no member render can even
    *  resolve an image ref). */
   resolveClusterValueFiles: (domain: string, stage: Stage) => Promise<ClusterValueFile[]>;
   /** Writes the tenant's crypto entry `<stage>/tenants/<guid>` — the ONE Vault leaf every member
@@ -137,11 +137,11 @@ export interface TenantOnboardPorts {
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
 
-/** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: the
- *  Tenant CR's operator.hostyour.cloud/reset annotation — where a CHANGED value would tell a reconciler
- *  to drop the tenant's databases and restart its pods so the boot-seeds repopulate — has no
- *  reconciler serving it, so a data reset has no mechanism. The field stays because it is a mandatory
- *  part of the registration schema and whatever answers "what is a data reset" will key on it. */
+/** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: no
+ *  reconciler on this platform reads it, so nothing drops the tenant's databases and restarts its pods
+ *  for the boot-seeds to repopulate, and a data reset has no mechanism. The field stays because it is
+ *  a mandatory part of the registration schema and whatever answers "what is a data reset" will key
+ *  on it. */
 const INITIAL_RESET_NONCE = "1";
 
 /** The frozen create-tenant params: the operator's fields + everything the streaming plan resolved

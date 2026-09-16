@@ -4,7 +4,7 @@
 //
 // It runs LAST (after record-inventory): the whole fan-out is Synced/Healthy, smoke passed, and the
 // tenant is recorded, so a failed invite never rolls back a live deployment. It calls the tenant's OWN
-// example-auth first-admin bootstrap over the tenant's public ingress with the crypto-seeded bootstrap
+// identity provider's first-admin bootstrap over the tenant's public ingress with the crypto-seeded bootstrap
 // token — read straight from the k8s Secret on the target slave, never persisted — plus the operator's
 // admin email, and surfaces the returned activate_url + optional invite-mail outcome exactly like the
 // consumer step. adminEmail lives ONLY in the run params + this transient call: it is never written to
@@ -52,10 +52,10 @@ export function tenantActivateStep(ports: TenantOnboardPorts, p: CreateTenantPar
       if (!token) {
         throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — the tenant's crypto secret must exist after a green smoke; refusing to invite the first admin without it`);
       }
-      // The tenant auth ingress: <idp>-<stage>.<subdomain>.<unitApex> — the same parts the auth member's
-      // chart renders. The apex is read off the TARGET cluster's own values chain (the resolver
-      // provision-dns already composes the tenant's wildcard `*.<subdomain>.<unitApex>` from), so the
-      // host this posts to is one the wildcard covers and the ingress answers for.
+      // The tenant's identity-provider host: <idp>.<subdomain>.<stage apex> (shared/unit-host.ts
+      // tenantMemberHost) — the same host its chart renders the ingress for. The apex is read off the
+      // TARGET cluster's own values chain (the resolver provision-dns composes the tenant's wildcard
+      // `*.<subdomain>.<stage apex>` from), so the host this posts to is one the wildcard covers.
       const authFqdn = tenantMemberHost(p.identityProvider, p.stage, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage));
       const url = `https://${authFqdn}/api/v1/bootstrap/invite-admin`;
       // The token rides ONLY the declared header — never the URL, the body, or a log line.

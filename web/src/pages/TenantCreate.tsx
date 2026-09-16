@@ -2,6 +2,7 @@ import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import type { Stage } from "../../../shared/enums.ts";
 import { HOST_LABEL_RE } from "../../../shared/unit-host.ts";
+import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "../../../shared/unit-size.ts";
 import { listTenantTargets, listTenantAppCatalog, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
@@ -15,7 +16,7 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
  *  gate-by-gate and the operator approves the deploy. */
 export function TenantCreate() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "" });
+  const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
   // The app-type catalog (null = still loading) + the operator's multi-selection. The catalog is the
   // SOLE source of app names — a checkbox can only select a values-<app>.yaml overlay that exists in
   // catalog, which is exactly what the T4 "apps resolved" gate requires (no free text).
@@ -92,6 +93,7 @@ export function TenantCreate() {
         stage: form.stage as Stage,
         subdomain: form.subdomain.trim(),
         owner: form.owner.trim(),
+        size: form.size as UnitSize,
         // the checked catalog app-types + their two per-app seed tiers (buildCreateTenantBody trims + de-dupes)
         apps: [...selectedApps].map((name) => ({ name, seedReference: referenceApps.has(name), seedDemo: demoApps.has(name) })),
         seedUsers,
@@ -202,12 +204,26 @@ export function TenantCreate() {
             <input value={form.owner} onChange={set("owner")} placeholder="team-acme" required />
           </label>
           <label className="field">
+            <span className="field__label">Size</span>
+            <select value={form.size} onChange={set("size")} required>
+              {UNIT_SIZE.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <span className="field__hint">
+              The ceiling every member namespace of this tenant gets. What each size means on this installation is the
+              size table; the registration carries the figures as they stand when the plan is approved.
+            </span>
+          </label>
+          <label className="field">
             <span className="field__label">
               Admin email <em className="field__opt">optional</em>
             </span>
             <input type="email" value={form.adminEmail} onChange={set("adminEmail")} placeholder="admin@acme.test" />
             <span className="field__hint">
-              Once the tenant is live, its example-auth is invited to bootstrap this first administrator. The activation
+              Once the tenant is live, its identity provider is invited to bootstrap this first administrator. The activation
               link is shown once on the run screen and stored nowhere. Leave blank to invite an admin later.
             </span>
           </label>
@@ -219,9 +235,9 @@ export function TenantCreate() {
           </span>
           <span className="field__hint">
             Each app becomes a member of its own: namespace and Application{" "}
-            <code>&lt;guid&gt;-&lt;name&gt;-&lt;stage&gt;</code>, rendered from its{" "}
-            <code>charts/example-engine/values-&lt;name&gt;.yaml</code> overlay in catalog. Pick from the catalog
-            below — auth/jobs/report are reserved for the mandatory trio.
+            <code>&lt;guid&gt;-&lt;name&gt;-&lt;stage&gt;</code>, reached at <code>&lt;name&gt;.&lt;subdomain&gt;.&lt;stage apex&gt;</code>,
+            rendered from the product&apos;s per-app charts in catalog with its own <code>values-&lt;name&gt;.yaml</code> overlay.
+            Pick from the catalog below; the standing members every tenant has are not offered, they are always there.
           </span>
           {catalog === null ? (
             <span className="field__hint">Loading the app catalog…</span>

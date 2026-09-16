@@ -173,7 +173,7 @@ const CLUSTER_SCOPED_FORBIDDEN = new Set<string>([
   "CustomResourceDefinition", "PriorityClass", "ValidatingWebhookConfiguration",
   "MutatingWebhookConfiguration", "APIService", "IngressClass", "RuntimeClass",
   "ClusterIssuer", "ClusterSecretStore", "ClusterExternalSecret",
-  "Tenant", // the Manager provisions it (create-tenant); a chart-rendered twin would fight it
+  "Tenant", // no reconciler on this platform serves one, so a chart-rendered one is an object nothing owns
 ]);
 // Namespaced control-plane kinds a tenant chart may not mint for itself (it does not own the GitOps
 // layer — the Manager generates the fan-out Applications, never a chart).

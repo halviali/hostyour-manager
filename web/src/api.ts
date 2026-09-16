@@ -30,6 +30,7 @@ import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
 import type { AppProvenance, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
+import type { UnitSize } from "../../shared/unit-size.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
@@ -441,8 +442,8 @@ export interface TenantView {
   createdAt: number;
   updatedAt: number;
 }
-/** One app of the tenant's guid × apps[] matrix — a MEMBER of its own: namespace <guid>-<name>,
- *  AppProject <guid>-<name>, Application <guid>-<name>-<stage>. */
+/** One app of the tenant's guid × apps[] matrix — a MEMBER of its own: namespace, AppProject and
+ *  Application all named <guid>-<name>-<stage>, its host <name>.<subdomain>.<stage apex>. */
 export interface TenantAppView {
   id: string;
   name: string;
@@ -464,6 +465,8 @@ export interface TenantCreateForm {
   stage: Stage;
   subdomain: string;
   owner: string;
+  /** The tenant's size — the ceiling every member namespace of it gets (the wizard's size field). */
+  size: UnitSize;
   /** The selected app-types with their two per-app seed tiers: seedReference ⇒ reference
    *  data (roles, navigation → the operator app is usable), seedDemo ⇒ demo/sample records. Both
    *  default off. */
@@ -480,6 +483,7 @@ export interface CreateTenantBody {
   stage: Stage;
   subdomain: string;
   owner: string;
+  size: UnitSize;
   apps: { name: string; seedReference: boolean; seedDemo: boolean }[]; // per-app seed tiers; default off
   seedUsers: boolean; // flips the tenant IdP's user boot-seed
   adminEmail?: string; // OPTIONAL — omitted when the operator left the field blank
@@ -502,6 +506,7 @@ export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
     stage: f.stage,
     subdomain: f.subdomain.trim(),
     owner: f.owner.trim(),
+    size: f.size,
     apps,
     seedUsers: f.seedUsers,
     // Omit the field entirely when blank (never send adminEmail: "" — the server treats absent as "no invite").
@@ -512,7 +517,8 @@ export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
 export const listTenants = (): Promise<TenantView[]> => req<TenantView[]>("/api/tenants");
 export const listTenantTargets = (): Promise<TenantTargetView[]> => req<TenantTargetView[]>("/api/tenants/targets");
 /** The tenant app-type catalog (GET /api/tenants/app-catalog) — the app-types the create-tenant wizard
- *  offers as checkboxes, discovered from catalog charts/example-engine/values-<app>.yaml. The
+ *  offers as checkboxes, discovered from the values-<app>.yaml overlays beside the product's per-app
+ *  chart in catalog (server app-catalog.ts reads the chart directory off the fan-out manifest). The
  *  server route is fail-soft (empty when tenant onboarding is not wired or catalog is momentarily
  *  unreadable), so the wizard just shows an inline "catalog unavailable" note and can still onboard a
  *  tenant with no apps. */
@@ -583,7 +589,7 @@ export interface TenantInviteAdminResult {
 }
 /** (Re)send a tenant's first-admin invite (owner-approved invite+resend). Synchronous — unlike
  *  suspend/resume/offboard this returns the RESULT directly (activate_url + mail outcome), NOT a
- *  { runId }, because example-auth's bootstrap invite is a single-shot call the operator watches inline,
+ *  { runId }, because the tenant identity provider's bootstrap invite is a single-shot call the operator watches inline,
  *  not a plan-then-approve run. The email is PII, sent plaintext (not a secret via encodeSecrets); the
  *  returned activate_url is a credential the caller surfaces once and never persists. */
 export const inviteTenantAdmin = (tenantId: string, adminEmail: string): Promise<TenantInviteAdminResult> =>
