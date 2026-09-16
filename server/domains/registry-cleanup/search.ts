@@ -7,7 +7,7 @@
 // which version each platform app runs on one installation. Same walk, so the versions it reports
 // and the tags the reaper protects come from one picture of the branches, never two.
 //
-// The search space is three carrier classes, over EVERY stage:
+// The search space is four carrier classes, over EVERY stage:
 //
 //   (a) the deployable units. Their registrations stand on this installation's books branch in
 //       hostyour-cloud (shared/branches.ts) as registrations/<unit>/<stage>.yaml; each one that carries a chartPath points at the unit's OWN
@@ -25,6 +25,11 @@
 //       install branches. An install branch stands on the release a cluster actually runs, which can
 //       be OLDER than master, so reading master alone would leave the tags of running clusters
 //       unprotected.
+//   (d) the tenants' own apps bundles: catalog, registrations/<guid>/<stage>.yaml on EVERY branch
+//       (an installation's books). A tenant's `<subdomain>-apps` image is declared by no chart's
+//       builds[] and stands in no pins file: its pin is `appsImage` + `appsImageTag` on the tenant
+//       registration (shared/tenant.ts appsBundleFields, hostyour-manager#178), the one tag every
+//       engine of that tenant runs. The empty pair is a tenant without a bundle and pins nothing.
 //
 // FAIL-CLOSED throughout. A carrier that cannot be read aborts the whole search: an incomplete result
 // is indistinguishable from "nothing pins this", and acting on that difference is what deletes a live
@@ -33,6 +38,7 @@
 // (b) and (c) glob over directories, so a chart that carries no file for a stage is simply not a
 // carrier at that stage.
 import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
+import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import {
   parseBuildPins, stagePinFile, stagePinFiles, catalogPinFiles,
@@ -63,7 +69,7 @@ export interface SearchDeps {
   /** hostyour-cloud: the registrations on the books branch (class a's index) and clusters/inventories/* on every
    *  branch (class c). */
   cloud: CarrierRepo;
-  /** catalog: charts/* on every branch (class b). */
+  /** catalog: charts/* (class b) and registrations/* (class d) on every branch. */
   deploy: CarrierRepo;
   /** A unit's OWN repo, opened per unit under that unit's own read credential (class a). */
   unit: Pick<RepoReader, "cloneAtRef" | "readFile" | "dispose">;
@@ -100,9 +106,42 @@ const at = (repo: string, branch: string, path: string): string => `${repo}@${br
 export async function searchCarriers(deps: SearchDeps, signal?: AbortSignal): Promise<PinHit[]> {
   return [
     ...(await searchUnitCharts(deps, signal)),
-    ...(await searchGlob(deps.deploy, DEPLOY_LABEL, DEPLOY_CHARTS_DIR, catalogPinFiles())).hits,
+    ...(await searchCatalog(deps.deploy)),
     ...(await searchPlatformApps(deps.cloud)).hits,
   ];
+}
+
+/** Classes (b) and (d) in ONE walk of the catalog's branches: the chart pins and the tenant
+ *  registrations stand on the same branches, and a branch fetched twice is a branch fetched once
+ *  too often. */
+async function searchCatalog(deploy: CarrierRepo): Promise<PinHit[]> {
+  const hits: PinHit[] = [];
+  for (const branch of await deploy.listBranches()) {
+    await deploy.withBranch(branch.name, async (scope) => {
+      hits.push(...(await globPins(scope, DEPLOY_LABEL, branch.name, DEPLOY_CHARTS_DIR, catalogPinFiles())).hits);
+      hits.push(...(await tenantBundles(scope, branch.name)));
+    });
+  }
+  return hits;
+}
+
+/** Class (d) on ONE branch: the apps bundle of every tenant registration there. A registration that
+ *  fails its schema THROWS — an image without its tag is refused there, and a tenant demonstrably
+ *  runs, so its pin is not optional to know. The pin's `name` is the image: a bundle is one flat
+ *  build whose name IS its image (tenant-apps-tree.ts tenantAppsManifest). */
+async function tenantBundles(scope: BranchScope, branch: string): Promise<PinHit[]> {
+  const hits: PinHit[] = [];
+  for (const guid of await scope.listDir(REGISTRATIONS_DIR)) {
+    for (const stage of STAGE) {
+      const path = `${REGISTRATIONS_DIR}/${guid}/${stage}.yaml`;
+      const raw = await scope.readFile(path);
+      if (raw === null) continue;
+      const entry = TenantRegistrationSchema.parse(parseYaml(raw));
+      if (!entry.appsImage || !entry.appsImageTag) continue; // the empty pair: no bundle
+      hits.push({ carrier: at(DEPLOY_LABEL, branch, path), pin: { name: entry.appsImage, image: entry.appsImage, tag: entry.appsImageTag } });
+    }
+  }
+  return hits;
 }
 
 /**
@@ -207,17 +246,9 @@ async function searchGlob(
   for (const branch of await repo.listBranches()) {
     branches.push(branch.name);
     await repo.withBranch(branch.name, async (scope) => {
-      const charts = await scope.listDir(dir);
-      if (charts.length > 0) carrying += 1;
-      for (const chart of charts) {
-        for (const { file, stage } of files) {
-          const path = `${dir}/${chart}/${file}`;
-          const text = await scope.readFile(path);
-          if (text === null) continue;
-          const carrier = at(label, branch.name, path);
-          hits.push(...parseBuildPins(carrier, text).map((pin) => ({ carrier, pin, branch: branch.name, chart, stage })));
-        }
-      }
+      const read = await globPins(scope, label, branch.name, dir, files);
+      if (read.carrying) carrying += 1;
+      hits.push(...read.hits);
     });
   }
   if (opts.mustCarry === true && carrying === 0) {
@@ -229,4 +260,21 @@ async function searchGlob(
     );
   }
   return { branches, hits };
+}
+
+/** The pin files of every immediate child of `dir` on ONE branch, and whether the branch carries
+ *  anything under it at all. */
+async function globPins(scope: BranchScope, label: string, branch: string, dir: string, files: readonly PinFile[]): Promise<{ carrying: boolean; hits: GlobPinHit[] }> {
+  const hits: GlobPinHit[] = [];
+  const charts = await scope.listDir(dir);
+  for (const chart of charts) {
+    for (const { file, stage } of files) {
+      const path = `${dir}/${chart}/${file}`;
+      const text = await scope.readFile(path);
+      if (text === null) continue;
+      const carrier = at(label, branch, path);
+      hits.push(...parseBuildPins(carrier, text).map((pin) => ({ carrier, pin, branch, chart, stage })));
+    }
+  }
+  return { carrying: charts.length > 0, hits };
 }

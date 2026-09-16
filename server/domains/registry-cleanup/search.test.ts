@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import { searchCarriers, type CarrierRepo, type SearchDeps } from "./search.ts";
 import { pinKey } from "../../../shared/pin.ts";
 import { FakeCarrierRepo, FakeUnitRepo, stageRegistration, buildRegistration, pinFile, PLATFORM_APPS_DIR, platformAppPinPath } from "./carriers.fixture.ts";
+import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
+import { seedQuota } from "../../../shared/unit-size.ts";
+import { TEST_BUNDLE, testMembers } from "../units/tenant-members.fixture.ts";
+import { stringify as stringifyYaml } from "yaml";
 
 // The search is the ONE thing that decides what "pinned" means — for the release bump when it writes
 // and for the reaper's floor when it protects. These cases pin down the three carrier classes, the
@@ -33,7 +37,16 @@ function deps(over: Partial<SearchDeps> = {}): SearchDeps {
   return { cloud: cloudCarryingPlatformApps(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), ...over };
 }
 
-describe("searchCarriers — the three carrier classes", () => {
+/** A tenant registration as the Manager writes it, with or without its own apps bundle. */
+function tenantRegistration(bundle: boolean): string {
+  return stringifyYaml(TenantRegistrationSchema.parse({
+    cluster: "s1", subdomain: "acme", apps: [{ name: "erp" }], members: testMembers(["erp"]), identityProvider: "auth",
+    quota: seedQuota("small"), seedUsers: false, resetNonce: "1", suspended: false, quiesced: false,
+    ...(bundle ? TEST_BUNDLE : { appsImage: "", appsImageTag: "" }),
+  }));
+}
+
+describe("searchCarriers — the four carrier classes", () => {
   it("(a) reads a deployable unit's pins off its OWN deploy/<stage> branch, under its OWN credential", async () => {
     const cloud = cloudWithRegistrations();
     const unit = new FakeUnitRepo();
@@ -79,6 +92,20 @@ describe("searchCarriers — the three carrier classes", () => {
     // The install branch stands on an OLDER release than master; reading master alone would leave the
     // tag the running cluster actually pulls out of the answer.
     expect(new Set(hits.map((h) => pinKey(h.pin)))).toEqual(new Set(["manager:0.2.0", "manager:0.1.0"]));
+  });
+
+  it("(d) reads every tenant's own apps bundle off its registration on EVERY branch of the catalog — the empty pair pins nothing", async () => {
+    const deploy = new FakeCarrierRepo();
+    deploy.seed("c1.example.com", "registrations/zsjs023ctne0/prod.yaml", tenantRegistration(true));
+    deploy.seed("c2.example.com", "registrations/zsjs023ctne0/dev.yaml", tenantRegistration(true).replace(TEST_BUNDLE.appsImageTag, "0.2.0-stable-20260202000000-def5678"));
+    deploy.seed("c2.example.com", "registrations/q7q7q7q7q7q7/prod.yaml", tenantRegistration(false));
+
+    const hits = await searchCarriers(deps({ deploy }));
+
+    expect(hits.filter((h) => h.pin.image === "acme-apps").map((h) => [h.carrier, pinKey(h.pin)]).sort()).toEqual([
+      ["catalog@c1.example.com:registrations/zsjs023ctne0/prod.yaml", `acme-apps:${TEST_BUNDLE.appsImageTag}`],
+      ["catalog@c2.example.com:registrations/zsjs023ctne0/dev.yaml", "acme-apps:0.2.0-stable-20260202000000-def5678"],
+    ]);
   });
 
   it("reads a SUSPENDED unit like any other — a suspended deploy is resumable and its image stays live", async () => {
@@ -129,6 +156,12 @@ describe("searchCarriers — FAIL-CLOSED (a carrier it cannot read is never read
     cloud.seed(cloud.booksBranch, "registrations/broken/prod.yaml", 'name: "broken"\nrepoURL: "not-a-git-url"\n');
 
     await expect(searchCarriers(deps({ cloud }))).rejects.toBeTruthy();
+  });
+
+  it("a tenant registration naming an image without its tag ABORTS — a bundle nothing could protect", async () => {
+    const deploy = new FakeCarrierRepo();
+    deploy.seed("c1.example.com", "registrations/zsjs023ctne0/prod.yaml", tenantRegistration(true).replace(`appsImageTag: ${TEST_BUNDLE.appsImageTag}`, 'appsImageTag: ""'));
+    await expect(searchCarriers(deps({ deploy }))).rejects.toThrow(/appsRepo, appsImage and appsImageTag together/);
   });
 
   it("a pin that breaks the grammar ABORTS — a mis-keyed pin is a tag nothing would protect", async () => {
