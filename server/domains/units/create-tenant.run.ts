@@ -28,6 +28,7 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
+import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
@@ -138,6 +139,10 @@ export interface TenantOnboardPorts {
    *  so the plan re-releases a registered build unit and asks a PAT only for one it has never seen.
    *  Absent ⇒ every build unit reads as unregistered. */
   buildUnitRegistration?: (unit: string) => Promise<RegisteredUnit | null>;
+  /** The platform's GitHub App, installed in the organisation the tenant repositories are created in
+   *  (adapters/github-app). Absent ⇒ a run kind that creates a tenant's repository refuses at the
+   *  plan, naming the three config keys; every other tenant run kind is untouched. */
+  githubApp?: GitHubApp;
 }
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely

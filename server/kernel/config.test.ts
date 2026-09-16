@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { generateKeyPairSync } from "node:crypto";
 import { parseConfig, ConfigError, MAX_SOCKET_PATH_BYTES } from "./config.ts";
 
 const validEnv = {
@@ -190,6 +191,59 @@ describe("tenant onboarding config (catalog)", () => {
     const c = parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant", CATALOG_REPO: "acme/acme-catalog" });
     expect(c.catalog).toBeDefined();
     expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_MANAGER_ADDR, yet tenant config still resolves
+  });
+});
+
+describe("the platform's GitHub App identity (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY)", () => {
+  // A real key, in the PKCS#1 form GitHub issues, because the schema reads the PEM to refuse one
+  // this process cannot sign with — a made-up string would test the wrong refusal.
+  const PEM = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }) as string;
+  const trio = { GITHUB_APP_ID: "12345", GITHUB_APP_INSTALLATION_ID: "42", GITHUB_APP_PRIVATE_KEY: PEM };
+  const issues = (env: NodeJS.ProcessEnv): string => {
+    try {
+      parseConfig(env);
+      return "";
+    } catch (e) {
+      return (e as ConfigError).issues.join(" ");
+    }
+  };
+
+  it("stays ABSENT with none of the three — no run can create a tenant repository, and boot says nothing", () => {
+    expect(parseConfig(validEnv).githubApp).toBeUndefined();
+  });
+
+  it("carries all three through as githubApp", () => {
+    expect(parseConfig({ ...validEnv, ...trio }).githubApp).toEqual({ appId: "12345", installationId: "42", privateKey: PEM });
+  });
+
+  it("REFUSES a partial trio and names the keys that are missing", () => {
+    // An id without the key that signs for it, or a key without the installation it acts in,
+    // addresses nothing — and the operator reading the boot log must not have to diff three keys
+    // against a values file to learn which one the ExternalSecret dropped.
+    expect(() => parseConfig({ ...validEnv, GITHUB_APP_ID: "12345" })).toThrow(ConfigError);
+    const missingTwo = issues({ ...validEnv, GITHUB_APP_ID: "12345" });
+    expect(missingTwo).toContain("missing: GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY");
+    expect(missingTwo).not.toContain("missing: GITHUB_APP_ID");
+    const missingOne = issues({ ...validEnv, GITHUB_APP_ID: "12345", GITHUB_APP_PRIVATE_KEY: PEM });
+    expect(missingOne).toContain("missing: GITHUB_APP_INSTALLATION_ID");
+  });
+
+  it("restores the line breaks of a key that arrived with them written as backslash-n", () => {
+    // The road from a values file through Vault and an env var flattens a PEM to one line with the
+    // two characters backslash-n where each break was; the key is unreadable in that form.
+    const flattened = PEM.replaceAll("\n", "\\n");
+    expect(flattened).not.toContain("\n");
+    expect(parseConfig({ ...validEnv, ...trio, GITHUB_APP_PRIVATE_KEY: flattened }).githubApp?.privateKey).toBe(PEM);
+  });
+
+  it("refuses a key this process cannot read, BY NAME, at boot rather than at the first tenant", () => {
+    const bad = { ...validEnv, ...trio, GITHUB_APP_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nnot a key\n-----END RSA PRIVATE KEY-----" };
+    expect(() => parseConfig(bad)).toThrow(ConfigError);
+    expect(issues(bad)).toContain("GITHUB_APP_PRIVATE_KEY");
+  });
+
+  it("refuses an installation id that is not a number — it is a path segment of the GitHub API", () => {
+    expect(issues({ ...validEnv, ...trio, GITHUB_APP_INSTALLATION_ID: "example-org" })).toContain("GITHUB_APP_INSTALLATION_ID");
   });
 });
 

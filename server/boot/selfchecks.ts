@@ -16,6 +16,7 @@ import { readAnsiwisePin, ANSIWISE_PIN_PATH, ANSIWISE_PIN_BRANCH, ANSIWISE_PIN_K
 import { readInstallOrder, holdsInstallOrder, INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
 import { PROGRAM_STEP_PREFIX } from "../domains/runs/defs/ansiwise-run.kit.ts";
 import type { PlatformRepo } from "../adapters/git/port.ts";
+import type { GitHubApp } from "../adapters/github-app/port.ts";
 import { spaBytes } from "../http/spa.ts";
 import type { ReadyzView } from "../../shared/api-types.ts";
 
@@ -441,12 +442,46 @@ async function checkInstallOrder(platformRepo: PlatformRepo | undefined, runDefi
   }
 }
 
+/**
+ * DOES THIS MANAGER HOLD THE PLATFORM'S GITHUB APP IDENTITY, AND WHERE IS IT INSTALLED? The App is
+ * what creates a tenant's own repository, and its three-part identity arrives through Vault and an
+ * ExternalSecret like every platform secret — a road on which a key can be pasted with its line
+ * breaks lost, an installation id can name an installation the key does not sign for, and a
+ * suspended installation looks exactly like a working one until a run asks. This asks at boot: one
+ * read of the installation with the App's own JWT, which proves the key signs, the id resolves, and
+ * names the organisation the installation is bound to — the organisation every plan holds the
+ * catalog's `appsOrg` against. The organisation rides onto /readyz as the row's detail, so a person
+ * reading it sees WHICH organisation this manager creates repositories in and not only that it can.
+ *
+ * DEGRADING, for the reason the checks above state: it reaches a REMOTE, and a GitHub that is down
+ * must not take a Manager down with it. Without the identity it SKIPS and says so: the run kinds
+ * that need it refuse at the plan, and a green row here would claim an identity nobody configured.
+ */
+async function checkGitHubAppInstallation(githubApp: GitHubApp | undefined): Promise<CheckResult> {
+  const name = "github-app.installation";
+  if (!githubApp) {
+    return {
+      name,
+      kind: "skipped",
+      ok: false,
+      detail: "no GitHub App identity is configured on this manager (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY) — no run can create a tenant repository, and nothing was asked of GitHub",
+    };
+  }
+  try {
+    const org = await githubApp.installationOrg();
+    return { name, kind: "degrading", ok: true, detail: `installed in the organisation ${org}` };
+  } catch (e) {
+    return { name, kind: "degrading", ok: false, detail: messageOf(e) };
+  }
+}
+
 /** Async checks (jose is Promise-based, the platform-repo read is a git fetch). Run after
  *  runSelfChecks; results concat. `platformRepo` is optional exactly as the wiring has it —
  *  wire-units.ts builds the port only with config.github and a books branch behind it.
  *  `runDefinitions` is optional for the same shape of reason: a check that holds a run kind against
- *  the platform's declaration has nothing to hold without one. */
-export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo; runDefinitions?: RunDefinitions }): Promise<CheckResult[]> {
+ *  the platform's declaration has nothing to hold without one. `githubApp` is optional as
+ *  config.githubApp is. */
+export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo; runDefinitions?: RunDefinitions; githubApp?: GitHubApp }): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   try {
     const codec = new SessionCodec(deps.db.db, deps.config);
@@ -461,17 +496,26 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; p
   results.push(await checkDeployStateNameMirror(deps.platformRepo));
   results.push(await checkAnsiwisePinReadable(deps.platformRepo));
   results.push(await checkInstallOrder(deps.platformRepo, deps.runDefinitions));
+  results.push(await checkGitHubAppInstallation(deps.githubApp));
   return results;
 }
 
 /** What /readyz answers: 503 while a BLOCKING check is red (a degrading one never takes the process
  *  out of rotation), and the name+verdict of every check that MEASURED something. A skipped check is
  *  left out — listed green it would claim a measurement that did not happen, listed red it would
- *  alarm on a configuration this platform supports. Its detail is said once, in the boot log. */
+ *  alarm on a configuration this platform supports. Its detail is said once, in the boot log.
+ *
+ *  A PASSING check's detail rides along, because that detail is what the check MEASURED — the
+ *  organisation the GitHub App is installed in, the version the engine is pinned at — and /readyz
+ *  is where a person asks a running Manager what it holds. A FAILING check's detail stays in the
+ *  boot log: it is an error message that names files and literals, and /readyz is served before the
+ *  chokepoint, to anyone. */
 export function readinessOf(checks: CheckResult[]): ReadyzView {
   return {
     ok: checks.every((c) => c.kind !== "blocking" || c.ok),
-    checks: checks.filter((c) => c.kind !== "skipped").map((c) => ({ name: c.name, ok: c.ok })),
+    checks: checks
+      .filter((c) => c.kind !== "skipped")
+      .map((c) => ({ name: c.name, ok: c.ok, ...(c.ok && c.detail !== undefined ? { detail: c.detail } : {}) })),
   };
 }
 

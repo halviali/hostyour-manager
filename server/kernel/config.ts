@@ -1,3 +1,4 @@
+import { createPrivateKey } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import { STAGE } from "../../shared/enums.ts";
@@ -156,6 +157,28 @@ const EnvSchema = z.object({
   // non-standard cluster.
   GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
   BUILD_EVENTLISTENER_SUBDOMAIN: z.string().min(1).default("build"),
+  // THE PLATFORM'S OWN GITHUB IDENTITY — a GitHub App installed in the organisation the tenant
+  // repositories are created in (adapters/github-app). The three values come from Vault
+  // <stage>/app/github-app via the manager's own ExternalSecret (the seeder is write-only, so like
+  // GITHUB_WEBHOOK_SECRET they arrive as env, never as a Vault read-back). ALL THREE OR NONE — an id
+  // without the key that signs for it, or a key without the installation it acts in, addresses
+  // nothing, and the refusal names the ones that are missing. Absent ⇒ the run kinds that create a
+  // tenant repository refuse at the plan, and the readiness row for the App is not listed.
+  //
+  // The key is a PEM, and a PEM crosses a values file, a Vault entry and an env var before it gets
+  // here: a writer along that road escapes its line breaks as the two characters `\n`, so those are
+  // put back before the key is read, and a key node's crypto cannot read is refused HERE by name,
+  // not at the first tenant.
+  GITHUB_APP_ID: z.string().min(1).optional(),
+  GITHUB_APP_INSTALLATION_ID: z.string().regex(/^\d+$/, "GITHUB_APP_INSTALLATION_ID must be the installation's numeric id — it is a path segment of the GitHub API").optional(),
+  GITHUB_APP_PRIVATE_KEY: z.string().min(1).transform((pem) => pem.replaceAll("\\n", "\n")).refine((pem) => {
+    try {
+      createPrivateKey(pem);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "GITHUB_APP_PRIVATE_KEY is not a private key this process can read — it must be the PEM GitHub issued for the App, line breaks intact or written as \\n").optional(),
   // The unit DNS record: the DNS-only Cloudflare token from secret/<stage>/app/cloudflare-dns,
   // fed to the manager as env off the manager-cloudflare-dns ExternalSecret's Secret. Set ⇒ the
   // DnsProvider is wired and the provision-dns/remove-dns steps work; unset ⇒ those steps fail LOUD
@@ -301,7 +324,19 @@ const EnvSchema = z.object({
 }).refine((e) => Boolean(e.CLOUDFLARE_R2_API_TOKEN) === Boolean(e.CLOUDFLARE_R2_ACCOUNT_ID), {
   message: "CLOUDFLARE_R2_API_TOKEN and CLOUDFLARE_R2_ACCOUNT_ID must be set together (a token addresses nothing without the account it manages, and an account nothing can be created in)",
   path: ["CLOUDFLARE_R2_API_TOKEN"],
+}).refine((e) => missingGitHubAppKeys(e).length === 0, {
+  error: (issue) => `GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY must be set together (the App's identity needs all three, or none) — missing: ${missingGitHubAppKeys(issue.input as GitHubAppEnv).join(", ")}`,
+  path: ["GITHUB_APP_ID"],
 });
+
+type GitHubAppEnv = { GITHUB_APP_ID?: string | undefined; GITHUB_APP_INSTALLATION_ID?: string | undefined; GITHUB_APP_PRIVATE_KEY?: string | undefined };
+
+/** The keys of the App trio a partial configuration left out — empty for none set and for all set. */
+function missingGitHubAppKeys(e: GitHubAppEnv): string[] {
+  const keys = ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"] as const;
+  const missing = keys.filter((k) => !e[k]);
+  return missing.length === keys.length ? [] : missing;
+}
 
 export interface Config {
   publicUrl: string;
@@ -396,6 +431,15 @@ export interface Config {
   webhook: {
     subdomain: string;
     secret?: string;
+  };
+  /** Present ⇒ the platform's GitHub App identity is wired (adapters/github-app): the App's id, the
+   *  installation in the organisation the tenant repositories are created in, and the PEM private
+   *  key its JWT is signed with (line breaks restored). Absent ⇒ the run kinds that create a tenant
+   *  repository refuse at the plan, and the readiness row for the App is not listed. */
+  githubApp?: {
+    appId: string;
+    installationId: string;
+    privateKey: string;
   };
   /** Present ⇒ the unit DNS provider is wired: the DNS-only Cloudflare token the
    *  provision-dns/remove-dns steps manage the one record per unit with. Absent ⇒ those steps fail
@@ -553,6 +597,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
       subdomain: e.BUILD_EVENTLISTENER_SUBDOMAIN,
       ...(e.GITHUB_WEBHOOK_SECRET ? { secret: e.GITHUB_WEBHOOK_SECRET } : {}),
     },
+    // The refine above guarantees the three together; the triple guard narrows them. The key's
+    // line breaks were restored by the schema, so what rides here is the PEM as GitHub issued it.
+    ...(e.GITHUB_APP_ID && e.GITHUB_APP_INSTALLATION_ID && e.GITHUB_APP_PRIVATE_KEY
+      ? { githubApp: { appId: e.GITHUB_APP_ID, installationId: e.GITHUB_APP_INSTALLATION_ID, privateKey: e.GITHUB_APP_PRIVATE_KEY } }
+      : {}),
     ...(e.CLOUDFLARE_DNS_API_TOKEN ? { dns: { cloudflareApiToken: e.CLOUDFLARE_DNS_API_TOKEN } } : {}),
     // The refine above guarantees the three together; the triple guard narrows them.
     ...(e.STORAGE_BOX_HOST && e.STORAGE_BOX_USER && e.STORAGE_BOX_PASSWORD

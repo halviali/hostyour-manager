@@ -21,6 +21,7 @@ import { DEPLOY_STATE_VALUES_BRANCH, DEPLOY_STATE_VALUES_PATH } from "../domains
 import { DEPLOY_STATE_CONFIGMAP } from "../../shared/deploy-state.ts";
 import { PRODUCT_BRANCH } from "../../shared/branches.ts";
 import { INSTALL_ORDER_PATH } from "../domains/inventory/install-order.ts";
+import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf } from "./selfchecks.ts";
 
 const BASE_ENV = {
@@ -318,7 +319,8 @@ describe("boot self-checks", () => {
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(true);
     expect(check?.detail).toContain("0.4.2");
-    expect(readinessOf(results).checks).toContainEqual({ name: "ansiwise.pin_readable", ok: true });
+    // What a passing check measured rides onto /readyz as the row's detail.
+    expect(readinessOf(results).checks).toContainEqual({ name: "ansiwise.pin_readable", ok: true, detail: check?.detail });
   });
 
   // THE COUNTER-PROBE, and it is this ticket's own defect: the file where this Manager looked before
@@ -419,6 +421,44 @@ describe("boot self-checks", () => {
     const check = results.find((r) => r.name === "install-order.agrees");
     expect(check?.kind).toBe("skipped");
     expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("install-order.agrees");
+  });
+
+  // DOES THIS MANAGER HOLD THE PLATFORM'S GITHUB APP IDENTITY, AND WHERE IS IT INSTALLED? One read of
+  // the installation with the App's own JWT at boot, so a key pasted without its line breaks or an
+  // installation the key does not sign for is a red row on /readyz and not a failed tenant run.
+  it("github-app.installation is GREEN and NAMES the organisation on /readyz when the identity resolves", async () => {
+    const { db } = fresh();
+    const githubApp = new FakeGitHubApp();
+    githubApp.org = "example-org";
+    const results = await runAsyncSelfChecks({ db, config, githubApp });
+    const check = results.find((r) => r.name === "github-app.installation");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(true);
+    expect(readinessOf(results).checks).toContainEqual({ name: "github-app.installation", ok: true, detail: "installed in the organisation example-org" });
+  });
+
+  it("github-app.installation is RED, boot goes on, and the reason stays OFF /readyz when GitHub refuses the identity", async () => {
+    const { db } = fresh();
+    const githubApp = new FakeGitHubApp();
+    githubApp.failWith = new Error("GitHub GET /app/installations/42 → 401: A JSON web token could not be decoded");
+    const results = await runAsyncSelfChecks({ db, config, githubApp });
+    const check = results.find((r) => r.name === "github-app.installation");
+    expect(check?.kind).toBe("degrading");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("could not be decoded");
+    expect(() => assertBlockingChecksPass(results)).not.toThrow();
+    // A failing check's detail is an error message for the boot log; /readyz is public.
+    expect(readinessOf(results).checks).toContainEqual({ name: "github-app.installation", ok: false });
+  });
+
+  it("github-app.installation SKIPS without the identity instead of reporting a pass, naming the three keys", async () => {
+    const { db } = fresh();
+    const results = await runAsyncSelfChecks({ db, config });
+    const check = results.find((r) => r.name === "github-app.installation");
+    expect(check?.kind).toBe("skipped");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("GITHUB_APP_PRIVATE_KEY");
+    expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("github-app.installation");
   });
 
   it("the append-only probe leaves no sentinel row behind (rolled back)", () => {

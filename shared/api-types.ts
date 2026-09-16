@@ -392,10 +392,11 @@ export interface ReleasesView {
   reason?: "onboarding-not-configured";
 }
 
-/** /readyz response — the degrading self-checks surface. */
+/** /readyz response — the degrading self-checks surface. A row's `detail` is present only on a
+ *  passing check and is what that check measured (boot/selfchecks.ts readinessOf). */
 export interface ReadyzView {
   ok: boolean;
-  checks: { name: string; ok: boolean }[];
+  checks: { name: string; ok: boolean; detail?: string }[];
 }
 
 /** Public /healthz payload. `version` is the running image tag (the Deployment's

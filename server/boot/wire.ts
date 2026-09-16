@@ -34,6 +34,7 @@ import { registerDnsRoutes } from "../domains/dns/api.ts";
 import { readDnsInventory, type DnsInventoryDeps } from "../domains/dns/dns-inventory.ts";
 import { DohPublicDns } from "../adapters/dns/public-dns.ts";
 import { createGitHubPlatform } from "../adapters/github-platform/github-platform-http.ts";
+import { HttpGitHubApp } from "../adapters/github-app/github-app-http.ts";
 import { registerBranchRoutes } from "../domains/branches/api.ts";
 import { registerReleaseRoutes } from "../domains/releases/api.ts";
 import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
@@ -121,7 +122,12 @@ export async function wire(): Promise<Wired> {
     openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
     buildClusterReader: (input) => new KubeClusterReader(input),
   });
-  const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver });
+  // THE PLATFORM'S GITHUB APP IDENTITY — one client, one token cache, built here because two things
+  // hold it: the tenant family creates a tenant's own repository with it, and the readiness check
+  // below names the organisation it is installed in. Absent when the three GITHUB_APP_* keys are —
+  // the run kinds that need it then refuse at the plan, and the readiness row is not listed.
+  const githubApp = config.githubApp ? new HttpGitHubApp(config.githubApp) : undefined;
+  const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver }, githubApp);
   // The mail DNS of the installation, measured at public resolvers: the Mail page's deps, and the
   // mail half of the DNS inventory below — one measurement, so the two pages can never disagree
   // about one record. The units' DNS provider gives the master's egress address (its own A record)
@@ -230,7 +236,7 @@ export async function wire(): Promise<Wired> {
   // then skips instead of reporting a comparison it never made.
   const checks = [
     ...runSelfChecks({ db, config, store, bus, runDefinitions }),
-    ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}) })),
+    ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(githubApp ? { githubApp } : {}) })),
   ];
   phase("self-checks");
   assertBlockingChecksPass(checks);

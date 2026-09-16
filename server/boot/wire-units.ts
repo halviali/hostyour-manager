@@ -30,6 +30,7 @@ import { HttpActivator } from "../adapters/activation/activation-http.ts";
 import type { Activator } from "../adapters/activation/port.ts";
 import { HttpGitHubConsumer } from "../adapters/github-consumer/github-consumer-http.ts";
 import type { GitHubConsumer } from "../adapters/github-consumer/port.ts";
+import type { GitHubApp } from "../adapters/github-app/port.ts";
 import { HelmCliRenderer } from "../adapters/helm/helm.ts";
 import { Registrations } from "../domains/units/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
@@ -214,6 +215,11 @@ export function buildUnits(
    *  resolver from the same input puts both behind that family's configuration guard, and a cluster
    *  run kind then has no way to reach one at all. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
+  /** The platform's GitHub App identity, built in the composition root beside the kube trio and for
+   *  the same reason: the boot self-check names its installation organisation, and a family building
+   *  its own would put that identity behind the family's configuration guard. Absent when
+   *  config.githubApp is. */
+  githubApp?: GitHubApp,
 ): UnitsWiring {
   // ONE activation client for the whole manager — a plain fetch to a consumer's / tenant's OWN public
   // ingress (no config gate; the target host is the unit's own). Constructed here and shared by BOTH
@@ -304,7 +310,7 @@ export function buildUnits(
   // CONSUMER'S BUILD CHAIN per build unit it lacks (tenant-builds.ts) — so the consumer ports reach it
   // through a holder filled once both stand. The tenant defs read it at run time, never at wiring.
   const lateBuild: { deps?: TenantBuildDeps } = {};
-  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps);
+  const tenant = buildTenantOnboarding(config, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, githubApp);
   const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube);
   if (consumer.onboardPorts) {
     lateBuild.deps = {
@@ -584,6 +590,8 @@ function buildTenantOnboarding(
   /** The consumer onboarding's ports, handed late: the tenant defs run its build-only chain per build
    *  unit a tenant lacks (tenant-builds.ts), and that family is wired after this one. */
   onboard: () => TenantBuildDeps | undefined,
+  /** The platform's GitHub App — the identity a tenant's own repository is created with. */
+  githubApp: GitHubApp | undefined,
 ): Family {
   // The platform repo coordinates are required: every member AppProject must allow the `$values`
   // source its Application pulls from, and a project written without it would fail every sync.
@@ -720,6 +728,9 @@ function buildTenantOnboarding(
       }
       return null;
     },
+    // Creates a tenant's own repository in the organisation the App is installed in. Absent ⇒ the run
+    // kind that needs it refuses at the plan, naming the three config keys.
+    ...(githubApp ? { githubApp } : {}),
   };
   // remove-app + tenant-suspend/-resume/-offboard only flip/drop the pointer + watch the fan-out — no
   // clone/render, so they take the narrower lifecycle port set (registrations + resolver).
