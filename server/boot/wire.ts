@@ -4,6 +4,7 @@ import { runActor } from "../kernel/actor.ts";
 import { createLogger, type Logger } from "../kernel/logger.ts";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, type CheckResult } from "./selfchecks.ts";
+import { bootPhases } from "./boot-phases.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
 import { seedUnitSizes } from "../domains/units/unit-size.ts";
@@ -91,11 +92,16 @@ export function carryCatalogTrunkLater(carry: (() => Promise<void>) | undefined,
 export async function wire(): Promise<Wired> {
   const config = loadConfig();
   const logger = createLogger(config);
+  // One line per boot phase with its duration (boot-phases.ts): the phase that holds the port
+  // shut on a slow boot has a name in the log.
+  const phase = bootPhases(logger);
   const db = openDb(config.dbFile);
+  phase("database");
   // Secrets backend: Vault when configured (prod), else a local keyfile-encrypted
   // store (dev). Either way the store API is identical to every caller, and one of the two is
   // always supplied (boot/store-backend.ts).
   const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config) });
+  phase("credential store");
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
   // Tekton gate-runner config (ONBOARD_GATE_MANAGER_ADDR) + platform repo are both configured
@@ -157,6 +163,7 @@ export async function wire(): Promise<Wired> {
     sshFactory: createSshSession,
     actor: runActor,
   });
+  phase("units, run definitions and executor");
   // Master self-registration (seed-master.ts): make a fresh DB carry the role=master row +
   // its self-SSH key so deploy-slave works with zero manual SQL. If the ESO secret is late, or the
   // credential store cannot be reached, a background reconcile inside seedMaster keeps converging
@@ -169,6 +176,7 @@ export async function wire(): Promise<Wired> {
   // single replica — the same dependency seed-master.ts states for its own reconcile.
   scheduleTenantCheck(executor, logger);
   await seedMaster(db.db, store, config, logger);
+  phase("master seed");
   // The catalog's books branch, brought into being and up to the catalog's trunk by boot — behind
   // the listening server, see Wired.carryCatalogTrunk — rather than at the first tenant
   // registration (wire-units.ts carryTrunkToBooksBranch); every tenant plan carries it again.
@@ -178,6 +186,7 @@ export async function wire(): Promise<Wired> {
   // size keeps its figures across every restart — the same rule the Vault seeder follows, and for the
   // same reason: a re-run must never silently re-price a unit that is already running on a value.
   const seededSizes = seedUnitSizes(db.db);
+  phase("unit sizes");
   if (seededSizes.length > 0) logger.info({ sizes: seededSizes }, "unit size table seeded");
   // The platform repo rides into the async checks because one of them reads it: the release grammar
   // the Manager enforces against the build plane's copy of it (selfchecks.ts,
@@ -188,6 +197,7 @@ export async function wire(): Promise<Wired> {
     ...runSelfChecks({ db, config, store, bus, runDefinitions }),
     ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}) })),
   ];
+  phase("self-checks");
   assertBlockingChecksPass(checks);
   // A blocking failure has thrown by now, so what is left is what boot goes on WITH. /readyz carries
   // only a check's name and verdict, so the detail — which literals differ, which file could not be
@@ -199,6 +209,7 @@ export async function wire(): Promise<Wired> {
   const session = new SessionCodec(db.db, config);
   const loginTx = new LoginTxCodec(db.db);
   const oidc = createOidcAdapter(config, logger);
+  phase("oidc");
   // GitHub adapter — ONE instance for Branches + Reset. Absent when GITHUB_REPO/GITHUB_WRITE_PAT
   // are unset — the routes then answer 501 NOT_CONFIGURED, never a quiet no-op.
   const github = config.github ? createGitHubPlatform(config.github) : undefined;
@@ -259,6 +270,7 @@ export async function wire(): Promise<Wired> {
       registerSpa(a, spaDistDir()); // LAST — the SPA fallback is the catch-all
     },
   });
+  phase("http app");
   return {
     config,
     logger,
