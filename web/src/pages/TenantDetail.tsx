@@ -1,13 +1,16 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { RunView } from "../../../shared/api-types.ts";
+import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
-  getTenant, addTenantApp, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
+  getTenant, getTenantAppCatalog, addTenantApp, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
   setTenantSize,
   backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
   type TenantDetailView,
 } from "../api.ts";
 import { tenantRowOffer } from "../tenantRows.ts";
+import { tenantAppRows } from "../tenantAppRows.ts";
+import { TenantAddAppForm, type TenantAddAppChoice } from "../components/TenantAddAppForm.tsx";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
@@ -18,8 +21,10 @@ import { TenantStatusBadge, UnfinishedTenantNotice } from "../components/TenantS
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Per-tenant detail. Renders the guid × apps[] matrix as a row list, an inline
- *  add-app control that fans ONE new app into the live tenant, and the tenant-wide lifecycle actions
+/** Per-tenant detail. Renders the apps of the tenant's OWN bundle (its repository's apps.yaml, read
+ *  by GET /api/tenants/:id/app-catalog) folded with the inventory's per-app rows, each marked deployed
+ *  or not (tenantAppRows.ts); the add-app control (TenantAddAppForm) offers the undeployed ones with
+ *  their selections and fans ONE into the live tenant; and the tenant-wide lifecycle actions
  *  (suspend / resume / offboard). Every action plans a Run and hands off to the generic Run screen —
  *  add-app streams the T1..T4 subset validation; remove-app and the lifecycle triggers plan
  *  synchronously. Offboard is guarded by a typed-guid confirm: it prunes the whole fan-out, so the
@@ -54,7 +59,9 @@ export function TenantDetail() {
   const nav = useNavigate();
   const [tenant, setTenant] = useState<TenantDetailView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [newApp, setNewApp] = useState("");
+  // The tenant's own catalog (null = still loading). Its read is not load-bearing for the page: a
+  // transport failure lands as the view's own `error`, which the list and the control render.
+  const [catalog, setCatalog] = useState<TenantAppCatalogView | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeApp, setRemoveApp] = useState<string | null>(null);
   const [offboardT, setOffboardT] = useState<TenantDetailView | null>(null);
@@ -74,6 +81,9 @@ export function TenantDetail() {
     getTenant(tenantId)
       .then(setTenant)
       .catch((e: unknown) => setError(msg(e)));
+    getTenantAppCatalog(tenantId)
+      .then(setCatalog)
+      .catch((e: unknown) => setCatalog({ apps: [], error: msg(e) }));
     // The band is contextual, never load-bearing: a failed runs read leaves the page intact.
     listRuns()
       .then(setRuns)
@@ -94,12 +104,10 @@ export function TenantDetail() {
     }
   }
 
-  async function submitAddApp(e: FormEvent): Promise<void> {
-    e.preventDefault();
-    const app = newApp.trim();
-    if (!app) return;
-    await act(() => addTenantApp(tenantId, app));
-  }
+  const addApp = (choice: TenantAddAppChoice): void => {
+    const { name, ...selections } = choice;
+    void act(() => addTenantApp(tenantId, name, selections));
+  };
 
   if (error && !tenant)
     return (
@@ -202,53 +210,45 @@ export function TenantDetail() {
       </div>
 
       <h3 className="steps-panel__title">Apps</h3>
-      {t.apps.length === 0 ? (
-        <div className="empty">
-          <p>No apps yet — this tenant runs only its mandatory trio: auth, jobs and report.</p>
-        </div>
-      ) : (
-        <ul className="rows">
-          {t.apps.map((a) => (
-            <li key={a.id}>
-              <div className="row">
-                <TenantStatusBadge status={a.status} />
-                <span className="row__title">{a.name}</span>
-                <span className="row__meta">{t.guid}-{a.name}-{t.stage}</span>
-                <span className="row__end">
-                  {a.lastRunId && (
-                    <Link className="btn" to={`/runs/${a.lastRunId}`}>
-                      Last run →
-                    </Link>
-                  )}
-                  {/* The per-app remove, gated by the SAME shared status rule as everything else on this
-                      page: an app row that a remove-app or a tenant-wide removal already settled
-                      ("offboarded" or "purged") has no Application left to prune. */}
-                  {!settled && !unfinished && !tenantRowOffer(a.status).settled && (
-                    <button type="button" className="btn btn--danger" disabled={busy} onClick={() => setRemoveApp(a.name)}>
-                      Remove
-                    </button>
-                  )}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* The bundle's apps lead, deployed or not; an inventory row the bundle no longer names follows.
+          While the catalog is unreadable the list is the inventory alone, and the control below says why. */}
+      {(() => {
+        const rows = tenantAppRows(catalog?.apps ?? [], t.apps);
+        return rows.length === 0 ? (
+          <div className="empty">
+            <p>No apps yet — this tenant runs only its standing members.</p>
+          </div>
+        ) : (
+          <ul className="rows">
+            {rows.map((r) => (
+              <li key={r.name}>
+                <div className="row">
+                  {r.row ? <TenantStatusBadge status={r.row.status} /> : <span className="chip">{r.deployed ? "deployed" : "in the bundle"}</span>}
+                  <span className="row__title">{r.entry ? `${r.entry.title} (${r.name})` : r.name}</span>
+                  <span className="row__meta">{r.deployed ? `${t.guid}-${r.name}-${t.stage}` : "not deployed"}</span>
+                  <span className="row__end">
+                    {r.row?.lastRunId && (
+                      <Link className="btn" to={`/runs/${r.row.lastRunId}`}>
+                        Last run →
+                      </Link>
+                    )}
+                    {/* The per-app remove, gated by the SAME shared status rule as everything else on this
+                        page: an app row that a remove-app or a tenant-wide removal already settled
+                        ("offboarded" or "purged") has no Application left to prune. */}
+                    {r.row && !settled && !unfinished && !tenantRowOffer(r.row.status).settled && (
+                      <button type="button" className="btn btn--danger" disabled={busy} onClick={() => setRemoveApp(r.name)}>
+                        Remove
+                      </button>
+                    )}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        );
+      })()}
 
-      {!settled && !unfinished && (
-        <form className="actions" onSubmit={submitAddApp}>
-          <input
-            className="input"
-            value={newApp}
-            onChange={(e) => setNewApp(e.target.value)}
-            placeholder="new app name (e.g. web)"
-            pattern="[a-z][a-z0-9-]{0,28}[a-z0-9]"
-          />
-          <button type="submit" className="btn btn--primary" disabled={busy || !newApp.trim()}>
-            Add app
-          </button>
-        </form>
-      )}
+      {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} />}
 
       {!settled && (
         <div className="actionbar">

@@ -26,7 +26,7 @@ import type {
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
-import type { AppsManifest } from "../../shared/apps-manifest.ts";
+import type { AppsManifest, TenantAppCatalogView } from "../../shared/apps-manifest.ts";
 // The DNS inventory the /dns page renders and the one act it offers. Declared ONCE in shared/dns.ts
 // and answered in that shape by the server's own domain module, for the reason the block above
 // states: there is no browser-side twin left to fall behind a server change.
@@ -559,6 +559,10 @@ export const listTenantTargets = (): Promise<TenantTargetView[]> => req<TenantTa
  *  "catalog unavailable" note and can still onboard a tenant with no apps. */
 export const listTenantAppCatalog = (): Promise<AppsManifest> => req<AppsManifest>("/api/tenants/app-catalog");
 export const getTenant = (id: string): Promise<TenantDetailView> => req<TenantDetailView>(`/api/tenants/${id}`);
+/** ONE tenant's own catalog (GET /api/tenants/:id/app-catalog): the apps its bundle's apps.yaml
+ *  carries, each marked deployed. The route degrades with `reason` or `error` (shared/apps-manifest.ts
+ *  TenantAppCatalogView), and the tenant page renders whichever is set instead of "no apps". */
+export const getTenantAppCatalog = (id: string): Promise<TenantAppCatalogView> => req<TenantAppCatalogView>(`/api/tenants/${id}/app-catalog`);
 export const getTenantLive = (id: string): Promise<TenantLiveView> => req<TenantLiveView>(`/api/tenants/${id}/live`);
 export const createTenant = (form: TenantCreateForm): Promise<{ runId: string }> =>
   post<{ runId: string }>("/api/tenants", buildCreateTenantBody(form) as unknown as Record<string, unknown>);
