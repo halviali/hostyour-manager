@@ -9,9 +9,9 @@ import type { TenantPurgeInput } from "../../../shared/api-types.ts";
 import { guid as guidSchema } from "../../../shared/tenant.ts";
 import { assertDeployState, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { assertTenantNotLive, type TenantLiveRefusal } from "./tenant-live-guard.ts";
-import { memberNamespace } from "./tenant-fanout.ts";
+import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
-import { tenantLocks, tenantSelector } from "./tenant-lifecycle.run.ts";
+import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
@@ -217,22 +217,28 @@ function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
   return { guid: p.guid, domain: row.domain, stage: p.stage, clusterId: row.id, cluster: clusterShortName(row.domain) };
 }
 
-/** The teardown target for a guid NEITHER source knows — no tenants row AND no live registration (a
- *  create-tenant that died BEFORE write-registration, or an earlier purge that removed the registration
- *  and then failed). resolveTeardownTarget returns null there, but the CLUSTER footprint can still
- *  stand: every member namespace and AppProject is named <guid>-<member> and the Vault entry is named by
- *  the guid ALONE, so the purge still reaps them. Nothing to git-rm (the remove step skips an absent
- *  registration) and no fan-out to wait for (watchNames []).
+/** The teardown target for a guid NEITHER live source knows — no live tenants row AND no live
+ *  registration (a create-tenant that died BEFORE write-registration, an earlier purge that removed the
+ *  registration and then failed, or the purge that follows an offboard, whose row is settled).
+ *  resolveTeardownTarget returns null there, but the CLUSTER footprint can still stand: every member
+ *  namespace and AppProject is named <guid>-<member>-<stage> and the Vault entry is named by the guid
+ *  ALONE, so the purge still reaps them. Nothing to git-rm (the remove step skips an absent
+ *  registration).
  *
- *  `members` is EMPTY, because nothing here knows them. A hardcoded trio is only
- *  ever true of one product's tenants — a purge of a tenant of any other would name three
- *  members it does not have and miss every one it does. Emptiness is the honest answer and it costs
- *  nothing that matters: the namespace reap asks the CLUSTER by label, which finds every member
- *  namespace including the ones no source names.
- *  The subdomain is likewise unknowable — only the registration or the row carries it — so it is left
- *  empty; remove-dns reads the emptiness as "no record was ever provisioned" (the registration write
- *  follows provision-dns, so a guid neither source knew never got one) and removes nothing. */
-function unresolvedTeardownTarget(c: TenantPurgeCluster): TenantTeardownTarget {
+ *  `members` is what the inventory still records under this guid (tenantTeardownMembers): a settled
+ *  row keeps its standing members and every app row, and each of them had an AppProject and an
+ *  admission policy that no prune and no status flip ever removed — the purge after an offboard is
+ *  the one run that takes them down. Where the inventory never recorded the tenant it is EMPTY, and
+ *  that is the honest answer: a hardcoded trio is only ever true of one product's tenants, and the
+ *  namespace reap asks the CLUSTER by label, which finds every member namespace including the ones no
+ *  source names. `watchNames` follows the members: an Application that still lingers under this guid
+ *  is what the settle guard has to see, and one long pruned reads Missing at once.
+ *  The subdomain is deliberately NOT read off a settled row: the wildcard `*.<subdomain>.<stage apex>`
+ *  may by now belong to a tenant that took the subdomain after this one was offboarded, and remove-dns
+ *  deletes by name. It is left empty; remove-dns reads the emptiness as "no record of this tenant's own
+ *  stands" and removes nothing (an offboard already removed it). */
+function unresolvedTeardownTarget(db: Db, c: TenantPurgeCluster): TenantTeardownTarget {
+  const members = tenantTeardownMembers(db, c.guid, c.stage);
   return TenantTeardownTargetSchema.parse({
     guid: c.guid,
     subdomain: "",
@@ -240,8 +246,8 @@ function unresolvedTeardownTarget(c: TenantPurgeCluster): TenantTeardownTarget {
     clusterId: c.clusterId,
     cluster: c.cluster,
     tenantId: null,
-    watchNames: [],
-    members: [],
+    watchNames: tenantApplicationSet(members, c.guid, c.stage),
+    members,
   });
 }
 
@@ -499,13 +505,13 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
           `tenant ${req.guid} lives on cluster ${resolved.clusterId} ("${resolved.cluster}"), tenant-purge targets ${c.clusterId} — refusing to purge on the wrong cluster`,
         );
       }
-      const target = resolved ?? unresolvedTeardownTarget(c);
+      const target = resolved ?? unresolvedTeardownTarget(ctx.db, c);
       ctx.log(
         target.tenantId
           ? `tenant ${req.guid} ("${target.subdomain}") resolved from inventory on ${target.cluster} — ${target.watchNames.length} fan-out Application(s) to prune`
           : resolved
             ? `tenant ${req.guid} ("${target.subdomain}") resolved from its GitOps pointer on ${target.cluster} with NO inventory row (an orphan) — ${target.watchNames.length} fan-out Application(s) to prune`
-            : `tenant ${req.guid} has neither an inventory row nor a live pointer — purging its cluster footprint (AppProject, namespaces) and its Vault crypto entry by guid on ${target.cluster}`,
+            : `tenant ${req.guid} has no live inventory row and no live pointer — purging its cluster footprint by guid on ${target.cluster}: ${target.members.length} recorded member AppProject(s) and admission polic${target.members.length === 1 ? "y" : "ies"}, every namespace labelled ${tenantSelector(req.guid)}, and its Vault crypto entry`,
       );
       const params: TenantPurgeParams = { ...req, target };
       const stepDefs = tenantPurgeSteps(ports, params);

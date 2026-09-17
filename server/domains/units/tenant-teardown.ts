@@ -26,8 +26,8 @@ import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { guid as guidSchema } from "../../../shared/tenant.ts";
-import { STAGE, atLeastAsSettledAs, type TenantSettledStatus } from "../../../shared/enums.ts";
-import type { ArgoAppStatusMap } from "../../adapters/kube/port.ts";
+import { STAGE, atLeastAsSettledAs, type Stage, type TenantSettledStatus } from "../../../shared/enums.ts";
+import type { ArgoAppStatusMap, ResolvedClusterKube } from "../../adapters/kube/port.ts";
 import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { renderTenantArgoSync } from "./build-rbac.ts";
@@ -50,13 +50,56 @@ export const TenantTeardownTargetSchema = z.object({
   // The record step re-resolves by (clusterId, guid) when this is null, so null never means "skip blind".
   tenantId: z.string().startsWith("tnt_").nullable(),
   watchNames: z.array(z.string()), // the fan-out Applications to wait for the prune of
-  // The tenant's MEMBERS (auth/jobs/report + one per app) as the plan resolved them — the teardown
-  // deletes ONE AppProject per member, and a member the plan could not name is a project left standing
-  // that a later re-onboard would then be refused against. Resolved beside watchNames from the same two
-  // sources (tenant-replace.ts), so the two can never disagree about what this tenant is made of.
+  // The tenant's MEMBERS (the standing ones + one per app row, whatever its status) as the plan
+  // resolved them — the teardown deletes ONE AppProject and ONE admission policy per member, and a
+  // member the plan could not name is a project left standing that a later re-onboard would then be
+  // refused against. watchNames is this list under the one naming function (tenant-replace.ts), so the
+  // two can never disagree about what this tenant is made of.
   members: z.array(z.string()),
 });
 export type TenantTeardownTarget = z.infer<typeof TenantTeardownTargetSchema>;
+
+/** The names one member-wide delete removed and the names it found already absent, for the
+ *  AppProjects and for the admission policies apart: a project can be gone while its policy stands
+ *  (nothing but the Manager deletes a policy), and the run log shows both lists in full. */
+export interface TenantMemberDeletes {
+  appProjects: { deleted: string[]; absent: string[] };
+  admissionPolicies: { deleted: string[]; absent: string[] };
+}
+
+/** Delete every member's isolation AppProject and admission policy — ONE of each per member, so a
+ *  tenant with three apps loses six of each. Shared by the two removal shapes, this builder's
+ *  delete-projects and tenant-offboard's delete-appprojects. The names come from tenant-fanout and
+ *  admission-policy, never hand-rolled. The policy lives on the TARGET cluster and is cluster-scoped,
+ *  so no ArgoCD prune ever reaps it, and one outliving the tenant would refuse a later re-onboard's
+ *  managed namespace under its fresh Application name. Idempotent: an absent project or policy is
+ *  reported absent, never an error. */
+export async function deleteTenantMembers(
+  kube: Pick<ResolvedClusterKube, "projectWriter" | "clusterReader" | "argoNamespace">,
+  guid: string,
+  stage: Stage,
+  members: readonly string[],
+): Promise<TenantMemberDeletes> {
+  const deletes: TenantMemberDeletes = { appProjects: { deleted: [], absent: [] }, admissionPolicies: { deleted: [], absent: [] } };
+  for (const member of members) {
+    const project = memberAppProject(guid, member, stage);
+    if ((await kube.projectWriter.deleteAppProject(kube.argoNamespace, project)).deleted) deletes.appProjects.deleted.push(project);
+    else deletes.appProjects.absent.push(project);
+    const policy = tenantMemberAdmissionPolicyName(guid, member, stage);
+    if ((await kube.clusterReader.deleteAdmissionPolicy(policy)).deleted) deletes.admissionPolicies.deleted.push(policy);
+    else deletes.admissionPolicies.absent.push(policy);
+  }
+  return deletes;
+}
+
+/** The run-log sentence of a member-wide delete: every name deleted and every name already absent,
+ *  for both kinds, then the argo-sync grant's fate. Names, not a count over a total, so a six-member
+ *  tenant can never read "3 of 3" while three stand. */
+export function describeTenantMemberDeletes(deletes: TenantMemberDeletes, argoSyncDeleted: boolean): string {
+  const list = (o: { deleted: string[]; absent: string[] }): string =>
+    `${o.deleted.length} deleted (${o.deleted.join(", ") || "none"}), ${o.absent.length} already absent (${o.absent.join(", ") || "none"})`;
+  return `member AppProjects: ${list(deletes.appProjects)}; admission policies: ${list(deletes.admissionPolicies)}; argo-sync grant ${argoSyncDeleted ? "deleted" : "already absent"}`;
+}
 
 /** Delete ONE tenant's argo-sync grant from the ArgoCD namespace its Applications live in — shared by
  *  the two removal shapes, this builder's delete-projects and tenant-offboard's delete-appprojects, so
@@ -310,30 +353,16 @@ export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardo
       name: `${pfx}-delete-projects`,
       title: `${title} ${t.guid}: delete every member's isolation AppProject, admission policy and the argo-sync grant`,
       run: async (ctx) => {
-        // ONE AppProject per member, so a teardown deletes them ALL — a project left standing would
-        // outlive the tenant it fenced and would then be found by a re-onboard of the same guid.
-        // Beside each project, the member's admission policy on the TARGET cluster (cluster-scoped,
-        // so no ArgoCD prune ever reaps it): applied wherever the member project is applied, deleted
-        // wherever it is deleted, or a policy named after a gone tenant would keep refusing a later
-        // re-onboard's managed namespace under a fresh Application name.
-        // Idempotent: an already-absent project or policy resolves deleted:false (a re-run / the orphan case).
-        const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(t.clusterId);
-        const names = t.members.map((m) => memberAppProject(t.guid, m, t.stage));
-        let deleted = 0;
-        let policiesDeleted = 0;
-        for (const member of t.members) {
-          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(t.guid, member, t.stage))).deleted) deleted++;
-          if ((await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(t.guid, member, t.stage))).deleted) policiesDeleted++;
-        }
+        // Every member the frozen target names (deleteTenantMembers): a project or a policy left
+        // standing would outlive the tenant it fenced and be found by a re-onboard of the same guid.
+        const kube = await ports.resolver.resolve(t.clusterId);
+        const deletes = await deleteTenantMembers(kube, t.guid, t.stage, t.members);
         // The tenant's argo-sync grant lives in the same namespace and goes the same way: it names
         // Application names, and a Role naming this guid's Applications must not outlive the guid.
         // The delete matches on the object names, so the grant is rendered here with no subject.
-        const removed = await deleteTenantArgoSync(ports, t.guid, argoNamespace);
-        ctx.checkpoint({ appProjects: names, deleted, admissionPoliciesDeleted: policiesDeleted, argoSyncDeleted: removed });
-        ctx.log(
-          "meta",
-          `${settled} ${t.guid}: ${deleted} of ${names.length} member AppProject(s) and ${policiesDeleted} admission polic${policiesDeleted === 1 ? "y" : "ies"} deleted, the rest were already absent; argo-sync grant ${removed ? "deleted" : "already absent"}`,
-        );
+        const removed = await deleteTenantArgoSync(ports, t.guid, kube.argoNamespace);
+        ctx.checkpoint({ members: t.members, ...deletes, argoSyncDeleted: removed });
+        ctx.log("meta", `${settled} ${t.guid}: ${describeTenantMemberDeletes(deletes, removed)}`);
       },
     },
     // The composing run's destructive cluster-side work, BEFORE the row is settled — see the header.

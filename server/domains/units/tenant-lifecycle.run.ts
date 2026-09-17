@@ -55,46 +55,58 @@ export const tenantLocks = (registrations: TenantRegistrations): LockClaim[] => 
  *  platform/tenant=<guid>. */
 export const tenantSelector = (guid: string): string => `${TENANT_LABEL_KEY}=${guid}`;
 
-/** The EXPECTED fan-out Application names for a tenant, computed from inventory (the faithful DB
- *  projection of the registration, written in lock-step by create-tenant/add-app/remove-app): the trio
- *  ALWAYS, then one <guid>-<app>-<stage> per NOT-YET-OFFBOARDED tenant_apps row. Never hand-rolled —
- *  delegates to tenantApplicationSet (tenant-fanout is the single source of truth for names). Computed
- *  from the DB (not the registration) so it still resolves after tenant-offboard git-rm'd the file.
- *
- *  The app filter is "everything except a SETTLED row", NOT "active": since
- *  create-tenant records its rows BEFORE it deploys, a half-created tenant's app rows sit at
- *  "provisioning" — yet the appset generated their Applications the moment the pointer landed, so they
- *  are every bit as deployed as an active tenant's. Filtering on "active" would silently shrink the set
- *  and let a tenant-offboard of a provisional tenant declare the prune complete while those very
- *  Applications keep running. Only a settled row is genuinely gone — "offboarded" (removed) or
- *  "purged" (deprovisioned), asked as the one named set TENANT_SETTLED_STATUS
- *  (shared/enums.ts) so the newer state cannot re-enter a watch set as a name ArgoCD will never create.
- *
- *  It takes only the three TenantCluster fields it actually reads, so the POINTER-driven resolver
- *  (tenant-replace.ts:resolveTeardownTarget) can call it too: that one holds a tenants row but no
- *  cluster join, and it needs this very set whenever the pointer the names would otherwise come from is
- *  already git-rm'd. A full TenantCluster still satisfies the parameter, so the row-driven runs below
- *  are unchanged. */
+/** The EXPECTED fan-out Application names of a LIVE tenant — tenantWatchMembers under the one naming
+ *  function (tenant-fanout is the single source of truth for names). What the suspend and resume
+ *  watches converge on: a name in this set that ArgoCD will never create hangs a Synced/Healthy watch
+ *  until its budget expires, which is why this set is filtered and a teardown's is not
+ *  (tenantTeardownMembers). Computed from the DB, not the registration, so it still resolves after a
+ *  removal git-rm'd the file. */
 export function tenantWatchSet(db: Db, tc: Pick<TenantCluster, "tenantId" | "guid" | "stage">): string[] {
-  const row = db.select().from(tenants).where(eq(tenants.id, tc.tenantId)).get();
-  if (!row) throw errNotFound(`tenant ${tc.tenantId}`);
-  const appRows = db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, tc.tenantId), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).all();
-  // `row.members` is the tenant's own standing set, recorded when it was created — never a constant.
-  // The apps come from their own rows so a settled one drops out of the set.
-  return tenantApplicationSet([...row.members, ...appRows.map((a) => a.name)], tc.guid, tc.stage);
+  return tenantApplicationSet(tenantWatchMembers(db, tc.tenantId), tc.guid, tc.stage);
 }
 
-/** The MEMBERS of a tenant, from the same inventory projection the watch set uses — its standing
- *  members plus one per not-yet-settled app row. What a teardown deletes one AppProject per, and what
- *  the suspend measurement turns into namespaces. */
+/** The members of a tenant that SERVE NOW: its standing members (the row's own set, recorded when
+ *  it was created — never a constant) plus one per NOT-YET-SETTLED app row. What the live watches
+ *  (watch-off, watch-sync), the suspend measurement, restart-workloads and the live reconciliation view
+ *  mean by "the tenant's members".
+ *
+ *  The app filter is "everything except a SETTLED row", NOT "active": create-tenant records its rows
+ *  BEFORE it deploys, so a half-created tenant's app rows sit at "provisioning" while the appset has
+ *  long generated their Applications, and filtering on "active" would shrink the set and let a watch
+ *  pass over members that keep running. Only a settled row is out — "offboarded" (removed) or "purged"
+ *  (deprovisioned), asked as the one named set TENANT_SETTLED_STATUS (shared/enums.ts) so a newer
+ *  terminal state cannot re-enter a live watch as a name ArgoCD will never create. */
 export function tenantWatchMembers(db: Db, tenantId: string): string[] {
   const row = db.select().from(tenants).where(eq(tenants.id, tenantId)).get();
   if (!row) throw errNotFound(`tenant ${tenantId}`);
-  const appRows = db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, tenantId), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).all();
+  const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(and(eq(tenantApps.tenantId, tenantId), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).orderBy(tenantApps.name).all();
   return [...row.members, ...appRows.map((a) => a.name)];
 }
 
-/** The member NAMESPACES of a tenant — tenantWatchMembers under the one naming function. */
+/** The members a TEARDOWN takes down — tenant-offboard, tenant-purge and the create-tenant replace:
+ *  the standing members plus EVERY app row of the tenant, whatever its status, off the row the
+ *  inventory keeps under (guid, stage) whatever ITS status. Empty where the inventory never recorded
+ *  the tenant: a purge by guid then reaps by label alone.
+ *
+ *  A settled app row is still a member to tear down. Its AppProject and its admission policy are
+ *  written by the Manager at create-tenant or add-app, and no status flip removes either: a
+ *  tenant-remove-app leaves both standing on purpose (soft state, the app is re-addable), and a
+ *  create-tenant that went red and was retried leaves its app rows wherever the failed pass put them
+ *  while the fan-out it generated keeps serving. Filtering on the status here leaves the AppProject
+ *  and the admission policy of every settled app row standing after the offboard, with the run log
+ *  reporting a count over a set smaller than the tenant. A row whose Application never existed costs
+ *  nothing: an absent AppProject is reported already absent, and an Application ArgoCD never
+ *  generated reads Missing, so a PRUNE watch over the wider set passes at once — unlike the
+ *  Synced/Healthy watches, which is why those stay on tenantWatchMembers. A standing registration's
+ *  own members[] are unioned in by the pointer-driven resolver (tenant-replace.ts). */
+export function tenantTeardownMembers(db: Db, guid: string, stage: Stage): string[] {
+  const row = db.select({ id: tenants.id, members: tenants.members }).from(tenants).where(and(eq(tenants.guid, guid), eq(tenants.stage, stage))).get();
+  if (!row) return [];
+  const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(eq(tenantApps.tenantId, row.id)).orderBy(tenantApps.name).all();
+  return [...row.members, ...appRows.map((a) => a.name)];
+}
+
+/** The member NAMESPACES of a live tenant — tenantWatchMembers under the one naming function. */
 export function tenantWatchNamespaces(db: Db, tenantId: string, guid: string, stage: Stage): string[] {
   return tenantWatchMembers(db, tenantId).map((m) => memberNamespace(guid, m, stage));
 }

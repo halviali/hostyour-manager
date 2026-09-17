@@ -4,11 +4,10 @@ import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { atLeastAsSettledAs } from "../../../shared/enums.ts";
 import { localTx } from "../../executor/stepkit.ts";
-import { memberAppProject } from "./tenant-fanout.ts";
-import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
+import { tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { attestTenantTargetStep, clearRelocationHold, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
-import { TenantLifecycleParams, tenantLocks, tenantWatchMembers, tenantWatchNamespaces, tenantWatchSet, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
-import { deleteTenantArgoSync } from "./tenant-teardown.ts";
+import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
+import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
 import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 
 // tenant-offboard — the tenant analogue of the consumer
@@ -48,11 +47,12 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // "unreadable" means a registration DOES stand and must still be git-rm'd BY PATH, which is all
         // removeTenant ever needs.
         const tc = loadTenantCluster(ctx.db, tenantId);
-        // The relocation mark goes FIRST, on every member namespace: each member chart renders its own
-        // ServiceClaim, and the prune this removal sets off is what hands those claims to the teardown
-        // the mark disarms. It runs before the resume skip too — a resumed run still has to clear it.
+        // The relocation mark goes FIRST, on every member namespace this teardown takes down: each
+        // member chart renders its own ServiceClaim, and the prune this removal sets off is what hands
+        // those claims to the teardown the mark disarms. It runs before the resume skip too — a resumed
+        // run still has to clear it.
         const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
-        await clearRelocationHold(ctx, clusterReader, tenantWatchNamespaces(ctx.db, tc.tenantId, tc.guid, tc.stage), tc.guid);
+        await clearRelocationHold(ctx, clusterReader, tenantNamespaces(tenantTeardownMembers(ctx.db, tc.guid, tc.stage), tc.guid, tc.stage), tc.guid);
         if ((await ports.registrations.scanTenant(tc.stage, tc.guid)).status === "absent") {
           ctx.log("meta", `tenant ${tc.guid} registration already removed — skipping (resume)`);
           return;
@@ -66,11 +66,13 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
       name: "watch-removal",
       title: "Wait for ArgoCD to prune the whole tenant fan-out",
       run: async (ctx) => {
-        // The expected set comes from inventory (tenantWatchSet), not the registration — remove-tenant
-        // just git-rm'd it, but the tenants/tenant_apps rows are still active until
-        // record-offboard, so the fan-out names still resolve.
+        // The expected set comes from inventory, not the registration — remove-tenant just git-rm'd
+        // it, but the tenants/tenant_apps rows are still there until record-offboard, so the fan-out
+        // names still resolve. It is the TEARDOWN set (tenantTeardownMembers), every app row whatever
+        // its status: a settled row's Application may still be serving, and an Application ArgoCD
+        // never generated reads Missing, so the wider set costs a prune watch nothing.
         const tc = loadTenantCluster(ctx.db, tenantId);
-        const names = tenantWatchSet(ctx.db, tc);
+        const names = tenantApplicationSet(tenantTeardownMembers(ctx.db, tc.guid, tc.stage), tc.guid, tc.stage);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
         const status = await argoReader.watchApplicationSet(argoNamespace, names, allPruned(names), { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: tenantSelector(tc.guid) });
         if (!allPruned(names)(status)) throw errValidation(`tenant ${tc.guid} fan-out was not pruned — ${lingering(status)}; the registration is removed but workloads linger, check ArgoCD`);
@@ -82,30 +84,18 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
       title: "Delete every member's isolation AppProject, admission policy and the argo-sync grant",
       run: async (ctx) => {
         // After the fan-out is pruned, no Application references any of the isolation projects — delete
-        // them ALL (the inverse of create-tenant's apply-appprojects). One per member, so a tenant with
-        // three apps leaves six behind if this only deleted one. The names come from tenant-fanout, never
-        // hand-rolled. Beside each project, the member's admission policy on the TARGET cluster —
-        // cluster-scoped, so no ArgoCD prune ever reaps it, and a policy outliving the tenant would
-        // refuse a later re-onboard's managed namespace under its fresh Application name.
-        // Idempotent: an already-absent project or policy resolves deleted:false.
+        // them ALL (the inverse of create-tenant's apply-appprojects), one project and one admission
+        // policy per member of the TEARDOWN set (tenantTeardownMembers, which says why a settled app
+        // row is still one), through the delete the pointer-driven teardown shares.
         const tc = loadTenantCluster(ctx.db, tenantId);
-        const members = tenantWatchMembers(ctx.db, tc.tenantId);
-        const names = members.map((m) => memberAppProject(tc.guid, m, tc.stage));
-        const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
-        let deleted = 0;
-        let policiesDeleted = 0;
-        for (const member of members) {
-          if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(tc.guid, member, tc.stage))).deleted) deleted++;
-          if ((await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(tc.guid, member, tc.stage))).deleted) policiesDeleted++;
-        }
+        const members = tenantTeardownMembers(ctx.db, tc.guid, tc.stage);
+        const kube = await ports.resolver.resolve(tc.clusterId);
+        const deletes = await deleteTenantMembers(kube, tc.guid, tc.stage, members);
         // The inverse of create-tenant's provision-argo-sync, in the same namespace and the same step
         // as the projects: a Role naming this guid's Applications must not outlive the guid.
-        const removed = await deleteTenantArgoSync(ports, tc.guid, argoNamespace);
-        ctx.checkpoint({ appProjects: names, deleted, admissionPoliciesDeleted: policiesDeleted, argoSyncDeleted: removed });
-        ctx.log(
-          "meta",
-          `${deleted} of ${names.length} member AppProject(s) and ${policiesDeleted} admission polic${policiesDeleted === 1 ? "y" : "ies"} deleted — the rest were already absent; argo-sync grant ${removed ? "deleted" : "already absent"}`,
-        );
+        const removed = await deleteTenantArgoSync(ports, tc.guid, kube.argoNamespace);
+        ctx.checkpoint({ members, ...deletes, argoSyncDeleted: removed });
+        ctx.log("meta", describeTenantMemberDeletes(deletes, removed));
       },
     },
     {

@@ -22,7 +22,7 @@ import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import { tenantWatchMembers, tenantWatchSet } from "./tenant-lifecycle.run.ts";
+import { tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { TenantTeardownTargetSchema, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { resolveClusterIdByName, resolveClusterNameById } from "./tenant-values.ts";
 
@@ -40,13 +40,17 @@ export type { TenantTeardownTarget as ReplaceTarget } from "./tenant-teardown.ts
  *  from the live registration — the ORPHAN case: a registration + fan-out with no
  *  tenants row (a tenant from before record-provisional, or a hand-written file). Its clusterId is
  *  then derived from the registration's `cluster` slave name (resolveClusterIdByName, the inverse of
- *  resolveClusterNameById) and its watch set from the registration's apps (tenantApplicationSet, the
- *  single source of fan-out names). A SETTLED row — "offboarded" OR "purged" (TENANT_SETTLED_STATUS,
- *  shared/enums.ts) — is deliberately NOT authoritative: it records a removal that already ran, so
- *  a guid whose only row is settled resolves exactly like an orphan, from its live pointer if one somehow
- *  still stands and otherwise not at all. Reading the set rather than testing `!== "offboarded"` is what
- *  keeps a PURGED row out: that tenant is deprovisioned, and treating its row as authoritative would hand
- *  a teardown the tenantId of a tenant there is nothing left to tear down.
+ *  resolveClusterNameById) and its members from the registration's members[] (tenantApplicationSet,
+ *  the single source of fan-out names, turns them into the watch set). A SETTLED row — "offboarded"
+ *  OR "purged" (TENANT_SETTLED_STATUS, shared/enums.ts) — is deliberately NOT the IDENTITY: it records
+ *  a removal that already ran, so a guid whose only row is settled resolves exactly like an orphan,
+ *  from its live pointer if one somehow still stands and otherwise not at all. Reading the set rather
+ *  than testing `!== "offboarded"` is what keeps a PURGED row out: that tenant is deprovisioned, and
+ *  treating its row as authoritative would hand a teardown the tenantId of a tenant there is nothing
+ *  left to tear down. Its MEMBERS are read all the same (tenantTeardownMembers) beside a pointer that
+ *  still stands, and the purge's by-guid target (tenant-purge.run.ts unresolvedTeardownTarget) reads
+ *  them the same way: what a tenant was made of does not change with its status, and a purge after an
+ *  offboard still has that tenant's AppProjects and admission policies to delete.
  *
  *  The registration is read through the registrations's TOLERANT scan (scanTenant), never the strict
  *  readTenant: a tenant whose registration has drifted is exactly the tenant a purge is aimed at, and
@@ -79,28 +83,25 @@ export async function resolveTeardownTarget(
     if (resolved) identity = { subdomain: pointer.subdomain, clusterId: resolved.clusterId, tenantId: null };
   }
   if (!identity) return null;
-  // watchNames: the fan-out to wait for the prune of — the UNION of what EITHER source knows, because
-  // neither alone is complete and a set that is too SMALL reads as "pruned" while workloads still serve
-  // the tenant's public FQDN:
+  // members: what the teardown takes down — the UNION of what EITHER source knows, because neither
+  // alone is complete. A member neither source names is an AppProject and an admission policy nobody
+  // deletes, and a watch set that is too SMALL reads as "pruned" while workloads still serve the
+  // tenant's public FQDN:
   //   - the LIVE pointer is what the appsets generate from, so it is the direct source (replace + orphan);
   //   - an ABSENT pointer does NOT mean the fan-out is gone. A FAILED tenant-offboard leaves exactly
   //     that state: remove-tenant committed the pointer removal, watch-removal then threw, so tenant.yaml
   //     is gone while the row is still "active" (record-offboard never ran) and every Application still
   //     runs. Deriving [] there would make allPruned([]) vacuously true — the fail-loud policy satisfied
   //     by a set that was never proven empty. The inventory is the source that survives the git-rm, which
-  //     is why tenant-offboard.run.ts's own watch-removal computes its set with tenantWatchSet too;
+  //     is why tenant-offboard.run.ts's own watch-removal computes its set from the inventory too;
+  //   - the inventory side is the TEARDOWN reader (tenantTeardownMembers): every app row whatever its
+  //     status, off the row of (guid, stage) whatever its status. A row a status flip settled while
+  //     its AppProject, its policy and possibly its Application stand is exactly what a teardown is
+  //     for, and a name the fan-out never generated reads Missing and costs a prune watch nothing;
   //   - the two can also disagree mid-flight (an add-app that wrote the pointer before its row, a
   //     remove-app that dropped it after), and only the union covers both directions.
-  const fromPointer = pointer ? tenantApplicationSet(pointer.members, guid, stage) : [];
-  const fromInventory = row ? tenantWatchSet(db, { tenantId: row.tenantId, guid, stage }) : [];
-  // The MEMBERS, unioned from the same two sources and for the same reason: the teardown deletes one
-  // AppProject per member, so a member neither source names is a project nobody deletes. The standing
-  // members are in both (each source records the set the tenant was created with); the apps are what
-  // can differ mid-flight.
-  const memberNames = new Set<string>([
-    ...(pointer ? pointer.members : []),
-    ...(row ? tenantWatchMembers(db, row.tenantId) : []),
-  ]);
+  // watchNames is this list under the one naming function, so the two can never disagree.
+  const members = [...new Set([...(pointer ? pointer.members : []), ...tenantTeardownMembers(db, guid, stage)])];
   // `cluster` is the ArgoCD-REGISTERED SLAVE NAME (the pointer's own `cluster` field, the appset
   // destination + AppProject pin) — it is what the run log and the tenant-purge plan NAME the tenant's
   // host by, on the very screen where a purge that drops Mongo databases is approved. With no pointer to
@@ -118,8 +119,8 @@ export async function resolveTeardownTarget(
     clusterId: identity.clusterId,
     cluster,
     tenantId: identity.tenantId,
-    watchNames: [...new Set([...fromPointer, ...fromInventory])],
-    members: [...memberNames],
+    watchNames: tenantApplicationSet(members, guid, stage),
+    members,
   });
 }
 
