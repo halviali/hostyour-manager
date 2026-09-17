@@ -54,7 +54,7 @@ async function seedDevStage(reg: Registrations): Promise<void> {
   await reg.commitRegistration({
     unit: { name: "acme", repoURL: REPO, suspended: false, quiesced: false },
     builds: ["acme-api"],
-    deploy: { stage: "dev", host: "acme", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "dev", host: "acme", cluster: "s2", chartPath: "deploy/chart", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: "run_onb_dev",
   });
 }

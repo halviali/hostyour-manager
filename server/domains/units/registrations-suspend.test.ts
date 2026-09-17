@@ -21,7 +21,7 @@ function unit(over: Partial<ConsumerRegistration> = {}) {
 }
 
 function deploy(over: Partial<{ stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; services: ConsumerRegistration["services"]; size: "small" | "medium" | "large"; mongodb: "shared" | "standalone" | "replicaset"; quota: UnitQuota; fqdn: string }> = {}) {
-  return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [], keyPatterns: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), fqdn: "acme.example.com", ...over };
+  return { stage: "prod" as Stage, chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"), fqdn: "acme.example.com", ...over };
 }
 
 

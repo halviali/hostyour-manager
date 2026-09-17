@@ -61,7 +61,7 @@ async function registered(): Promise<Registrations> {
   await reg.commitRegistration({
     unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
     builds: [],
-    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
     runId: "run_onb",
   });
   return reg;

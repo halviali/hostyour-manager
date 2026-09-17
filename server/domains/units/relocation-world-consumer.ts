@@ -181,7 +181,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
                     // The redis grant travels with the unit, for the reason the size below does: a
                     // move must land it with what it ran with. Dropped here, the unit would arrive
                     // granted NOTHING and its ACL user would be refused its own keys.
-                    keyPatterns: entry.keyPatterns ?? [], services: entry.services ?? [],
+                    keyPatterns: entry.keyPatterns ?? [], channelPatterns: entry.channelPatterns ?? [], services: entry.services ?? [],
                     // The size travels with the unit: a move must land it on the instance it ran on,
                     // not on whatever the default happens to be at the destination.
                     size: entry.size ?? "small", mongodb: entry.mongodb ?? "shared",

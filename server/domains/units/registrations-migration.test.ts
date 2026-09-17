@@ -43,7 +43,7 @@ function consumerBuildFile(over: Record<string, unknown> = {}, drop: string[] = 
   return flat({ name: "acme", repoURL: REPO_URL, suspended: false, quiesced: false, removing: false, builds: ["acme"], ...over }, drop);
 }
 function consumerStageFile(over: Record<string, unknown> = {}, drop: string[] = []): string {
-  return flat({ name: "acme", repoURL: REPO_URL, suspended: false, quiesced: false, removing: false, chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), host: "acme", ...over }, drop);
+  return flat({ name: "acme", repoURL: REPO_URL, suspended: false, quiesced: false, removing: false, chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"), host: "acme", ...over }, drop);
 }
 function flat(entry: Record<string, unknown>, drop: string[]): string {
   for (const k of drop) delete entry[k];
@@ -181,7 +181,7 @@ describe("Registrations.migrateToSchema (the consumer registrations: stage files
     const reg = new Registrations(repo);
     await reg.commitRegistration({
       unit: { name: "acme", repoURL: REPO_URL, suspended: false, quiesced: false }, builds: ["acme"],
-      deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [], keyPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+      deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
       runId: "run_1",
     });
     const build = repo.read(repo.booksBranch, BUILD_PATH);

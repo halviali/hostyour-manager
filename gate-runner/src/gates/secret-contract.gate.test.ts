@@ -38,7 +38,7 @@ function baseManifest(): ConsumerManifest {
     envs: ["test"],
     chart: { path: "deploy/chart" },
     services: [],
-    databases: [], keyPatterns: [],
+    databases: [], keyPatterns: [], channelPatterns: [],
     builds: [],
     secrets: [
       { key: "DB_PASSWORD", required: true },

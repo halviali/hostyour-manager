@@ -316,6 +316,14 @@ export const ConsumerManifestSchema = z.object({
   // an ACL user must be told which keys it may touch, and the answer for a claim naming none is an
   // error rather than every key. Empty [] ⇒ this consumer claims no redis, which is most of them.
   keyPatterns: z.array(z.string()).default([]),
+  // The LITERAL redis Pub/Sub channel patterns this consumer's ACL user is granted, each written
+  // as redis writes one after `&` (`example:notify:*`). A channel is not a key: a user granted
+  // `~example:*` still gets NOPERM on PUBLISH and SUBSCRIBE, because the ACL user starts with
+  // `resetchannels` and only a `&` rule opens one. Same path as `keyPatterns`: copied VERBATIM
+  // into the registration, injected as `redis.channelPatterns`, granted EXACTLY as stated by the
+  // service-provisioner, held to this set by the fence. Empty [] ⇒ no channel, the default that
+  // every consumer standing before the field ran with (#195).
+  channelPatterns: z.array(z.string()).default([]),
   // HOW this consumer runs MongoDB. `shared` (the default) means the cluster's own replica set, the
   // one every tenant uses. The other two give it an instance of its OWN, in its own namespace, and
   // the difference between them is capability rather than price: a `standalone` is ONE member and
@@ -517,6 +525,9 @@ export const ConsumerRegistrationSchema = z
     // the field existed is still a valid registration; ABSENT reads as granted NOTHING, never as
     // granted everything, which is also what a unit claiming no redis carries.
     keyPatterns: z.array(z.string()).optional(),
+    // The redis channel patterns copied VERBATIM from ConsumerManifest.channelPatterns, optional for
+    // the same reason and with the same reading: ABSENT is granted NO channel (#195).
+    channelPatterns: z.array(z.string()).optional(),
     // The backing services the consumer CLAIMS, copied VERBATIM from ConsumerManifest.services.
     // Distinct from `databases` on purpose: `databases` is engine-neutral (a consumer may reuse it for
     // Postgres db names), so it cannot be the switch that decides whether the platform renders a

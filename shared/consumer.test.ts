@@ -186,6 +186,15 @@ describe("keyPatterns (the redis grant, the sibling of databases)", () => {
     expect(r.success).toBe(true);
     expect(r.data?.keyPatterns).toEqual(["example:auth:*"]);
   });
+
+  // A channel is not a key: the ACL user starts with `resetchannels`, so a unit granted every key
+  // it asked for still gets NOPERM on PUBLISH until a `&` rule names the channel (#195).
+  it("channelPatterns: none declared is none granted, and a declared one travels verbatim", () => {
+    expect(ConsumerManifestSchema.safeParse(base).data?.channelPatterns).toEqual([]);
+    expect(ConsumerManifestSchema.safeParse({ ...base, channelPatterns: ["example:notify:*"] }).data?.channelPatterns).toEqual(["example:notify:*"]);
+    expect(ConsumerRegistrationSchema.safeParse(stage).data?.channelPatterns).toBeUndefined();
+    expect(ConsumerRegistrationSchema.safeParse({ ...stage, channelPatterns: ["example:notify:*"] }).data?.channelPatterns).toEqual(["example:notify:*"]);
+  });
 });
 
 describe("ConsumerRegistrationSchema databases (verbatim copy carried in the registration)", () => {

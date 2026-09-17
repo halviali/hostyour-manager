@@ -58,7 +58,7 @@ afterEach(() => { db.sqlite.close(); });
 const MANIFEST: ConsumerManifest = {
   apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
-  chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], secrets: [],
+  chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
 };
 /** The chart's per-stage pin G18's chart half reads — the builds[] entry whose `image` is the build
@@ -238,7 +238,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const activator = new FakeActivator(); // 201 { activate_url: https://example-auth.s1.example/activate?token=inv_test }
     const manifest: ConsumerManifest = {
       apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",
-      envs: ["prod"], chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], builds: [{ name: "acme-api", containerfile: "Containerfile" }],
+      envs: ["prod"], chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], builds: [{ name: "acme-api", containerfile: "Containerfile" }],
       secrets: [{ key: "AUTH_BOOTSTRAP_TOKEN", required: true, generate: "hex32" }],
       activation: { path: "/api/v1/bootstrap/invite-admin", method: "POST", tokenSecret: "AUTH_BOOTSTRAP_TOKEN", tokenHeader: "X-Bootstrap-Token", prompt: [{ field: "email", label: "First administrator email" }] },
     };

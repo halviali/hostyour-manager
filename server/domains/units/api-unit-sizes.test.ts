@@ -35,7 +35,7 @@ async function seedConsumer(registrations: Registrations, brings: { postgresql: 
     unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
     builds: [],
     deploy: {
-      stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [],
+      stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [],
       services: brings.postgresql ? ["postgresql"] : [],
       size: "small", mongodb: brings.mongodb, quota: seedQuota("small", brings),
     },

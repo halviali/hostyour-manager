@@ -41,6 +41,7 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
           host: p.host, // the attested public host label — the appset composes unitHost from it
           databases: p.databases, // literal Mongo DB name(s), copied verbatim from the manifest
           keyPatterns: p.keyPatterns, // literal redis key patterns — the grant the unit's fence holds its claim to
+          channelPatterns: p.channelPatterns, // literal redis channel patterns — the same grant for Pub/Sub
           services: p.services, // claimed services, copied verbatim — a chart source gates on this
           // The unit's one size, and what it brings — the appset names the database presets from
           // the first and gates its conditional sources on the second.
