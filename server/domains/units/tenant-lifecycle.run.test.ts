@@ -45,6 +45,7 @@ function entry(over: Partial<TenantRegistration> = {}): TenantRegistration {
     resetNonce: "1",
     suspended: false,
     quiesced: false,
+    appsImage: "", appsImageTag: "",
     ...over,
   };
 }

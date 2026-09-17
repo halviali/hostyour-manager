@@ -92,7 +92,7 @@ async function seededRegistrations(): Promise<TenantRegistrations> {
   const registration: TenantRegistration = {
     cluster: "s1", subdomain: "acme",
     members: testMembers(APPS), identityProvider: "auth", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {} })),
-    seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false,
+    seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };
   await registrations.commitTenant({ stage: "prod", guid: GUID, registration, runId: "run_onb" });
   return registrations;

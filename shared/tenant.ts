@@ -125,9 +125,9 @@ export const subdomain = z
  *  and for the tenant-create params, which carry the first two — the plan derives them from the
  *  subdomain and the GitHub App's organisation, and the run reads the tag off the release it
  *  triggers. The REGISTRATION carries all three or none (`refineAppsBundle`): an image without its
- *  tag is nothing the engines can mount. The registration composer writes the empty string for
- *  `appsImage` and `appsImageTag` when the tenant has none, so the tenants ApplicationSet may read
- *  both bare under missingkey=error; `appsRepo` reaches no chart and is simply absent then. */
+ *  tag is nothing the engines can mount. The registration defaults `appsImage` and `appsImageTag`
+ *  to the empty string when the tenant has none, so the tenants ApplicationSet may read both bare
+ *  under missingkey=error; `appsRepo` reaches no chart and is simply absent then. */
 export const appsBundleFields = {
   appsRepo: z.string().regex(/^https:\/\/[^ ]+\.git$/).optional(),
   appsImage: z.string().regex(/^([a-z0-9-]+)?$/).optional(),
@@ -149,10 +149,22 @@ export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): voi
  *  ABSENT: a tenant's repo is always catalog and the credential is the manager's first-party
  *  write credential, both constants of the one-time catalog registration.
  *
- *  `seedUsers`, `resetNonce`, `suspended` and `quiesced` are MANDATORY with a default and are written
- *  explicitly on every commit, so a chart may read them BARE under `missingkey=error` without a `dig`.
- *  Kept fully JSON-round-trip-clean so the registry serializer's serialize -> validate -> re-parse law
- *  holds. */
+ *  `seedUsers`, `resetNonce`, `suspended`, `quiesced`, `appsImage` and `appsImageTag` are MANDATORY
+ *  with a default and are written explicitly on every commit, so a chart may read them BARE under
+ *  `missingkey=error` without a `dig`. Kept fully JSON-round-trip-clean so the registry serializer's
+ *  serialize -> validate -> re-parse law holds.
+ *
+ *  THE RULE FOR EVERY FIELD ADDED HERE: IT HAS A DEFAULT, AND THE BOOT WRITES IT. A registration is
+ *  written by the run that creates the tenant and rewritten only by a flip, so every file written
+ *  before a field existed carries no key for it — and the tenants ApplicationSet reads the file bare,
+ *  where a missing key is a render failure for the whole tenant. The Manager's boot parses every
+ *  standing registration through this schema and commits the ones whose serialized form differs
+ *  (server/domains/units/registrations-migration.ts), which is what brings a standing tenant onto a
+ *  new field with no offboard and no hand. That write-back can only fill what the schema itself
+ *  fills: a field with a default reaches every standing file at the next boot; an OPTIONAL field
+ *  (`appsRepo`, where absent is a meaning) is left absent; a REQUIRED field with no default refuses
+ *  every standing file, and its value is a run kind's job — a run that knows the tenant — never a
+ *  boot's. */
 export const TenantRegistrationSchema = z
   .object({
     // The target SLAVE the tenant fans out on — the ArgoCD-REGISTERED cluster name (plane
@@ -195,8 +207,12 @@ export const TenantRegistrationSchema = z
     resetNonce: z.string().min(1).default("1"), // bump + commit triggers a tenant reset (Tenant CR annotation)
     suspended: z.boolean().default(false), // tenant-wide pause: replicas 0, no Ingress
     quiesced: z.boolean().default(false), // the deeper pause a removal-in-flight holds a tenant in
-    // The tenant's own apps bundle, all three or none (appsBundleFields above).
+    // The tenant's own apps bundle, all three or none (appsBundleFields above). The two the tenants
+    // ApplicationSet reads bare default to the empty string HERE, so a registration written before
+    // they existed gains both at the boot migration; the params keep them optional.
     ...appsBundleFields,
+    appsImage: appsBundleFields.appsImage.default(""),
+    appsImageTag: appsBundleFields.appsImageTag.default(""),
   })
   .superRefine((e, ctx) => {
     refineAppsBundle(e, ctx);

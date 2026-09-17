@@ -106,7 +106,7 @@ function syncedStatuses(names: readonly string[], ref: string): Map<string, Argo
 
 /** A well-formed existing tenant registration (subdomain SUB) the registrations can commit as the replace target. */
 function oldRegistration(over: Partial<TenantRegistration> = {}): TenantRegistration {
-  return { cluster: "s1", subdomain: SUB, members: testMembers([]), identityProvider: "auth", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, ...over };
+  return { cluster: "s1", subdomain: SUB, members: testMembers([]), identityProvider: "auth", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "", ...over };
 }
 
 /** A shared registrations over a seedable FakePlatformRepo, so a test can pre-commit the old pointer AND

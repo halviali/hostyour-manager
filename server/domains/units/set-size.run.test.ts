@@ -98,7 +98,7 @@ async function seedTenant(reg: TenantRegistrations): Promise<void> {
     stage: "prod", guid: GUID, runId: "run_crt",
     registration: {
       cluster: "s1", subdomain: "simetrix", apps: [], members: testMembers(), identityProvider: "auth",
-      seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false,
+      seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });
 }

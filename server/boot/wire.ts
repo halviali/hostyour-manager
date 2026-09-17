@@ -3,7 +3,7 @@ import { loadConfig, type Config } from "../kernel/config.ts";
 import { runActor } from "../kernel/actor.ts";
 import { createLogger, type Logger } from "../kernel/logger.ts";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, type CheckResult } from "./selfchecks.ts";
+import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, checkRegistrationsMigrated, type CheckResult } from "./selfchecks.ts";
 import { bootPhases } from "./boot-phases.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
@@ -44,6 +44,7 @@ import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefil
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
+import { migrateRegistrations } from "../domains/units/registrations-migration.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
@@ -74,6 +75,13 @@ export interface Wired {
    *  listening server and then every 45 minutes. Never rejects — every failure is logged per unit.
    *  A no-op where the consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
+  /** Every standing registration on both books brought to the schema this release ships
+   *  (domains/units/registrations-migration.ts): a file the schema now defaults a key of is
+   *  rewritten with it, one commit per books per boot. boot.ts runs it once, behind the listening
+   *  server and after the catalog carry, and never again until the next boot — a schema changes
+   *  only with a release, and a release boots the Manager. Never rejects: every failure is logged,
+   *  and the outcome becomes the `registrations.schema` self-check row on /readyz. */
+  migrateRegistrations: () => Promise<void>;
 }
 
 /** The carry as boot runs it: LOG AND CONTINUE on failure — a catalog that is unreachable at
@@ -260,6 +268,12 @@ export async function wire(): Promise<Wired> {
     if (c.kind === "skipped") logger.info({ check: c.name, detail: c.detail }, "self-check skipped");
     else if (!c.ok) logger.warn({ check: c.name, detail: c.detail }, "self-check degraded");
   }
+  // The registrations brought to this release's schema, behind the listener (Wired.migrateRegistrations).
+  // Its verdict joins the checks above once it has run: /readyz reads that array live, so the row
+  // stands there from the moment the measurement exists and not before.
+  const migrateRegistrationsLater = async (): Promise<void> => {
+    checks.push(checkRegistrationsMigrated(await migrateRegistrations({ registrations, tenantRegistrations, version: config.version, logger })));
+  };
   const session = new SessionCodec(db.db, config);
   const loginTx = new LoginTxCodec(db.db);
   const oidc = createOidcAdapter(config, logger);
@@ -345,5 +359,6 @@ export async function wire(): Promise<Wired> {
     checks,
     carryCatalogTrunk,
     refreshAppTokens: refreshAppTokensLater,
+    migrateRegistrations: migrateRegistrationsLater,
   };
 }

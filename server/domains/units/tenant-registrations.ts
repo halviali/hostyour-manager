@@ -24,7 +24,6 @@
 // Boundary: domain layer — imports shared/ (type + schema) and the git PlatformRepo port; the
 // concrete second repo bound to catalog (its workRoot + repo-qualified lock) is wired by the adapter.
 import type { UnitQuota } from "../../../shared/unit-size.ts";
-import { z } from "zod";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration } from "../../../shared/tenant.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
@@ -34,7 +33,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { AppError } from "../../kernel/errors.ts";
-import { serializePointer, makeRegistrationGuard, trailer } from "./registrations.ts";
+import { serializePointer, makeRegistrationGuard, trailer, schemaWhy, migrateRegistrationFiles, type RegistrationMigration } from "./registrations.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */
@@ -49,10 +48,9 @@ const tenantDir = (guid: string): string => `registrations/${guid}`;
 const registrationPath = (stage: Stage, guid: string): string => `${tenantDir(guid)}/${stage}.yaml`;
 
 /** WHY a YAML parse failed, in one line. Shared by the strict fold and the tolerant scan so a broken
- *  file reads identically whether it THREW the read or was SKIPPED by it. */
+ *  file reads identically whether it THREW the read or was SKIPPED by it; schemaWhy (registrations.ts)
+ *  is the same for a body that failed its schema. */
 const yamlWhy = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-/** WHY a body failed its schema, as "path message; path message". Same sharing reason as yamlWhy. */
-const schemaWhy = (err: z.ZodError): string => err.issues.map((i) => i.path.join(".") + " " + i.message).join("; ");
 
 /** ONE tenant as the TOLERANT scan sees it: the registration fields a DISCOVERY (the orphan scan) or a
  *  REMOVAL (tenant-purge / the replace, via tenant-replace.ts) needs. `guid`/`stage` come from the PATH
@@ -330,6 +328,20 @@ export class TenantRegistrations {
         remove: [guard(registrationPath(stage, guid))],
       }),
     );
+  }
+
+  /** Every registrations/<guid>/<stage>.yaml brought to the schema this release ships
+   *  (registrations.ts migrateRegistrationFiles), in ONE turn and at most ONE commit ending in
+   *  `marker`. The boot runs it once (registrations-migration.ts), after the catalog carry. A file
+   *  the schema refuses is answered by path and reason, never rewritten. */
+  async migrateToSchema(marker: string): Promise<RegistrationMigration> {
+    return this.repo.withBranch(this.branch, async (books) => {
+      const paths: string[] = [];
+      for (const g of await books.listDir("registrations")) {
+        paths.push(...STAGE.map((stage) => registrationPath(stage, g)));
+      }
+      return migrateRegistrationFiles(books, TenantRegistrationSchema, paths, guard, marker);
+    });
   }
 
   /** Rewrite the whole registration file from a complete entry. Every read-modify-write op above goes

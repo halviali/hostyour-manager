@@ -44,7 +44,11 @@ export async function boot(): Promise<void> {
   wired.serveEmergencySocket();
   // The one slow act of boot runs behind the listening server, so /healthz answers from the first
   // second and the liveness probe has nothing to kill (#166).
-  void wired.carryCatalogTrunk();
+  // The carry never rejects, so the registrations follow it: every standing registration brought to
+  // this release's schema, once per boot and never on a timer — a schema changes only with a release,
+  // and a release boots the Manager. After the carry rather than beside it only so the log reads in
+  // order; the carry brings charts and rewrites no registration.
+  void wired.carryCatalogTrunk().then(wired.migrateRegistrations);
   // ... and again every ten minutes, so a change on the catalog's trunk reaches a standing tenant
   // without a boot or a plan (#169).
   scheduleCatalogCarry(wired.carryCatalogTrunk, logger);

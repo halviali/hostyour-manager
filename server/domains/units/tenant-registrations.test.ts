@@ -19,6 +19,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
     resetNonce: "1",
     suspended: false,
     quiesced: false,
+    appsImage: "", appsImageTag: "",
     ...over,
   };
 }

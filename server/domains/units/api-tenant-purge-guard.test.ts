@@ -92,7 +92,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
     cluster: "s1", subdomain: SUB,
     members: TEST_MEMBER_RECORDS, identityProvider: "auth",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
-    seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false,
+    seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     ...over,
   };
 }

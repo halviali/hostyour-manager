@@ -204,6 +204,7 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
     resetNonce: "1",
     suspended: false,
     quiesced: false,
+    appsImage: "", appsImageTag: "",
     ...regOver,
   };
   await registrations.commitTenant({ stage, guid, registration, runId: "run_seed" });

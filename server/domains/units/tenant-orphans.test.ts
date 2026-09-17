@@ -44,6 +44,7 @@ function entry(guid: string, subdomain: string, over: Partial<TenantRegistration
       resetNonce: "1",
       suspended: false,
       quiesced: false,
+      appsImage: "", appsImageTag: "",
       ...registrationOver,
     },
   };

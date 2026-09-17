@@ -1,8 +1,8 @@
 // Registrations — the Manager's ONLY writer of the platform repo's
 // registrations/**, and the ONE writer of EVERY file of a unit. Policy lives here; transport lives in
 // the PlatformRepo git adapter. The laws, factored into reusable primitives (serializePointer /
-// parseRegistration / trailer / makeRegistrationGuard) so the tenant-shaped registrations
-// (tenant-registrations.ts) obeys the same ones:
+// parseRegistration / trailer / makeRegistrationGuard / migrateRegistrationFiles) so the tenant-shaped
+// registrations (tenant-registrations.ts) obeys the same ones:
 //   - PATH GUARD: every write path matches its registrations's namespace regex — a traversal or a stray
 //     path is a programming error (INTERNAL), never a commit. makeRegistrationGuard(pattern) mints one
 //     guard per namespace (registrations/<unit>/… here; registrations/<guid>/… in the tenant registrations).
@@ -134,6 +134,100 @@ export function parseRegistration(text: string): Record<string, unknown> {
 /** The [<runId>] commit-message trailer — every registration commit ends with it. */
 export const trailer = (runId: string): string => `[${runId}]`;
 
+/** The marker a BOOT's migration commit ends with, where a run's trailer stands: the Manager release
+ *  whose schema wrote the file, so the commit is traceable to the boot that made it. */
+export const bootMarker = (version: string): string => trailer(`boot ${version}`);
+
+export interface RegistrationRewrite {
+  path: string;
+  /** The top-level fields that moved: `+key` added, `-key` dropped, `~key` changed in value. Empty
+   *  when only the form moved — a hand-written file, or one written in an older key order. */
+  fields: string[];
+}
+
+export interface RegistrationRefusal {
+  path: string;
+  reason: string;
+}
+
+/** What ONE books branch's migration did (registrations-migration.ts). */
+export interface RegistrationMigration {
+  /** The files that stood on the branch — how much was covered. */
+  read: number;
+  rewritten: RegistrationRewrite[];
+  refused: RegistrationRefusal[];
+  /** The one commit of this branch, or null when every readable file already stood in the schema's form. */
+  commit: string | null;
+}
+
+/** The top-level keys that differ between the file as parsed and the entry as the schema gives it
+ *  back. JSON.stringify compares a nested value by content, so a list whose element gained a
+ *  defaulted key reads as `~<list>`. */
+function fieldsMoved(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  const moved: string[] = [];
+  for (const k of Object.keys(after)) {
+    if (after[k] === undefined) continue;
+    if (before[k] === undefined) moved.push(`+${k}`);
+    else if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) moved.push(`~${k}`);
+  }
+  for (const k of Object.keys(before)) {
+    if (before[k] !== undefined && after[k] === undefined) moved.push(`-${k}`);
+  }
+  return moved;
+}
+
+/** The one-line message of a migration commit: every rewritten file with the fields that moved,
+ *  then the boot marker. */
+export function migrationMessage(rewritten: RegistrationRewrite[], marker: string): string {
+  const files = rewritten.map((r) => `${r.path} ${r.fields.length > 0 ? r.fields.join(" ") : "(form only)"}`).join("; ");
+  return `migrate-registrations: ${files} ${marker}`;
+}
+
+/** THE MIGRATION OF ONE BRANCH'S FILES to the schema this release ships, inside the turn `books`
+ *  holds — the same exclusive turn every flip takes, so no run commits between the read and the
+ *  write. Each path with a file is parsed through `schema` and serialized as the writer writes it
+ *  (serializePointer: the schema's output, in the schema's key order). A key the schema defaults is
+ *  added; a key it does not know is dropped, because z.object() strips unknown keys rather than
+ *  refusing them; a legacy spelling a field's transform folds is folded. A file whose bytes already
+ *  equal that form is left. A file the schema REFUSES, or one standing outside the registry's own
+ *  `guard`, is recorded with its reason and left as it stands: rewriting it would invent a
+ *  registration, and deleting it would offboard a unit at boot. Every rewrite of the branch lands in
+ *  ONE commit naming the files and the fields, or in none. */
+export async function migrateRegistrationFiles<T extends object>(
+  books: BranchScope,
+  schema: z.ZodType<T>,
+  paths: string[],
+  guard: (path: string) => string,
+  marker: string,
+): Promise<RegistrationMigration> {
+  let read = 0;
+  const rewritten: RegistrationRewrite[] = [];
+  const refused: RegistrationRefusal[] = [];
+  const write: { path: string; content: string }[] = [];
+  for (const path of paths) {
+    const raw = await books.readFile(path);
+    if (raw === null) continue;
+    read += 1;
+    try {
+      const parsed = parseRegistration(raw);
+      const r = schema.safeParse(parsed);
+      if (!r.success) {
+        refused.push({ path, reason: `failed its schema: ${schemaWhy(r.error)}` });
+        continue;
+      }
+      const content = serializePointer(schema, r.data);
+      if (content === raw) continue;
+      write.push({ path: guard(path), content });
+      rewritten.push({ path, fields: fieldsMoved(parsed, r.data as Record<string, unknown>) });
+    } catch (e) {
+      refused.push({ path, reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  if (write.length === 0) return { read, rewritten, refused, commit: null };
+  const { commit } = await books.commit({ message: migrationMessage(rewritten, marker), write });
+  return { read, rewritten, refused, commit };
+}
+
 export interface RegistrationRead {
   entry: ConsumerRegistration;
 }
@@ -147,9 +241,10 @@ export interface ScannedConsumer {
   entry: ConsumerStageRegistration;
 }
 
-/** WHY a body failed its schema, as "path message; path message" — shared wording with the tenant
- *  registrations's schemaWhy so a broken registration reads identically across the two formats. */
-const schemaWhy = (err: z.ZodError): string => err.issues.map((i) => i.path.join(".") + " " + i.message).join("; ");
+/** WHY a body failed its schema, as "path message; path message" — one wording for the consumer
+ *  registrations, the tenant registrations and the boot migration, so a broken registration reads
+ *  identically wherever it is met. */
+export const schemaWhy = (err: z.ZodError): string => err.issues.map((i) => i.path.join(".") + " " + i.message).join("; ");
 
 /** What ONE unit's registration set says, as the writer is asked to commit it: the stage-free build
  *  half (always written) and, for a DEPLOYABLE unit, the deploy group of ONE stage. Splitting the input
@@ -505,6 +600,20 @@ export class Registrations {
         remove: [guard(buildPath(name))],
       });
       return { removed: true };
+    });
+  }
+
+  /** Every file of every unit — build.yaml and each stage file — brought to the schema this release
+   *  ships (migrateRegistrationFiles), in ONE turn and at most ONE commit ending in `marker`. The
+   *  boot runs it once (registrations-migration.ts). A file the schema refuses is answered by path
+   *  and reason, never rewritten. */
+  async migrateToSchema(marker: string): Promise<RegistrationMigration> {
+    return this.repo.withBranch(this.branch, async (books) => {
+      const paths: string[] = [];
+      for (const unit of await books.listDir("registrations")) {
+        paths.push(buildPath(unit), ...STAGE.map((stage) => stagePath(stage, unit)));
+      }
+      return migrateRegistrationFiles(books, ConsumerRegistrationSchema, paths, guard, marker);
     });
   }
 

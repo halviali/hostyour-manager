@@ -35,12 +35,12 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
       const registration: TenantRegistration = TenantRegistrationSchema.parse({
         cluster: p.cluster,
         subdomain: p.subdomain,
-        // The tenant's own bundle, or the empty pair: both keys always, because the tenants
-        // ApplicationSet delivers them bare under missingkey=error; the repository reaches no chart
-        // and stands only where there is one.
+        // The tenant's own bundle, or none: the schema defaults the two the tenants ApplicationSet
+        // reads bare to the empty string; the repository reaches no chart and stands only where
+        // there is one.
         ...(p.appsRepo ? { appsRepo: p.appsRepo } : {}),
-        appsImage: p.appsImage ?? "",
-        appsImageTag: appsImageTag ?? "",
+        appsImage: p.appsImage,
+        appsImageTag,
         // As the approved validation froze them: this copy is the one the CHARTS read, and it must
         // say what the tenant WAS created with, not what the manifest says when it is read back.
         members: p.members, identityProvider: p.identityProvider,

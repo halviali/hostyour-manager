@@ -73,6 +73,7 @@ export function tenantEntry(over: Partial<TenantRegistration> = {}): TenantRegis
     resetNonce: "1",
     suspended: false,
     quiesced: false,
+    appsImage: "", appsImageTag: "",
     ...over,
   };
 }

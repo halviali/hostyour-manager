@@ -170,7 +170,7 @@ describe("create-tenant plans the zone before the first write", () => {
     seedClusters(dns);
     dns.seed(WILDCARD, "A", S2_ADDRESS); // the old tenant's wildcard, provisioned at s2
     const prt = ports(dns);
-    await prt.registrations.commitTenant({ stage: "prod", guid: "e2e8ymj86dk8", runId: "run_old", registration: { cluster: "s2", subdomain: SUB, members: testMembers([]), identityProvider: "auth", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false } });
+    await prt.registrations.commitTenant({ stage: "prod", guid: "e2e8ymj86dk8", runId: "run_old", registration: { cluster: "s2", subdomain: SUB, members: testMembers([]), identityProvider: "auth", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" } });
     const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx([]));
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
