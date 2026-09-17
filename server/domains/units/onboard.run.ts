@@ -33,7 +33,7 @@ import { checkStep, DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
 import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
 import { resolveUnitQuota } from "./unit-size.ts";
 import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep } from "./onboard-registration.ts";
-import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader } from "../../adapters/kube/port.ts";
+import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader, ClusterReader } from "../../adapters/kube/port.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -235,6 +235,19 @@ export interface OnboardPorts {
   releaseBuildAppearMs: number;
   /** Poll tick of the release watches; overridable for tests. */
   releasePollIntervalMs?: number;
+  /** How long the unit's three build Secrets may take to stand again after refresh-repo-pat deleted
+   *  them; the release is dispatched only once they do, or the clone would race the materialization.
+   *  Defaults to two minutes (ESO materializes an OnChange ExternalSecret whose target is gone within
+   *  seconds; two minutes outlasts a controller that is restarting); overridable for tests. */
+  buildSecretsMaterializeMs?: number;
+  /** The BUILD PLANE's cluster reader — this Manager's own cluster, where every unit's `<name>-build`
+   *  namespace stands (refresh-repo-pat deletes the unit's build Secrets there and reads their
+   *  ExternalSecrets' return). Injected directly, exactly as buildArgo is and for the same reason: the
+   *  build namespace is master-local whatever cluster the unit targets, and a build-only unit has no
+   *  clusterId to resolve one from. Optional but UNCONDITIONALLY needed by the release re-run —
+   *  absent ⇒ the step fails loud, because a rewrite whose Secrets are not deleted is a release that
+   *  clones with the old token. */
+  buildClusterReader?: ClusterReader;
   /** The trigger's 404 retry window (a just-committed workflow indexes with a lag); overridable for
    *  tests. Defaults to 60s at 5s ticks. */
   dispatchRetry?: { budgetMs: number; intervalMs: number };

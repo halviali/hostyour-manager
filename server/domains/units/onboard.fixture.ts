@@ -8,6 +8,9 @@ import { seedClusterMaps } from "./cluster-map.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
+import type { ExternalSecretRow } from "../../adapters/kube/port.ts";
+import { BUILD_TARGET_SECRETS } from "./app-token-refresh.ts";
+import { unitBuildNamespace } from "./build-rbac.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
@@ -91,6 +94,35 @@ export const CHANNEL_STAGES: ChannelStages = { alpha: ["dev"], beta: ["dev", "te
 
 export type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
+/** The moment every build ExternalSecret of the fixture last materialized, before any deletion. */
+export const BUILD_SECRETS_MATERIALIZED_AT = "2026-01-01T00:00:00Z";
+
+/** The three ExternalSecret rows of a unit's build namespace as the consumer-build inventory renders
+ *  them: named after the Secret each targets, Ready, materialized once at `at`. */
+export function buildSecretRows(at = BUILD_SECRETS_MATERIALIZED_AT): ExternalSecretRow[] {
+  return BUILD_TARGET_SECRETS.map((name) => ({ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: at }));
+}
+
+/** The build plane's cluster reader with ESO standing behind it: the unit's three build
+ *  ExternalSecrets are materialized, and a deletion of a Secret one of them targets is answered the
+ *  way `refreshPolicy: OnChange` answers it — the row is written again, and its `refreshTime` moves
+ *  to a later instant. `ready` does not change across it, which is why a test cannot read the
+ *  return off that bit. A test about ESO NOT coming back uses a plain FakeClusterReader instead. */
+export class FakeBuildPlaneClusterReader extends FakeClusterReader {
+  private materializations = 0;
+  constructor(unit: string) {
+    super({ externalSecretsByNamespace: { [unitBuildNamespace(unit)]: buildSecretRows() } });
+  }
+  override async deleteSecret(namespace: string, name: string): Promise<void> {
+    await super.deleteSecret(namespace, name);
+    const rows = await this.listExternalSecrets(namespace);
+    if (!rows.some((r) => r.targetSecret === name)) return;
+    this.materializations += 1;
+    const at = new Date(Date.parse(BUILD_SECRETS_MATERIALIZED_AT) + this.materializations * 1000).toISOString();
+    this.setExternalSecrets(namespace, rows.map((r) => (r.targetSecret === name ? { ...r, refreshTime: at } : r)));
+  }
+}
+
 /** The full port set with every release-cycle fake wired green: the dispatched workflow run
  *  completes with success, the build plane carries the unit's Succeeded release run, and the DNS
  *  fake knows the target cluster's own A record. */
@@ -150,6 +182,11 @@ export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts
     }),
     repoCredential: new FakeRepoCredentialWriter(),
     buildPlane,
+    // The build plane's cluster reader refresh-repo-pat deletes the build Secrets through, with ESO
+    // materializing them again behind every deletion — scripted for the fixture unit, so a journey
+    // through the release re-run converges; a test about the wait scripts its own.
+    buildClusterReader: new FakeBuildPlaneClusterReader("acme"),
+    buildSecretsMaterializeMs: 200,
     dns,
     ...portOver,
   };

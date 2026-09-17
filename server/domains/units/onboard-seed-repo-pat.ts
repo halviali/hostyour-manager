@@ -4,8 +4,11 @@
 // orchestrator and the per-unit PAT writes are a small, self-contained unit.
 import type { Step } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
+import { errValidation } from "../../kernel/errors.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import { refreshUnitRepoPat } from "./app-token-refresh.ts";
+import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshUnitRepoPat } from "./app-token-refresh.ts";
+import { unitBuildNamespace } from "./build-rbac.ts";
+import { sleep } from "./onboard-release-cycle.ts";
 
 /** The onboard `seed-repo-pat` step: write the ONE per-unit GitHub PAT (the SAME value the
  *  Manager clones with) to secret/build/<name>/repo-pat (property `pat`) on the LOCAL Vault — the
@@ -42,22 +45,53 @@ export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
   };
 }
 
-/** The `refresh-repo-pat` step: REWRITE the unit's entry with the value its credential opens to now.
- *  For a `github-app` credential that is a token the App minted this second, so the release
+/** The `refresh-repo-pat` step: REWRITE the unit's entry with the value its credential opens to now,
+ *  DELETE the three build Secrets that carry it, and WAIT until ESO has materialized them again.
+ *  For a `github-app` credential the value is a token the App minted this second, so the release
  *  triggered next clones with one that lives a full hour — the boot-time and 45-minute refresh
  *  (app-token-refresh.ts) keeps the entry alive between releases, and this step keeps a release
- *  right after a Manager boot from meeting the value a dead Manager left. Runs only in the release
+ *  right after a Manager boot from meeting the value a dead Manager left. The deletion is what
+ *  carries the rewrite into the Secrets: the unit's ExternalSecrets read Vault on deploy and on the
+ *  deletion of their target and never on a timer (`refreshPolicy: OnChange`). The wait is what keeps
+ *  the clone from racing the materialization: the pipeline's clone task reads `build-git-https` the
+ *  moment it starts, and a Secret still absent then fails the run. The return is read off each
+ *  ExternalSecret's `refreshTime`, the one field that moves on a materialization — `ready` stays
+ *  True across the deletion, and the Manager holds no `get` on Secrets. Runs only in the release
  *  re-run of a unit already registered (tenant-apps-steps.ts): the first onboarding seeds the entry
  *  through seed-repo-pat and clones within the hour. */
 export function refreshRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
   return {
     name: "refresh-repo-pat",
-    title: "Rewrite the unit's repo PAT in the local build Vault with a value minted now",
+    title: "Rewrite the unit's repo PAT in the local build Vault with a value minted now, and carry it into the build Secrets",
     run: async (ctx) => {
+      const kube = ports.buildClusterReader;
+      if (!kube) {
+        throw errValidation(`onboard "${p.consumerName}" requires the build plane's cluster reader to delete the unit's build Secrets after the repo PAT rewrite but none is wired on this manager — without the deletion ESO keeps the Secrets it wrote before, and the release would clone with the old token`);
+      }
+      const namespace = unitBuildNamespace(p.consumerName);
+      const before = await readBuildSecretRefreshTimes(kube, p.consumerName);
       await refreshUnitRepoPat({ store: ctx.creds, seeder: ports.seeder }, p.consumerName, p.repoCredentialId, { purpose: "consumer-onboard:refresh-repo-pat", runId: ctx.runId });
       const path = `${KV_MOUNT}/build/${p.consumerName}/repo-pat`;
-      ctx.checkpoint({ path });
-      ctx.log("meta", `repo PAT rewritten at ${path} (property pat) with the credential's current value — the release below clones with it`);
+      ctx.log("meta", `repo PAT rewritten at ${path} (property pat) with the credential's current value`);
+      await deleteBuildSecrets(kube, p.consumerName);
+      ctx.log("meta", `${BUILD_TARGET_SECRETS.join(", ")} deleted in ${namespace} — waiting for ESO to materialize them again from the rewritten entry`);
+      const budgetMs = ports.buildSecretsMaterializeMs ?? 2 * 60_000;
+      const deadline = Date.now() + budgetMs;
+      const pollMs = ports.releasePollIntervalMs ?? 2_000;
+      for (;;) {
+        const now = await readBuildSecretRefreshTimes(kube, p.consumerName);
+        // A Secret stands again once its ExternalSecret's refreshTime moved past the one read before
+        // the deletion. Two materializations inside one second read as one, because the API serves
+        // the time to the second; the wait then runs out and refuses rather than passing.
+        const pending = BUILD_TARGET_SECRETS.filter((name) => now[name] === "" || now[name] === before[name]);
+        if (pending.length === 0) break;
+        if (Date.now() >= deadline || ctx.signal.aborted) {
+          throw errValidation(`${pending.join(", ")} in ${namespace} did not materialize again within ${Math.round(budgetMs / 1000)}s of their deletion — their ExternalSecrets have not written them since, so the release was not dispatched: its clone would read no credential at all. Read the ExternalSecrets in ${namespace} for what ESO says.`);
+        }
+        await sleep(pollMs, ctx.signal);
+      }
+      ctx.checkpoint({ path, namespace, secrets: [...BUILD_TARGET_SECRETS] });
+      ctx.log("meta", `${BUILD_TARGET_SECRETS.join(", ")} stand again in ${namespace}, materialized from the rewritten entry — the release below clones with it`);
     },
   };
 }

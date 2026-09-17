@@ -392,7 +392,7 @@ function buildConsumerOnboarding(
   // master reuses the trio verbatim, a slave gets a per-slave ClusterReader over its harvested bearer
   // + sealed CA bundle, while argo/projects STAY master-local (the slave's Application CRs +
   // AppProject live in the per-slave ArgoCD instance ON the master).
-  const { argoReader: argo } = kube.master;
+  const { argoReader: argo, clusterReader: buildClusterReader } = kube.master;
   const { resolver } = kube;
 
   // The per-call consumer-PAT GitHub client: the scope preflight, the build webhook
@@ -487,6 +487,9 @@ function buildConsumerOnboarding(
     deployRefVisibleMs: DEPLOY_REF_VISIBLE_MS,
     releaseBuildAppearMs: RELEASE_BUILD_APPEAR_MS,
     buildPlane,
+    // The build plane's own cluster reader (refresh-repo-pat): every `<name>-build` namespace stands
+    // on this cluster, so the master-local reader is handed over directly, exactly as buildArgo is.
+    buildClusterReader,
     // The unit's ONE public DNS record (provision-dns / remove-dns). Absent ⇒ fail loud.
     ...(dns ? { dns } : {}),
     // The ArgoCD repository credential (provision-repo-credential): without it the generated

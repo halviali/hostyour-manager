@@ -200,7 +200,7 @@ export interface SmokeResult {
 }
 
 /** One ExternalSecret a namespace holds: what it is called, whether ESO reports it Ready, WHY it
- *  says so, and which Secret it materializes.
+ *  says so, which Secret it materializes, and WHEN it last did.
  *
  *  THE REASON AND THE TARGET ARE WHAT A BOOLEAN CANNOT SAY. `SmokeResult.externalSecretsReady`
  *  collapses a whole namespace to one bit, so a gate built on it can report that something is stuck
@@ -216,6 +216,12 @@ export interface ExternalSecretRow {
   /** `.spec.target.name` — the Secret this materializes into, or the empty text where the
    *  ExternalSecret names none (ESO then uses its own name). */
   targetSecret: string;
+  /** `.status.refreshTime` — the moment ESO last fetched the value AND wrote the target Secret, as
+   *  the RFC 3339 text the API serves, or the empty text where it never has. It moves on every
+   *  materialization and on nothing else, so a caller that deleted the target Secret reads its return
+   *  off this field: `ready` stays True across the deletion and cannot say it. The Manager's grants
+   *  carry no `get` on Secrets, and this is what stands in for one. */
+  refreshTime: string;
 }
 
 /** kube-system/hostyour-deploy-state, written by the platform's deploy-state chart on every sync — attest-target

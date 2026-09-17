@@ -146,6 +146,10 @@ export class FakeClusterReader implements ClusterReader {
       /** Makes listExternalSecrets THROW — the UPSTREAM a kube API answers a list with while it is
        *  restarting, which a polling gate must read as a failing tick. */
       throwOnListExternalSecrets?: Error | undefined;
+      /** Makes deleteSecret THROW — the 403 a credential without `delete` on Secrets gets, or the
+       *  UPSTREAM of an API server that is away. The App-token refresh has to log the unit and go on
+       *  to the next one rather than die in its timer. */
+      throwOnDeleteSecret?: Error;
     } = {},
   ) {}
 
@@ -304,6 +308,7 @@ export class FakeClusterReader implements ClusterReader {
 
   /** Absent is success, exactly as the live client treats a 404. */
   async deleteSecret(namespace: string, name: string): Promise<void> {
+    if (this.scripted.throwOnDeleteSecret) throw this.scripted.throwOnDeleteSecret;
     this.secretWrites.push({ op: "delete", namespace, name });
     this.secrets.delete(`${namespace}/${name}`);
   }

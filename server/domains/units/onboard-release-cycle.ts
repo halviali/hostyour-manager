@@ -37,7 +37,8 @@ export interface ReleaseCycleRuntime {
   imageTag?: string | undefined;
 }
 
-const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+/** A bounded pause the run's cancel cuts short — the tick between two polls of a watch. */
+export const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted) return resolve();
     const t = setTimeout(done, ms);

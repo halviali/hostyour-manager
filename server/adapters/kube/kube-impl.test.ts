@@ -346,36 +346,37 @@ describe("workload mappers", () => {
 });
 
 describe("mapExternalSecrets", () => {
-  const raw = (name: string, status: string, reason: string, target?: string) => ({
+  const raw = (name: string, status: string, reason: string, target?: string, refreshTime?: string | null) => ({
     metadata: { name },
     ...(target !== undefined ? { spec: { target: { name: target } } } : {}),
-    status: { conditions: [{ type: "Ready", status, reason }] },
+    status: { conditions: [{ type: "Ready", status, reason }], ...(refreshTime !== undefined ? { refreshTime } : {}) },
   });
 
-  it("carries the name, the Ready verdict, its reason and the Secret the spec targets", () => {
-    expect(mapExternalSecrets([raw("repo-platform", "False", "SecretSyncedError", "repo-platform-creds")])).toEqual([
-      { name: "repo-platform", ready: false, reason: "SecretSyncedError", targetSecret: "repo-platform-creds" },
+  it("carries the name, the Ready verdict, its reason, the Secret the spec targets and the moment ESO last wrote it — a refreshTime served as null reads as never", () => {
+    expect(mapExternalSecrets([raw("repo-platform", "False", "SecretSyncedError", "repo-platform-creds", "2026-09-17T10:00:00Z"), raw("nulled", "True", "SecretSynced", "x", null)])).toEqual([
+      { name: "repo-platform", ready: false, reason: "SecretSyncedError", targetSecret: "repo-platform-creds", refreshTime: "2026-09-17T10:00:00Z" },
+      { name: "nulled", ready: true, reason: "SecretSynced", targetSecret: "x", refreshTime: "" },
     ]);
   });
 
-  it("an ExternalSecret with no Ready condition at all is NOT ready, and names no reason", () => {
+  it("an ExternalSecret with no Ready condition at all is NOT ready, names no reason, and has never written its Secret", () => {
     // ESO has not looked at it yet. Fail closed: reading it as ready would let a gate pass on a
     // credential that has never been fetched.
     expect(mapExternalSecrets([{ metadata: { name: "fresh" } }])).toEqual([
-      { name: "fresh", ready: false, reason: "", targetSecret: "" },
+      { name: "fresh", ready: false, reason: "", targetSecret: "", refreshTime: "" },
     ]);
   });
 
   it("drops an item with no name, because a row nobody can name tells an operator nothing", () => {
     expect(mapExternalSecrets([{ status: { conditions: [] } }, raw("cluster-slave", "True", "SecretSynced")])).toEqual([
-      { name: "cluster-slave", ready: true, reason: "SecretSynced", targetSecret: "" },
+      { name: "cluster-slave", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "" },
     ]);
   });
 });
 
 describe("externalSecretsAllReady", () => {
-  const ready = { name: "a", ready: true, reason: "SecretSynced", targetSecret: "" };
-  const notReady = { name: "b", ready: false, reason: "SecretSyncedError", targetSecret: "" };
+  const ready = { name: "a", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "" };
+  const notReady = { name: "b", ready: false, reason: "SecretSyncedError", targetSecret: "", refreshTime: "" };
 
   it("zero ExternalSecrets is ready", () => {
     expect(externalSecretsAllReady([])).toBe(true);

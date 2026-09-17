@@ -15,7 +15,7 @@ import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, 
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
-import { ports as onboardPorts, type FakeSeeder } from "./onboard.fixture.ts";
+import { ports as onboardPorts, FakeBuildPlaneClusterReader, type FakeSeeder } from "./onboard.fixture.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
@@ -54,6 +54,8 @@ interface Harness {
   github: FakeGitHubConsumer;
   seeder: FakeSeeder;
   buildPlane: FakeBuildPlane;
+  /** The build plane's cluster reader: what the release re-run deletes the unit's build Secrets through. */
+  buildCluster: FakeBuildPlaneClusterReader;
 }
 
 function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; noApp?: boolean } = {}): Harness {
@@ -66,7 +68,8 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
   const github = new FakeGitHubConsumer();
   const buildPlane = new FakeBuildPlane();
   buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true, imageTag: IMAGE_TAG });
-  const onboard = onboardPorts({ repo: unitReader, consumerRepo, github, buildPlane });
+  const buildCluster = new FakeBuildPlaneClusterReader(UNIT);
+  const onboard = onboardPorts({ repo: unitReader, consumerRepo, github, buildPlane, buildClusterReader: buildCluster });
   const ports: TenantOnboardPorts = {
     seeder: fakeTenantSeeder(),
     repo: catalogReader,
@@ -92,7 +95,7 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
     ...(over.noApp ? {} : { githubApp }),
     ...over.ports,
   };
-  return { ports, githubApp, catalogReader, unitReader, consumerRepo, github, seeder: onboard.seeder as FakeSeeder, buildPlane };
+  return { ports, githubApp, catalogReader, unitReader, consumerRepo, github, seeder: onboard.seeder as FakeSeeder, buildPlane, buildCluster };
 }
 
 /** A credential store shaped like the real one for the kind under test: a `github-app` credential
@@ -309,6 +312,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     expect(registration?.entry).toMatchObject({ name: UNIT, repoURL: TENANT_URL, repoCredentialId: "cred_1", owner: SUBDOMAIN, builds: [UNIT] });
     expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_hour_two" }]);
     expect(h.seeder.refreshedRepoPats).toEqual([]);
+    expect(h.buildCluster.secretWrites).toEqual([]);
     expect(h.github.created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_hour_two" }]);
     expect(h.github.dispatches.map((d) => ({ repo: d.repo, token: d.token, inputs: d.inputs }))).toEqual([{ repo: UNIT, token: "ghs_hour_two", inputs: { version: "0.1.0", channel: "stable", stage: "prod" } }]);
     expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
@@ -329,7 +333,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
     await expect(run("onboard-build-only").run(ctx(p, [], creds.store))).rejects.toThrow(/states no image-tag result/);
   });
-  it("re-runs the release of a unit already registered build-only: rewrites its build repo-pat with a token minted now, then dispatches with the same", async () => {
+  it("re-runs the release of a unit already registered build-only: rewrites its build repo-pat with a token minted now, deletes its build Secrets, waits for their return, then dispatches with the same", async () => {
     const h = harness({ ports: { buildUnitRegistration: async (unit) => (unit === UNIT ? { form: "build-only", repoCredentialId: "cred_old" } : null) } });
     const p = await planned(h);
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
@@ -341,7 +345,12 @@ describe("create-repository and onboard-build-only — a github-app credential a
     // Not the create-only seed: the entry stands from the onboarding and holds a dead token.
     expect(h.seeder.buildRepoPats).toEqual([]);
     expect(h.seeder.refreshedRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_rerun" }]);
-    expect(logs.findIndex((l) => l.includes("repo PAT rewritten"))).toBeLessThan(logs.findIndex((l) => l.includes("release workflow dispatched")));
+    // The three target Secrets of the unit's ExternalSecrets, deleted in ITS build namespace behind
+    // the rewrite, and the dispatch only after they stood again — a clone that started between the
+    // deletion and the materialization would read no credential.
+    expect(h.buildCluster.secretWrites).toEqual(["build-git-https", "bump-git-https", "build-npmrc"].map((name) => ({ op: "delete", namespace: `${UNIT}-build`, name })));
+    expect(logs.findIndex((l) => l.includes("repo PAT rewritten"))).toBeLessThan(logs.findIndex((l) => l.includes(`deleted in ${UNIT}-build`)));
+    expect(logs.findIndex((l) => l.includes(`stand again in ${UNIT}-build`))).toBeLessThan(logs.findIndex((l) => l.includes("release workflow dispatched")));
     expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
     expect(h.github.dispatches[0]?.token).toBe("ghs_rerun");
   });

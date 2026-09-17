@@ -71,9 +71,10 @@ export interface Wired {
    *  state behind, never a wrong one. */
   carryCatalogTrunk: () => Promise<void>;
   /** The build repo-pat of every unit whose credential is the platform's GitHub App, rewritten with
-   *  a token minted now (domains/units/app-token-refresh.ts). boot.ts runs it once behind the
-   *  listening server and then every 45 minutes. Never rejects — every failure is logged per unit.
-   *  A no-op where the consumer family is not wired: there are then no build registrations. */
+   *  a token minted now, and the unit's three build Secrets deleted so ESO materializes the entry
+   *  again (domains/units/app-token-refresh.ts). boot.ts runs it once behind the listening server
+   *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
+   *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
   /** Every standing registration on both books brought to the schema this release ships
    *  (domains/units/registrations-migration.ts): a file the schema now defaults a key of is
@@ -240,8 +241,10 @@ export async function wire(): Promise<Wired> {
   // the listening server, see Wired.carryCatalogTrunk — rather than at the first tenant
   // registration (wire-units.ts carryTrunkToBooksBranch); every tenant plan carries it again.
   const carryCatalogTrunk = carryCatalogTrunkLater(units.carryTrunkToBooksBranch, logger);
+  // The deletion after each rewrite reaches the build namespaces over the master-local cluster
+  // reader: they stand on this cluster whatever cluster a unit targets.
   const refreshAppTokensLater = registrations
-    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, logger }); }
+    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger }); }
     : async (): Promise<void> => undefined;
   // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a

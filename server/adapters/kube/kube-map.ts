@@ -226,11 +226,11 @@ function workload(kind: string, name: string | undefined, ready: number, desired
 interface RawExternalSecret {
   metadata?: { name?: string };
   spec?: { target?: { name?: string } };
-  status?: { conditions?: RawCondition[] };
+  status?: { conditions?: RawCondition[]; refreshTime?: string | null };
 }
 
 /** Every ExternalSecret a list tick found, one row each: the name, whether the Ready condition
- *  reads True, that condition's reason, and the Secret the spec targets.
+ *  reads True, that condition's reason, the Secret the spec targets, and when ESO last wrote it.
  *
  *  ONE MAPPER AND NOT TWO. `SmokeResult.externalSecretsReady` is derived from these rows
  *  (kube.ts), so the bit a smoke reports and the rows a gate names cannot drift apart — which they
@@ -247,6 +247,7 @@ export function mapExternalSecrets(rawItems: readonly unknown[]): ExternalSecret
       ready: ready?.status === "True",
       reason: ready?.reason ?? "",
       targetSecret: item.spec?.target?.name ?? "",
+      refreshTime: item.status?.refreshTime ?? "",
     });
   }
   return rows;
