@@ -12,6 +12,10 @@ export default tseslint.config(
       "*.config.ts",
       "*.config.js",
       ".dependency-cruiser.cjs",
+      // Machine-local tooling a workstation drops into the checkout (an agent's helpers, a code
+      // graph): git ignores them, and what git never commits is not this repository's hygiene.
+      ".claude/**",
+      "graft/**",
     ],
   },
   ...tseslint.configs.recommended,
