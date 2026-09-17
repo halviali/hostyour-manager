@@ -220,22 +220,32 @@ export class Registrations {
    *  tolerant stage scan there is no fail-soft here: skipping an unreadable file would silently shrink
    *  the set the uniqueness check runs against, and the gate would pass a name that is in fact taken. */
   async listAttestedBuildNames(exceptUnit?: string): Promise<{ unit: string; build: string }[]> {
-    return this.repo.withBranch(this.branch, async (books) => {
     const attested: { unit: string; build: string }[] = [];
-    for (const unit of await books.listDir("registrations")) {
+    for (const { unit, entry } of await this.listBuildRegistrations()) {
       if (unit === exceptUnit) continue;
-      const path = buildPath(unit);
-      const raw = await books.readFile(path);
-      if (raw === null) continue; // no build.yaml — the unit attests no build name
-      let entry: ConsumerRegistration;
-      try {
-        entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
-      } catch (e) {
-        throw errValidation(`${path} is not a readable build registration, so the build-name uniqueness check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
-      }
       for (const build of entry.builds ?? []) attested.push({ unit, build });
     }
     return attested;
+  }
+
+  /** Every BUILD registration the branch carries — `registrations/<unit>/build.yaml`, parsed — in
+   *  directory order. A unit without one (deploy-only) is not listed. THROWS on a build.yaml that
+   *  does not read or does not validate, naming the file: every reader of this set (the build-name
+   *  uniqueness check, the App-token refresh) would otherwise run over a set that silently shrank. */
+  async listBuildRegistrations(): Promise<{ unit: string; entry: ConsumerRegistration }[]> {
+    return this.repo.withBranch(this.branch, async (books) => {
+      const registrations: { unit: string; entry: ConsumerRegistration }[] = [];
+      for (const unit of await books.listDir("registrations")) {
+        const path = buildPath(unit);
+        const raw = await books.readFile(path);
+        if (raw === null) continue;
+        try {
+          registrations.push({ unit, entry: ConsumerRegistrationSchema.parse(parseRegistration(raw)) });
+        } catch (e) {
+          throw errValidation(`${path} is not a readable build registration, so the build-name uniqueness check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      return registrations;
     });
   }
 

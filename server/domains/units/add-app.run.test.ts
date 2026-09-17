@@ -102,7 +102,7 @@ const TENANT_CATALOG: AppsManifest = {
  *  repository it was asked for. */
 function tenantCatalogPort(manifest: AppsManifest | null = TENANT_CATALOG): { port: TenantAppsManifestReader; asked: string[] } {
   const asked: string[] = [];
-  return { asked, port: async (appsRepo) => { asked.push(appsRepo); return manifest; } };
+  return { asked, port: async ({ appsRepo }) => { asked.push(appsRepo); return manifest; } };
 }
 
 /** A FakePlatformRepo pre-seeded with a live tenant carrying one app ("erp") — the registration file a

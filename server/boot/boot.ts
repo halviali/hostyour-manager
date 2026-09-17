@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { wire } from "./wire.ts";
 import { scheduleCatalogCarry } from "./carry-catalog-schedule.ts";
+import { scheduleAppTokenRefresh } from "./refresh-app-tokens-schedule.ts";
 
 /**
  * Ordered boot. LAW 0: boots with the whole world down — the only hard
@@ -47,6 +48,11 @@ export async function boot(): Promise<void> {
   // ... and again every ten minutes, so a change on the catalog's trunk reaches a standing tenant
   // without a boot or a plan (#169).
   scheduleCatalogCarry(wired.carryCatalogTrunk, logger);
+  // The App tokens behind the build repo-pat entries: rewritten once now, behind the listener, and
+  // then every 45 minutes — a token lives 60, so a unit whose credential is the platform's GitHub
+  // App can release at any hour, not only the one after its onboarding (#184).
+  void wired.refreshAppTokens();
+  scheduleAppTokenRefresh(wired.refreshAppTokens, logger);
 
   const shutdown = (signal: string): void => {
     logger.info({ signal }, "shutting down");

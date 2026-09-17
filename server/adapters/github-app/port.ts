@@ -26,8 +26,13 @@ export interface CreateRepositoryInput {
 export interface GitHubApp {
   /** The installation access token (POST /app/installations/{id}/access_tokens), cached until five
    *  minutes before GitHub's own expires_at and minted afresh after that. The value is a credential:
-   *  it is handed to the consumer port's per-call `token` and never logged. */
+   *  it is handed to the consumer port's per-call `token` and never logged. The credential store
+   *  opens a `github-app` credential through this, so a token is never stored past its hour. */
   installationToken(signal?: AbortSignal): Promise<string>;
+  /** A stable, non-secret fingerprint of this identity — the App id and the installation id —
+   *  which a sealed `github-app` credential carries in place of a token's fingerprint, so an audit
+   *  row names WHICH App acted. */
+  identityFingerprint(): string;
   /** The organisation this installation is bound to (GET /app/installations/{id} → account.login),
    *  read once and kept — an installation does not move between organisations. What the readiness
    *  row names, and what a plan holds the catalog's own `appsOrg` against. */

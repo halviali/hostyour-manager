@@ -74,7 +74,7 @@ function passReport(): GateReport {
   };
 }
 
-const fakeSeeder = () => ({ seed: async () => ({ created: true }), seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} });
+const fakeSeeder = () => ({ seed: async () => ({ created: true }), seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} });
 
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` for the two consumer

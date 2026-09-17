@@ -17,6 +17,7 @@ import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy } from "./admission-policy.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "./build-rbac.ts";
 import { memberApplication, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
+import { tenantAppsUnit } from "./tenant-apps-tree.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
@@ -326,7 +327,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       // The tenant's OWN catalog: what its bundle's repository carries is what can be deployed, so
       // T4 judges the new app and its selections against that apps.yaml and never the template's.
       if (!ports.tenantAppsManifest) throw errValidation(`this Manager holds no GitHub App identity, so tenant ${tc.guid}'s repository ${appsRepo} cannot be read — set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY`);
-      const tenantCatalog = await ports.tenantAppsManifest(appsRepo, ctx.signal);
+      const tenantCatalog = await ports.tenantAppsManifest({ appsRepo, unit: tenantAppsUnit(current.entry.subdomain) }, ctx.signal);
       if (!tenantCatalog) throw errValidation(`${appsRepo} carries no ${APPS_MANIFEST_PATH} at its default branch — nothing says which apps tenant ${tc.guid}'s bundle carries; tenant-apps-repo writes it`);
       ctx.log(`tenant ${tc.guid}'s catalog: ${appsRepo} names ${tenantCatalog.apps.map((a) => a.name).join(", ") || "no app"}`);
       // The registration is the GitOps truth for the tenant's target slave; apply-appproject pins the

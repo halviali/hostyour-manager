@@ -110,6 +110,7 @@ class FakeSeeder implements VaultSeeder {
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(i: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> { this.buildRepoPats.push(i); return { created: true }; }
+  async refreshBuildRepoPat(): Promise<void> {}
   async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deletedBuildRepoPats.push(i); }
   async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
   async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }

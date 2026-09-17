@@ -6,9 +6,10 @@
 // apps repository is copied from, never a unit: the platform does not build it and no tenant mounts
 // it, so nothing here reaches for a registration or a unit's credential. readAppsManifest is the
 // primitive: one apps repository, one credential. A STANDING tenant's own catalog is its own
-// bundle's apps.yaml, read through the same primitive by readTenantAppsManifest with a credential
-// minted from the GitHub App at the moment of the read, because the App is installed in the
-// organisation the tenant repositories live in and a token stored at the onboarding has expired.
+// bundle's apps.yaml, read through the same primitive by readTenantAppsManifest with the credential
+// the bundle's BUILD registration names — a `github-app` credential, which the store opens by
+// minting a fresh installation token from the App (security/store.ts), so the id stored at the
+// onboarding is as good a day later as it was that hour.
 //
 // WHERE NO MANIFEST STANDS — the catalog declares no template, or the template carries no apps.yaml
 // yet — the catalog is what it was before the manifest existed: the engine chart's
@@ -19,9 +20,6 @@
 // Boundary: a domain module. It depends on the git RepoReader PORT, on shared/ and on nothing that
 // does IO of its own; the clone/read/dispose is the port's job. fallbackCatalog is pure.
 import type { RepoReader } from "../../adapters/git/port.ts";
-import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import type { CredentialStore } from "../../security/store.ts";
-import { fingerprintSecret } from "../../security/fingerprint.ts";
 import { parse as parseYaml } from "yaml";
 import { appName } from "../../../shared/tenant.ts";
 import { SEED_SELECTIONS } from "../../../shared/app-selections.ts";
@@ -86,35 +84,38 @@ export async function readAppsManifest(input: ReadAppsManifestInput): Promise<Ap
   }
 }
 
-export interface ReadTenantAppsManifestInput {
+/** The two facts of a tenant's own bundle a catalog read takes: the repository, and the unit whose
+ *  build registration names the credential the clone opens. */
+export interface TenantAppsBundle {
   /** The tenant's own apps repository — `appsRepo` off its registration (shared/tenant.ts). */
   appsRepo: string;
-  /** A reader that opens a SEALED credential by id (wire-units.ts: the tenant family's reader does,
-   *  for every id but the catalog's own). */
+  /** The bundle's unit, `<subdomain>-apps` (tenant-apps-tree.ts tenantAppsUnit). */
+  unit: string;
+}
+
+export interface ReadTenantAppsManifestInput extends TenantAppsBundle {
+  /** A reader that opens a SEALED credential by id (wire-tenants.ts: the tenant family's reader
+   *  does, for every id but the catalog's own). */
   repo: RepoReader;
-  githubApp: GitHubApp;
-  creds: Pick<CredentialStore, "seal" | "purge">;
+  /** The unit's registration on this installation (create-tenant.run.ts TenantOnboardPorts
+   *  buildUnitRegistration): its `repoCredentialId` is what the clone opens. */
+  buildUnitRegistration: (unit: string) => Promise<{ repoCredentialId?: string } | null>;
   signal?: AbortSignal;
 }
 
-/** The reader of ONE tenant's own catalog, closed over the reader, the App and the store where the
+/** The reader of ONE tenant's own catalog, closed over the reader and the registrations where the
  *  ports are built: `tenant-add-app` judges against what it answers and the tenant page shows it. */
-export type TenantAppsManifestReader = (appsRepo: string, signal?: AbortSignal) => Promise<AppsManifest | null>;
+export type TenantAppsManifestReader = (bundle: TenantAppsBundle, signal?: AbortSignal) => Promise<AppsManifest | null>;
 
 /** A standing tenant's OWN catalog: the apps.yaml of its bundle's repository, cloned at its default
- *  branch head with a credential minted from the App NOW and sealed for this one read — the id is
- *  purged in finally, so nothing of the token outlives the clone (a token stored at the onboarding
- *  has expired, hostyour-manager#184). null where the repository carries no apps.yaml; throws where
- *  the App refuses, the clone fails or the file does not parse. */
+ *  branch head with the credential the bundle's BUILD registration names — the build registration
+ *  is the one holder of that id, and the store mints the value at the open. Nothing is sealed and
+ *  nothing is purged. null where the repository carries no apps.yaml; throws where the unit is not
+ *  registered (naming the run that registers it), the clone fails or the file does not parse. */
 export async function readTenantAppsManifest(input: ReadTenantAppsManifestInput): Promise<AppsManifest | null> {
-  const plaintext = Buffer.from(await input.githubApp.installationToken(input.signal), "utf8");
-  const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
-  const ref = await input.creds.seal({ kind: "pat", label: `GitHub App installation token (catalog read of ${input.appsRepo})`, plaintext, fingerprint });
-  try {
-    return await readAppsManifest({ repo: input.repo, repoURL: input.appsRepo, credentialId: ref.id, ...(input.signal ? { signal: input.signal } : {}) });
-  } finally {
-    await input.creds.purge(ref.id);
-  }
+  const credentialId = (await input.buildUnitRegistration(input.unit))?.repoCredentialId;
+  if (!credentialId) throw errValidation(`${input.unit} is not registered build-only on this installation — registrations/${input.unit}/build.yaml names no credential to read ${input.appsRepo} with; the tenant-apps-repo run registers it`);
+  return readAppsManifest({ repo: input.repo, repoURL: input.appsRepo, credentialId, ...(input.signal ? { signal: input.signal } : {}) });
 }
 
 export interface ReadAppCatalogInput {

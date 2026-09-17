@@ -112,10 +112,10 @@ export interface UnitsWiring {
    *  /api/tenants/app-catalog can offer the wizard the apps of the apps repository's apps.yaml.
    *  Undefined when tenant onboarding is not configured — the catalog route then serves { apps: [] }. */
   appCatalog?: AppCatalogProvider;
-  /** ONE tenant's own catalog — its bundle's apps.yaml, read with a credential minted from the App
-   *  at the read — threaded to the route GET /api/tenants/:id/app-catalog; the SAME closure the
-   *  tenant-add-app plan judges against. Undefined without tenant onboarding or without the App;
-   *  the route then answers { apps: [], reason }. */
+  /** ONE tenant's own catalog — its bundle's apps.yaml, read under the `github-app` credential its
+   *  build registration names — threaded to the route GET /api/tenants/:id/app-catalog; the SAME
+   *  closure the tenant-add-app plan judges against. Undefined without tenant onboarding or without
+   *  the App; the route then answers { apps: [], reason }. */
   tenantAppsManifest?: TenantAppsManifestReader;
   /** The shared activation client (ONE HttpActivator for the whole manager), threaded to
    *  registerTenantRoutes so the operator-driven POST /api/tenants/:id/invite-admin can call a
@@ -139,6 +139,9 @@ export interface UnitsWiring {
    *  SAME Registrations the consumer runs commit through. Undefined when consumer onboarding is not
    *  configured; the scan route then degrades to an empty result with a reason. */
   registrations?: Registrations;
+  /** The ONE Vault seeder both families write through, threaded to the App-token refresh
+   *  (wire.ts): the entry it rewrites is the one the consumer family's seed-repo-pat created. */
+  seeder: VaultSeeder;
   /** The CONSUMER family's repository reader, threaded to registerConsumerRoutes so the wizard's
    *  prefill (POST /api/consumers/prefill) reads a consumer repository's version before any run
    *  exists — the SAME GitRepoReader the onboard run clones with. Undefined when consumer
@@ -308,6 +311,7 @@ export function buildUnits(
     tenantEnabled: tenant.enabled,
     ...(consumer.resolver ? { resolver: consumer.resolver } : {}),
     ...(consumer.registrations ? { registrations: consumer.registrations } : {}),
+    seeder,
     ...(consumer.repoReader ? { repoReader: consumer.repoReader } : {}),
     ...(consumer.github ? { github: consumer.github } : {}),
     ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),

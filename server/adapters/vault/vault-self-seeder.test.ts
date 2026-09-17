@@ -212,6 +212,17 @@ describe("VaultSelfSeeder build repo-pat (stage-free)", () => {
     expect(recorded).toHaveLength(0); // no HTTP happened — refused before any call
   });
 
+  it("refreshBuildRepoPat REWRITES the entry without check-and-set, and fails closed on a cas-shaped 400 (no cas ⇒ no benign conflict)", async () => {
+    await withSelf(async (seeder) => {
+      await seeder.refreshBuildRepoPat(patInput({ pat: "ghs_minted_now" }));
+      expect(recorded.map((r) => `${r.method} ${r.url}`)).toEqual(["POST /v1/auth/kubernetes/login", "POST /v1/secret/data/build/acme/repo-pat", "POST /v1/auth/token/revoke-self"]);
+      expect(recorded[1]!.body).toEqual({ data: { pat: "ghs_minted_now" } });
+      dataPut = { status: 400, body: JSON.stringify({ errors: ["check-and-set parameter did not match the current version"] }) };
+      await expect(seeder.refreshBuildRepoPat(patInput())).rejects.toThrow(/repo-pat put failed/);
+      expect(recorded.at(-1)?.url).toBe("/v1/auth/token/revoke-self");
+    });
+  });
+
   it("propagates a put failure (fail-closed onboard) after a successful login", async () => {
     loginStatus = 200;
     // re-script: the data write answers 403 (the build-tier grant is missing GitOps-side)

@@ -29,7 +29,7 @@ import { makeTenantRestartWorkloadsDef } from "../domains/units/restart-workload
 import { makeTenantSetSizeDef } from "../domains/units/set-size.run.ts";
 import type { TenantLifecyclePorts } from "../domains/units/lifecycle.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/create-tenant.run.ts";
-import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
+import type { RegisteredUnit, TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, readTenantAppsManifest, type AppCatalogProvider, type TenantAppsManifestReader } from "../domains/units/app-catalog.ts";
@@ -81,8 +81,8 @@ export interface TenantFamily {
 // ---- Tenant (multi-app) onboarding: catalog + the manager-side HelmRenderer ----
 export function buildTenantOnboarding(
   config: Config,
-  /** The credential store: the tenant family's reader opens a sealed credential from it, and the
-   *  read of a tenant's own repository seals the App's token into it for that one read. */
+  /** The credential store: the tenant family's reader opens a sealed credential from it — a
+   *  tenant's own repository under the `github-app` credential its build registration names. */
   store: CredentialStore,
   activator: Activator,
   logger: Logger,
@@ -121,8 +121,9 @@ export function buildTenantOnboarding(
   const openDeployToken = (): Promise<Buffer> => Promise.resolve(Buffer.from(deployToken, "utf8"));
 
   // The reader clones the catalog and the apps template under the catalog's own read credential,
-  // and a tenant's OWN repository under a credential sealed for that one read (readTenantAppsManifest
-  // below): the one id names the configured token, every other id is opened from the store.
+  // and a tenant's OWN repository under the credential its build registration names
+  // (readTenantAppsManifest below): the one id names the configured token, every other id is opened
+  // from the store — a `github-app` id by minting the App's token at the open.
   const repo = new GitRepoReader({ openCredential: (id) => (id === CATALOG_READ_CREDENTIAL_ID ? openDeployToken() : store.open(id, { purpose: "tenant-apps-read" })) });
   // ONE INSTALLATION, ONE BOOKS BRANCH NAME, IN BOTH REPOSITORIES, so the name is taken off the
   // platform repo rather than resolved a second time here and the two can never disagree. In
@@ -183,12 +184,24 @@ export function buildTenantOnboarding(
   const buildRbac = new KubeBuildRbacWriter(masterKubeInput(config));
   const registrations = new Registrations(platformRepo);
 
+  // A unit the installation registered: build-only under registrations/<unit>/build.yaml, deployable
+  // under a stage file; the stored credential rides the entry either way.
+  const buildUnitRegistration = async (unit: string): Promise<RegisteredUnit | null> => {
+    const build = await registrations.readBuildRegistration(unit);
+    if (build) return { form: "build-only", ...(build.entry.repoCredentialId ? { repoCredentialId: build.entry.repoCredentialId } : {}) };
+    for (const stage of STAGE) {
+      const deployed = await registrations.readRegistration(stage, unit);
+      if (deployed) return { form: "deployable", ...(deployed.entry.repoCredentialId ? { repoCredentialId: deployed.entry.repoCredentialId } : {}) };
+    }
+    return null;
+  };
   // A standing tenant's OWN catalog: its bundle's apps.yaml off the repository its registration
-  // names, cloned by the reader above under the App's installation token, minted at the read and
-  // sealed into the store only for it (the token stored at the onboarding has expired,
-  // hostyour-manager#184). ONE closure, judged against by tenant-add-app and served by
-  // GET /api/tenants/:id/app-catalog, so the page offers what the plan accepts.
-  const tenantAppsManifest: TenantAppsManifestReader | undefined = githubApp && ((appsRepo, signal) => readTenantAppsManifest({ appsRepo, repo, githubApp, creds: store, ...(signal ? { signal } : {}) }));
+  // names, cloned by the reader above under the `github-app` credential the bundle's build
+  // registration names — the store mints the App's token at the open, so the id sealed at the
+  // onboarding never goes stale. Absent without the App, which is what opens that kind. ONE
+  // closure, judged against by tenant-add-app and served by GET /api/tenants/:id/app-catalog, so
+  // the page offers what the plan accepts.
+  const tenantAppsManifest: TenantAppsManifestReader | undefined = githubApp && ((bundle, signal) => readTenantAppsManifest({ ...bundle, repo, buildUnitRegistration, ...(signal ? { signal } : {}) }));
   // create-tenant + add-app drive the full port set (git reader + helm + the second platform repo);
   // the kube clients are resolved per target cluster at run time via the resolver.
   const onboardPorts: TenantOnboardPorts = {
@@ -227,17 +240,7 @@ export function buildTenantOnboarding(
     // it and no other bucket of this account.
     ...(objectStore ? { objectStore } : {}),
     onboard,
-    // A unit the installation registered: build-only under registrations/<unit>/build.yaml, deployable
-    // under a stage file; the stored credential rides the entry either way.
-    buildUnitRegistration: async (unit) => {
-      const build = await registrations.readBuildRegistration(unit);
-      if (build) return { form: "build-only", ...(build.entry.repoCredentialId ? { repoCredentialId: build.entry.repoCredentialId } : {}) };
-      for (const stage of STAGE) {
-        const deployed = await registrations.readRegistration(stage, unit);
-        if (deployed) return { form: "deployable", ...(deployed.entry.repoCredentialId ? { repoCredentialId: deployed.entry.repoCredentialId } : {}) };
-      }
-      return null;
-    },
+    buildUnitRegistration,
     // Creates a tenant's own repository in the organisation the App is installed in. Absent ⇒ the run
     // kind that needs it refuses at the plan, naming the three config keys.
     ...(githubApp ? { githubApp } : {}),

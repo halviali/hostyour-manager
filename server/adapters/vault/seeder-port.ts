@@ -42,7 +42,7 @@ export interface VaultSeedInput {
 /** The BUILD-tier repo-PAT write (one PAT per unit): property `pat` at
  *  secret/build/<consumerName>/repo-pat — the entry the unit's consumer-build ExternalSecrets
  *  (build-git-https, build-npmrc, the bump credential) read. Stage-free by construction: a build is
- *  one image per release, never one per stage. */
+ *  one image per release, never one per stage. The seed and the refresh take the same input. */
 export interface BuildRepoPatSeedInput {
   consumerName: string;
   /** The raw PAT value (opened from the sealed store by the caller; never logged). */
@@ -211,6 +211,13 @@ export interface VaultSeeder {
    *  existence proof that keeps the write-only rule intact (no read, not even of metadata).
    *  Fail-closed on every other error. */
   seedBuildRepoPat(input: BuildRepoPatSeedInput): Promise<VaultSeedOutcome>;
+  /** REWRITE the unit's build repo PAT at secret/build/<name>/repo-pat — created where absent,
+   *  replaced where it stands, no check-and-set. The one write here that is not create-only, and
+   *  the one value that EXPIRES: a unit whose credential is the platform's GitHub App holds an
+   *  installation token that lives one hour, so its entry is rewritten with a token minted now on
+   *  a timer and before every release the Manager triggers (domains/units/app-token-refresh.ts). A
+   *  consumer's own PAT is never rewritten through this. Still write-only: nothing is read. */
+  refreshBuildRepoPat(input: BuildRepoPatSeedInput): Promise<void>;
   /** Remove the unit's build repo PAT (offboard/purge). Idempotent — an absent entry (404) is ok. */
   deleteBuildRepoPat(input: BuildRepoPatDeleteInput): Promise<void>;
   /** Remove the consumer's ceremony secrets (offboard) — see AppSecretsDeleteInput for why a

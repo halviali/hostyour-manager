@@ -11,6 +11,7 @@ describe("FakeGitHubApp", () => {
     fake.org = "acme";
     expect(await fake.installationToken()).toBe("ghs_scripted");
     expect(await fake.installationOrg()).toBe("acme");
+    expect(fake.identityFingerprint()).toMatch(/^sha256:/);
   });
 
   it("creates a repository once and answers {created:false} for a seeded or repeated name", async () => {

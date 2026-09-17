@@ -149,9 +149,10 @@ export interface TenantOnboardPorts {
    *  (adapters/github-app). Absent ⇒ a run kind that creates a tenant's repository refuses at the
    *  plan, naming the three config keys; every other tenant run kind is untouched. */
   githubApp?: GitHubApp;
-  /** A standing tenant's OWN catalog — its bundle's apps.yaml, read off `appsRepo` with a credential
-   *  minted from the App at the read (app-catalog.ts readTenantAppsManifest). tenant-add-app judges
-   *  the new app against what it answers. Absent without the App; add-app then refuses, naming it. */
+  /** A standing tenant's OWN catalog — its bundle's apps.yaml, read off `appsRepo` under the
+   *  `github-app` credential the bundle's build registration names (app-catalog.ts
+   *  readTenantAppsManifest). tenant-add-app judges the new app against what it answers. Absent
+   *  without the App, which opens that kind; add-app then refuses, naming it. */
   tenantAppsManifest?: TenantAppsManifestReader;
 }
 

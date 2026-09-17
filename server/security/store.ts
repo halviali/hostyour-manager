@@ -8,9 +8,10 @@ import { writeAudit } from "../db/audit-writer.ts";
 import { credId } from "../kernel/ids.ts";
 import { now } from "../kernel/clock.ts";
 import { currentActor } from "../kernel/actor.ts";
-import { AppError, errNotFound } from "../kernel/errors.ts";
+import { AppError, errNotFound, errNotConfigured } from "../kernel/errors.ts";
 import type { CredentialKind } from "../../shared/enums.ts";
 import type { VaultKv } from "../adapters/vault/port.ts";
+import type { GitHubApp } from "../adapters/github-app/port.ts";
 
 export type KeystoreMode = "plaintext" | "passphrase" | "keyfile" | "vault";
 
@@ -31,7 +32,11 @@ export interface UseContext {
 export interface SealInput {
   kind: CredentialKind;
   label: string;
+  /** The value, zeroed once the row is written. Empty for `github-app`: that kind stores nothing,
+   *  and open() mints the token from the App instead. */
   plaintext: Buffer;
+  /** A public correlator of the value — for `github-app`, the App identity's own
+   *  (GitHubApp.identityFingerprint), since there is no value to fingerprint. */
   fingerprint: string;
   serverId?: string;
   publicKey?: string;
@@ -48,6 +53,10 @@ const V1_PREFIX = "v1:";
 // KV under this id. Metadata (kind/label/fingerprint/serverId/revoked) still rides in SQLite for
 // fast list queries; Vault handles encryption-at-rest + audit for the values themselves.
 const VAULT_REF_PREFIX = "vault:v1:";
+// A `github-app` credential: the blob is this marker and nothing else, in every keystore mode. The
+// value is an installation token that lives one hour, so open() mints it from the App at the moment
+// of the open — a stored copy would be dead by the time the next release or catalog read needs it.
+const GITHUB_APP_BLOB = "github-app:v1:";
 
 function toRef(row: typeof credentials.$inferSelect): CredentialRef {
   return {
@@ -108,13 +117,15 @@ export class CredentialStore {
   private readonly logger: Logger;
   private readonly dataKey: Buffer | undefined; // 32 bytes ⇒ keyfile mode; undefined ⇒ plaintext
   private readonly vault: VaultKv | undefined; // set ⇒ vault mode (values in Vault KV)
+  private readonly githubApp: Pick<GitHubApp, "installationToken"> | undefined; // mints a `github-app` credential at open
 
-  constructor(deps: { db: Db; logger: Logger; dataKey?: Buffer; vault?: VaultKv }) {
+  constructor(deps: { db: Db; logger: Logger; dataKey?: Buffer; vault?: VaultKv; githubApp?: Pick<GitHubApp, "installationToken"> }) {
     this.db = deps.db;
     this.logger = deps.logger;
     if (deps.dataKey && deps.dataKey.length !== 32) throw new AppError("INTERNAL", "credential-store data key must be 32 bytes");
     this.dataKey = deps.dataKey;
     this.vault = deps.vault;
+    this.githubApp = deps.githubApp;
     // keystore.mode drives the UI banner (store.mode_banner self-check) and the crypto
     // gate. vault when Vault is the backend (prod); else keyfile when a data key is
     // loaded; else plaintext (tests).
@@ -153,11 +164,14 @@ export class CredentialStore {
     return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]);
   }
 
-  /** Seal plaintext, insert the row, audit credential.created, and zero the input. */
+  /** Seal plaintext, insert the row, audit credential.created, and zero the input. A `github-app`
+   *  credential seals no value: its row is the marker, and open() mints the token. */
   async seal(input: SealInput): Promise<CredentialRef> {
     const id = credId();
     let blob: string;
-    if (this.vault) {
+    if (input.kind === "github-app") {
+      blob = GITHUB_APP_BLOB;
+    } else if (this.vault) {
       await this.vault.put(id, input.plaintext.toString("base64"));
       blob = VAULT_REF_PREFIX + id;
     } else if (this.dataKey) {
@@ -199,13 +213,18 @@ export class CredentialStore {
   }
 
   /** Decrypt for use; audits credential.used. The caller MUST zero the returned Buffer
-   *  (helper: withOpened). Throws on a missing or revoked credential. */
+   *  (helper: withOpened). Throws on a missing or revoked credential. A `github-app` credential is
+   *  MINTED here — a fresh installation token from the App every time, never a stored value — and
+   *  refused by name on a Manager that holds no App. */
   async open(id: string, use: UseContext): Promise<Buffer> {
     const row = this.db.select().from(credentials).where(eq(credentials.id, id)).get();
     if (!row) throw errNotFound(`credential ${id} not found`);
     if (row.revokedAt !== null) throw new AppError("NOT_FOUND", `credential ${id} is revoked`);
     let plain: Buffer;
-    if (row.encryptedBlob.startsWith(VAULT_REF_PREFIX)) {
+    if (row.kind === "github-app") {
+      if (!this.githubApp) throw errNotConfigured(`credential ${id} is the platform's GitHub App, and this Manager holds no GitHub App identity: set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY and restart it`);
+      plain = Buffer.from(await this.githubApp.installationToken(), "utf8");
+    } else if (row.encryptedBlob.startsWith(VAULT_REF_PREFIX)) {
       if (!this.vault) throw new AppError("INTERNAL", `credential ${id} lives in Vault but no Vault backend is configured`);
       const value = await this.vault.get(row.encryptedBlob.slice(VAULT_REF_PREFIX.length));
       if (value === undefined) throw new AppError("NOT_FOUND", `credential ${id} value missing from Vault`);

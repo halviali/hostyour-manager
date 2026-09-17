@@ -70,12 +70,13 @@ const read = async (app: Hono<AppEnv>, cookie: string, id = "tnt_1"): Promise<{ 
 
 describe("GET /api/tenants/:id/app-catalog", () => {
   it("answers the bundle's apps off the registration's appsRepo, each marked deployed where the registration's apps[] names it", async () => {
-    const asked: string[] = [];
-    const { app, cookie } = await serve({ registrations: registrationsWith(), tenantAppsManifest: async (appsRepo) => { asked.push(appsRepo); return CATALOG; } });
+    const asked: { appsRepo: string; unit: string }[] = [];
+    const { app, cookie } = await serve({ registrations: registrationsWith(), tenantAppsManifest: async (bundle) => { asked.push(bundle); return CATALOG; } });
     const { status, body } = await read(app, cookie);
     expect(status).toBe(200);
     expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }] });
-    expect(asked).toEqual([TEST_BUNDLE.appsRepo]);
+    // The bundle's unit is composed from the tenant's subdomain — its build registration names the credential.
+    expect(asked).toEqual([{ appsRepo: TEST_BUNDLE.appsRepo, unit: "acme-apps" }]);
   });
 
   it("says why there is no catalog: not wired, no App, no bundle, no apps.yaml — each a reason, never a bare empty list", async () => {

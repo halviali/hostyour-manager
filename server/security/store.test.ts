@@ -7,6 +7,7 @@ import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
 import { CredentialStore, holdsManagerKey } from "./store.ts";
 import { runAsActor } from "../kernel/actor.ts";
+import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
 
 const logger = createLogger(
   parseConfig({
@@ -171,6 +172,74 @@ describe("CredentialStore (plaintext pass-through)", () => {
     const revoked = sqlite.prepare("SELECT count(*) AS n FROM audit WHERE action='credential.revoked'").get() as { n: number };
     expect(created.n).toBe(2);
     expect(revoked.n).toBe(1);
+  });
+});
+
+// A `github-app` credential stores no value: the store mints the App's installation token at every
+// open, because a stored one dies an hour after it was minted (the tenant's own apps repository,
+// tenant-apps-steps.ts).
+describe("CredentialStore — the github-app kind is minted at open, never stored", () => {
+  const dirs: string[] = [];
+  const closers: Array<() => void> = [];
+  function fresh(githubApp?: FakeGitHubApp) {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-store-app-"));
+    dirs.push(dir);
+    const handle = openDb(join(dir, "manager.db"));
+    closers.push(() => handle.sqlite.close());
+    return { store: new CredentialStore({ db: handle.db, logger, ...(githubApp ? { githubApp } : {}) }), sqlite: handle.sqlite };
+  }
+  afterEach(() => {
+    for (const c of closers.splice(0)) c();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("opens to a token minted NOW — two opens answer two different tokens when the App's changes between them, and the row holds no value", async () => {
+    const app = new FakeGitHubApp();
+    const { store, sqlite } = fresh(app);
+    const ref = await store.seal({ kind: "github-app", label: "GitHub App (acme-apps)", plaintext: Buffer.alloc(0), fingerprint: app.identityFingerprint() });
+    app.token = "ghs_first_hour";
+    expect((await store.open(ref.id, { purpose: "test" })).toString("utf8")).toBe("ghs_first_hour");
+    app.token = "ghs_second_hour";
+    expect((await store.open(ref.id, { purpose: "test" })).toString("utf8")).toBe("ghs_second_hour");
+    const row = sqlite.prepare("SELECT encrypted_blob, fingerprint, kind FROM credentials WHERE id=?").get(ref.id) as { encrypted_blob: string; fingerprint: string; kind: string };
+    expect(row.kind).toBe("github-app");
+    expect(row.encrypted_blob).not.toContain("ghs_");
+    expect(row.encrypted_blob).not.toContain(Buffer.from("ghs_first_hour").toString("base64"));
+    // The audit names the App identity's fingerprint — stable across every mint.
+    expect(row.fingerprint).toBe(app.identityFingerprint());
+    const used = sqlite.prepare("SELECT detail_json AS detail FROM audit WHERE target_id=? AND action='credential.used'").all(ref.id) as { detail: string }[];
+    expect(used).toHaveLength(2);
+    for (const u of used) expect(JSON.parse(u.detail)).toMatchObject({ fingerprint: app.identityFingerprint() });
+  });
+
+  it("a value handed to seal under the kind is never returned — the open still mints", async () => {
+    const app = new FakeGitHubApp();
+    app.token = "ghs_minted";
+    const { store } = fresh(app);
+    const ref = await store.seal({ kind: "github-app", label: "x", plaintext: Buffer.from("ghs_stored_by_mistake"), fingerprint: "sha256:app" });
+    expect((await store.open(ref.id, { purpose: "test" })).toString("utf8")).toBe("ghs_minted");
+  });
+
+  it("is listed under its kind, and a revoked one is refused before any mint", async () => {
+    const app = new FakeGitHubApp();
+    const { store } = fresh(app);
+    const ref = await store.seal({ kind: "github-app", label: "x", plaintext: Buffer.alloc(0), fingerprint: "sha256:app" });
+    await store.seal({ kind: "pat", label: "y", plaintext: Buffer.from("pat-value"), fingerprint: "sha256:pat" });
+    expect((await store.list({ kind: "github-app" })).map((r) => r.id)).toEqual([ref.id]);
+    await store.revoke(ref.id, "offboarded");
+    app.failWith = new Error("must not be asked");
+    await expect(store.open(ref.id, { purpose: "test" })).rejects.toThrow(/revoked/);
+  });
+
+  it("refuses by name on a Manager that holds no GitHub App, and lets the App's own refusal through", async () => {
+    const { store } = fresh();
+    const ref = await store.seal({ kind: "github-app", label: "x", plaintext: Buffer.alloc(0), fingerprint: "sha256:app" });
+    await expect(store.open(ref.id, { purpose: "test" })).rejects.toThrow(/holds no GitHub App identity: set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY/);
+    const app = new FakeGitHubApp();
+    app.failWith = new Error("installation suspended");
+    const { store: withApp } = fresh(app);
+    const ref2 = await withApp.seal({ kind: "github-app", label: "x", plaintext: Buffer.alloc(0), fingerprint: "sha256:app" });
+    await expect(withApp.open(ref2.id, { purpose: "test" })).rejects.toThrow(/installation suspended/);
   });
 });
 

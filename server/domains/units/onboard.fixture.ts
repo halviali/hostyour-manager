@@ -51,6 +51,8 @@ export function passReport(manifest: ConsumerManifest = MANIFEST): GateReport {
 export class FakeSeeder implements VaultSeeder {
   seeded: VaultSeedInput[] = [];
   buildRepoPats: BuildRepoPatSeedInput[] = [];
+  /** Every REWRITE of a unit's repo-pat — the refresh before a release of an App-credentialed unit. */
+  refreshedRepoPats: BuildRepoPatSeedInput[] = [];
   deletedBuildRepoPats: BuildRepoPatDeleteInput[] = [];
   deletedApp: AppSecretsDeleteInput[] = [];
   /** Overridable so a test can drive the create-only re-run / attest paths. */
@@ -59,6 +61,7 @@ export class FakeSeeder implements VaultSeeder {
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(i: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> { this.buildRepoPats.push(i); return { created: this.created }; }
+  async refreshBuildRepoPat(i: BuildRepoPatSeedInput): Promise<void> { this.refreshedRepoPats.push(i); }
   async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deletedBuildRepoPats.push(i); }
   async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
   async deletePostgres(): Promise<void> {}

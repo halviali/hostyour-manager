@@ -2,8 +2,9 @@
 // these steps after the platform build units and before its own writes, `tenant-apps-repo` runs
 // them for a standing tenant. The repository `<org>/<subdomain>-apps` is created through the
 // platform's GitHub App, its tree written from the catalog's apps template with the apps the tenant
-// chose, and the unit onboarded Build-only with the App's installation token as its credential,
-// building the first image. The tag the release built lands in the runtime the caller hands in.
+// chose, and the unit onboarded Build-only with a `github-app` credential — one that stores no
+// token and mints a fresh installation token from the App at every open — building the first
+// image. The tag the release built lands in the runtime the caller hands in.
 //
 // The plan half stands here too (resolveTenantAppsUnit): the refusals a plan makes before either run
 // kind freezes its params, each a sentence the operator acts on, and the four facts both freeze.
@@ -19,7 +20,6 @@ import type { Stage } from "../../../shared/enums.ts";
 import { CONSUMER_MANIFEST_PATH, ConsumerManifestSchema, consumerName, tenantAppsTemplate, type ConsumerManifest, type TenantSpec } from "../../../shared/consumer.ts";
 import { APPS_MANIFEST_PATH, parseAppsManifest } from "../../../shared/apps-manifest.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { fingerprintSecret } from "../../security/fingerprint.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -31,6 +31,7 @@ import { resolveMasterCluster } from "./tenant-values.ts";
 import { channelReaching } from "./tenant-builds.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
+import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 
 const repoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
@@ -63,9 +64,9 @@ export interface TenantAppsStepParams extends TenantAppsUnit {
   apps: readonly string[];
 }
 
-/** In-run memory of one execute() pass: the credential id the App's token was sealed under, and the
- *  image tag the bundle's release built (read off its PipelineRun, onboard-release-cycle.ts). A
- *  resumed pass seals afresh — the token sealed before has expired by then — and carries no tag,
+/** In-run memory of one execute() pass: the id of the `github-app` credential sealed for the unit,
+ *  and the image tag the bundle's release built (read off its PipelineRun, onboard-release-cycle.ts).
+ *  A resumed pass seals afresh — the id sealed before is not in its memory — and carries no tag,
  *  which the step that needs it refuses rather than guessing one. */
 export interface TenantAppsRepoRuntime {
   appsRepoCredentialId?: string;
@@ -77,18 +78,15 @@ export function requireGitHubApp(ports: TenantOnboardPorts): GitHubApp {
   return ports.githubApp;
 }
 
-/** The App's installation token, sealed under a credential id of the unit's own — the id the
- *  build-only chain opens the way it opens a consumer's PAT (tenant-builds.ts seals an approve-time
- *  PAT the same way). The value never reaches params, a log or a checkpoint.
- *
- *  ponytail: the token lives one hour. The build registration and the build Vault keep its id and
- *  its value past that, so the unit's NEXT release (from its Consumers page, or the tenant's next
- *  push) needs a fresh one; the upgrade path is opening the App at use time instead of a stored copy. */
-async function sealAppToken(ctx: StepCtx, app: GitHubApp, unit: string, runtime: TenantAppsRepoRuntime): Promise<string> {
+/** ONE `github-app` credential of the unit's own, sealed once per pass — the id the build-only
+ *  chain opens the way it opens a consumer's PAT (tenant-builds.ts seals an approve-time PAT the
+ *  same way), and the id the build registration and the catalog read carry from then on. The row
+ *  stores no token: the store mints a fresh installation token from the App at every open
+ *  (security/store.ts), so nothing here expires and no token reaches params, a log or a checkpoint.
+ *  The row carries the App identity's fingerprint, so an audit names which App acted. */
+async function sealAppCredential(ctx: StepCtx, app: GitHubApp, unit: string, runtime: TenantAppsRepoRuntime): Promise<string> {
   if (runtime.appsRepoCredentialId) return runtime.appsRepoCredentialId;
-  const plaintext = Buffer.from(await app.installationToken(ctx.signal), "utf8");
-  const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
-  const ref = await ctx.creds.seal({ kind: "pat", label: `GitHub App installation token (${unit})`, plaintext, fingerprint });
+  const ref = await ctx.creds.seal({ kind: "github-app", label: `GitHub App (${unit})`, plaintext: Buffer.alloc(0), fingerprint: app.identityFingerprint() });
   runtime.appsRepoCredentialId = ref.id;
   return ref.id;
 }
@@ -179,7 +177,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
       run: async (ctx) => {
         const writer = ports.onboard?.()?.ports.consumerRepo;
         if (!writer) throw errValidation(`${unit} needs the consumer repository writer to commit its tree, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
-        const credentialId = await sealAppToken(ctx, requireGitHubApp(ports), unit, runtime);
+        const credentialId = await sealAppCredential(ctx, requireGitHubApp(ports), unit, runtime);
         const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
         let files: { path: string; content: string }[];
         try {
@@ -223,7 +221,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         if (!d) throw errValidation(`${unit} needs the consumer onboarding's build-only chain, and it is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
         const onboard = d.ports;
         if (!onboard.github) throw errValidation(`${unit} needs the GitHub consumer client to read its release tags, and none is wired on this manager`);
-        const credentialId = await sealAppToken(ctx, requireGitHubApp(ports), unit, runtime);
+        const credentialId = await sealAppCredential(ctx, requireGitHubApp(ports), unit, runtime);
         const master = resolveMasterCluster(ctx.db);
         const token = await ctx.creds.open(credentialId, { purpose: "tenant-apps-repo:release-version", runId: ctx.runId });
         let version: string;
@@ -252,9 +250,11 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         // workflows, webhooks), not a PAT's scopes: GitHub answers no X-OAuth-Scopes for an
         // installation token, which preflight-scopes reads as a fine-grained token and refuses. It is
         // left out by name; a permission the App lacks fails loud at the step that needs it.
+        // A registered unit's release re-run rewrites its build repo-pat first: the entry seeded at
+        // the onboarding holds a token that died an hour later, and the pipeline's clone reads it.
         const release: ReleaseCycleRuntime = {};
         const chain: Step[] = p.registered
-          ? [triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]
+          ? [refreshRepoPatStep(onboard, params), triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]
           : buildOnlySteps(onboard, params, release).filter((s) => s.name !== "preflight-scopes");
         ctx.log("meta", `${unit}: version ${version}, channel ${channel}, release run on ${p.stage}, build plane ${master.domain} — ${p.registered ? "registered build-only, its release is re-run" : "onboarded build-only by this run"}`);
         for (const step of chain) {

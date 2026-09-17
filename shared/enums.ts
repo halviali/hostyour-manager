@@ -333,11 +333,14 @@ export type ServerAuthorizedKeysState = (typeof SERVER_AUTHORIZED_KEYS_STATE)[nu
 
 // What a sealed credential IS, for the store's list filters and the card that shows it. Every member
 // has a producer: `ssh_key` (generate-key, seed-master), `pat` (the consumer repo PAT), `kubeconfig`
-// (a slave's cluster bearer) and `other` (a password sealed beside a server row, a slave's Vault
-// reviewer JWT).
+// (a slave's cluster bearer), `other` (a password sealed beside a server row, a slave's Vault
+// reviewer JWT) and `github-app` (a tenant's own apps repository, tenant-apps-steps.ts). The last
+// one STORES NO VALUE: the platform's GitHub App mints an installation token that lives one hour, so
+// the store mints a fresh one at every open instead of handing back a stored copy; the row carries
+// the App identity's fingerprint so an audit names something stable.
 // A member with nothing sealing it is a filter that can only ever answer empty, and a kind the card
 // offers for a credential this platform cannot hold.
-export const CREDENTIAL_KIND = ["ssh_key", "pat", "kubeconfig", "other"] as const;
+export const CREDENTIAL_KIND = ["ssh_key", "pat", "kubeconfig", "other", "github-app"] as const;
 export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 
 // Every run kind the Manager can run. A literal with no definition behind it is a run kind the UI offers,

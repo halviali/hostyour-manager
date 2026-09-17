@@ -93,17 +93,29 @@ export class VaultSelfSeeder implements VaultSeeder {
     // cas=0 makes the write attest-or-create: the seven hand-seeded platform units re-run the onboard
     // run kind over a path that already stands, and the cas conflict is the existence proof
     // (`created: false`) without any read, not even of metadata.
+    return this.putBuildRepoPat(input, { cas: 0 });
+  }
+
+  async refreshBuildRepoPat(input: BuildRepoPatSeedInput): Promise<void> {
+    // No cas: the entry is replaced where it stands and created where it does not — the one value
+    // that expires (seeder-port.ts refreshBuildRepoPat).
+    await this.putBuildRepoPat(input, undefined);
+  }
+
+  /** The one write of secret/build/<unit>/repo-pat, with or without check-and-set. Only the cas
+   *  conflict is a benign outcome (`created: false`); every other non-2xx fails. */
+  private async putBuildRepoPat(input: BuildRepoPatSeedInput, options: { cas: 0 } | undefined): Promise<VaultSeedOutcome> {
     const { addr, token } = await this.login();
     try {
       const path = `build/${input.consumerName}/repo-pat`;
       const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
         method: "POST",
         headers: { "x-vault-token": token, "content-type": "application/json" },
-        body: JSON.stringify({ data: { pat: input.pat }, options: { cas: 0 } }),
+        body: JSON.stringify({ data: { pat: input.pat }, ...(options ? { options } : {}) }),
       });
       if (res.ok) return { created: true };
       const detail = await res.text().catch(() => "");
-      if (res.status === 400 && detail.includes("check-and-set")) return { created: false };
+      if (options && res.status === 400 && detail.includes("check-and-set")) return { created: false };
       throw new VaultError(`vault build repo-pat put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
     } finally {
       await this.revoke(addr, token).catch(() => undefined);

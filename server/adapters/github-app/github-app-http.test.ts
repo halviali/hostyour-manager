@@ -97,6 +97,15 @@ describe("github-app adapter — the App's JWT and the installation token", () =
   it("refuses a private key node cannot read where the client is built, not at the first call", () => {
     expect(() => new HttpGitHubApp({ ...APP, privateKey: "-----BEGIN RSA PRIVATE KEY-----\nnot a key\n-----END RSA PRIVATE KEY-----\n" })).toThrow();
   });
+
+  it("identityFingerprint names the App id and the installation id — stable across clients, distinct per installation, never the key or a token", () => {
+    const a = new HttpGitHubApp({ ...APP });
+    const b = new HttpGitHubApp({ ...APP });
+    const other = new HttpGitHubApp({ ...APP, installationId: "999" });
+    expect(a.identityFingerprint()).toMatch(/^sha256:[0-9a-f]{16}$/);
+    expect(a.identityFingerprint()).toBe(b.identityFingerprint());
+    expect(a.identityFingerprint()).not.toBe(other.identityFingerprint());
+  });
 });
 
 describe("github-app adapter — installationOrg", () => {

@@ -43,6 +43,7 @@ import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
+import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
@@ -68,6 +69,11 @@ export interface Wired {
    *  every rollout once. Never rejects — a failure is logged and the branch stays one product
    *  state behind, never a wrong one. */
   carryCatalogTrunk: () => Promise<void>;
+  /** The build repo-pat of every unit whose credential is the platform's GitHub App, rewritten with
+   *  a token minted now (domains/units/app-token-refresh.ts). boot.ts runs it once behind the
+   *  listening server and then every 45 minutes. Never rejects — every failure is logged per unit.
+   *  A no-op where the consumer family is not wired: there are then no build registrations. */
+  refreshAppTokens: () => Promise<void>;
 }
 
 /** The carry as boot runs it: LOG AND CONTINUE on failure — a catalog that is unreachable at
@@ -104,10 +110,17 @@ export async function wire(): Promise<Wired> {
   const phase = bootPhases(logger);
   const db = openDb(config.dbFile);
   phase("database");
+  // THE PLATFORM'S GITHUB APP IDENTITY — one client, one token cache, built here because three
+  // things hold it: the credential store mints a `github-app` credential through it at every open,
+  // the tenant family creates a tenant's own repository with it, and the readiness check below names
+  // the organisation it is installed in. Absent when the three GITHUB_APP_* keys are — the run kinds
+  // that need it then refuse at the plan, the store refuses such a credential by name, and the
+  // readiness row is not listed.
+  const githubApp = config.githubApp ? new HttpGitHubApp(config.githubApp) : undefined;
   // Secrets backend: Vault when configured (prod), else a local keyfile-encrypted
   // store (dev). Either way the store API is identical to every caller, and one of the two is
   // always supplied (boot/store-backend.ts).
-  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config) });
+  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config), ...(githubApp ? { githubApp } : {}) });
   phase("credential store");
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
@@ -124,11 +137,6 @@ export async function wire(): Promise<Wired> {
     openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
     buildClusterReader: (input) => new KubeClusterReader(input),
   });
-  // THE PLATFORM'S GITHUB APP IDENTITY — one client, one token cache, built here because two things
-  // hold it: the tenant family creates a tenant's own repository with it, and the readiness check
-  // below names the organisation it is installed in. Absent when the three GITHUB_APP_* keys are —
-  // the run kinds that need it then refuse at the plan, and the readiness row is not listed.
-  const githubApp = config.githubApp ? new HttpGitHubApp(config.githubApp) : undefined;
   const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver }, githubApp);
   // The mail DNS of the installation, measured at public resolvers: the Mail page's deps, and the
   // mail half of the DNS inventory below — one measurement, so the two pages can never disagree
@@ -224,6 +232,9 @@ export async function wire(): Promise<Wired> {
   // the listening server, see Wired.carryCatalogTrunk — rather than at the first tenant
   // registration (wire-units.ts carryTrunkToBooksBranch); every tenant plan carries it again.
   const carryCatalogTrunk = carryCatalogTrunkLater(units.carryTrunkToBooksBranch, logger);
+  const refreshAppTokensLater = registrations
+    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, logger }); }
+    : async (): Promise<void> => undefined;
   // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
   // size keeps its figures across every restart — the same rule the Vault seeder follows, and for the
@@ -333,5 +344,6 @@ export async function wire(): Promise<Wired> {
     serveEmergencySocket: () => void serveAdminSocket(config.adminSocketPath, emergencyDeps),
     checks,
     carryCatalogTrunk,
+    refreshAppTokens: refreshAppTokensLater,
   };
 }

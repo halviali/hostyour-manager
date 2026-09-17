@@ -7,11 +7,12 @@ import { errNotFound } from "../../kernel/errors.ts";
 import { APPS_MANIFEST_PATH, type TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { TenantAppsManifestReader } from "./app-catalog.ts";
+import { tenantAppsUnit } from "./tenant-apps-tree.ts";
 
 // The catalog of ONE tenant, apart from api.ts the way api-tenant-apps-repo.ts is: the apps its
-// own bundle carries (its repository's apps.yaml, read with a credential minted from the App at
-// the read — app-catalog.ts readTenantAppsManifest), each marked deployed where the registration's
-// apps[] names it. The tenant page offers the undeployed ones to tenant-add-app, which judges the
+// own bundle carries (its repository's apps.yaml, read with the credential the bundle's build
+// registration names — app-catalog.ts readTenantAppsManifest), each marked deployed where the
+// registration's apps[] names it. The tenant page offers the undeployed ones to tenant-add-app, which judges the
 // choice against the same apps.yaml (T4), so what the page offers and what the plan accepts are one
 // thing. A READ: it degrades with `reason` where there is nothing to read by design and with
 // `error` where the read failed (TenantAppCatalogView says why neither may render as "no apps").
@@ -37,7 +38,7 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
       if (!current) return none(`tenant ${tenant.guid} is not onboarded (no registration at ${tenant.stage})`);
       const { appsRepo } = current.entry;
       if (!appsRepo) return none(`tenant ${tenant.guid} has no apps bundle (appsRepo) in its registration — every tenant mounts its own ${tenant.subdomain}-apps bundle, created and built by the tenant-apps-repo run`);
-      const manifest = await tenantAppsManifest(appsRepo, c.req.raw.signal);
+      const manifest = await tenantAppsManifest({ appsRepo, unit: tenantAppsUnit(tenant.subdomain) }, c.req.raw.signal);
       if (!manifest) return none(`${appsRepo} carries no ${APPS_MANIFEST_PATH} at its default branch — nothing says which apps tenant ${tenant.guid}'s bundle carries; tenant-apps-repo writes it`);
       const deployed = new Set(current.entry.apps.map((a) => a.name));
       return c.json({ apps: manifest.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })) } satisfies TenantAppCatalogView);

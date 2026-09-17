@@ -6,6 +6,7 @@
 import { createPrivateKey, createSign, type KeyObject } from "node:crypto";
 import type { GitHubApp, CreateRepositoryInput } from "./port.ts";
 import { GitHubAppError } from "./port.ts";
+import { fingerprintSecret } from "../../security/fingerprint.ts";
 
 type FetchLike = typeof fetch;
 
@@ -77,6 +78,10 @@ export class HttpGitHubApp implements GitHubApp {
 
   private get installationPath(): string {
     return `/app/installations/${encodeURIComponent(this.opts.installationId)}`;
+  }
+
+  identityFingerprint(): string {
+    return fingerprintSecret(Buffer.from(`github-app:${this.opts.appId}:${this.opts.installationId}`, "utf8"));
   }
 
   async installationToken(signal?: AbortSignal): Promise<string> {

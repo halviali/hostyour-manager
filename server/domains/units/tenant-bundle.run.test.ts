@@ -17,9 +17,10 @@ import { validateTenant } from "./validate-tenant.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
-import { ports as onboardPorts } from "./onboard.fixture.ts";
+import { ports as onboardPorts, type FakeSeeder } from "./onboard.fixture.ts";
 import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import type { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
@@ -97,7 +98,7 @@ function passReport(): TenantValidationReport {
 function fakeTenantSeeder(): VaultSeeder {
   const no = () => Promise.reject(new Error("a tenant run never seeds a consumer entry"));
   return {
-    seed: no, seedPostgres: no, seedMongodb: no, seedBuildRepoPat: no,
+    seed: no, seedPostgres: no, seedMongodb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no,
     deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {},
     seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {},
   };
@@ -144,19 +145,29 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     ...over,
   });
 }
-/** A credential store that keeps what it sealed, so the build-only chain opens the App's token back. */
-function fakeCreds(): CredentialStore {
-  const seals = new Map<string, string>();
-  return {
+/** A credential store shaped like the real one for the kind the apps-repo steps seal: a `github-app`
+ *  credential opens to the token the App answers at THAT moment (security/store.ts mints it), every
+ *  other kind to what was sealed. Records what it sealed. */
+function fakeCreds(app?: FakeGitHubApp): { store: CredentialStore; seals: { id: string; kind: string; label: string; plaintext: string }[] } {
+  const seals: { id: string; kind: string; label: string; plaintext: string }[] = [];
+  const store = {
     seal: async (i: { kind: string; label: string; plaintext: Buffer; fingerprint: string }) => {
-      const id = `cred_${seals.size + 1}`;
-      seals.set(id, i.plaintext.toString("utf8"));
+      const id = `cred_${seals.length + 1}`;
+      seals.push({ id, kind: i.kind, label: i.label, plaintext: i.plaintext.toString("utf8") });
       return { id, kind: i.kind, label: i.label, fingerprint: i.fingerprint };
     },
-    open: async (id: string) => Buffer.from(seals.get(id) ?? "ghp_test", "utf8"),
+    open: async (id: string) => {
+      const sealed = seals.find((x) => x.id === id);
+      if (sealed?.kind === "github-app") {
+        if (!app) throw new Error("a github-app credential opens through the App, and this store holds none");
+        return Buffer.from(await app.installationToken(), "utf8");
+      }
+      return Buffer.from(sealed?.plaintext ?? "ghp_test", "utf8");
+    },
   } as unknown as CredentialStore;
+  return { store, seals };
 }
-function ctx(p: Record<string, unknown>, logs: string[], creds: CredentialStore = fakeCreds()): StepCtx {
+function ctx(p: Record<string, unknown>, logs: string[], creds: CredentialStore = fakeCreds().store): StepCtx {
   return {
     runId: "run_bundle", stepName: "bundle", db: db.db, creds, params: p,
     secrets: { get: () => undefined, wipe: () => undefined },
@@ -268,13 +279,20 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     // After the build the render carries the bundle at the built tag, as the real chart would.
     (prt.helm as FakeHelmRenderer).setDocs(withBundle(BUILT_TAG));
     const logs: string[] = [];
-    const creds = fakeCreds();
-    for (const step of makeCreateTenantDef(prt).steps(result.params)) await step.run(ctx(result.params, logs, creds));
+    const creds = fakeCreds(prt.githubApp);
+    prt.githubApp.token = "ghs_minted_for_this_pass";
+    for (const step of makeCreateTenantDef(prt).steps(result.params)) await step.run(ctx(result.params, logs, creds.store));
     const entry = (await prt.registrations.readTenant("prod", result.params.guid))?.entry;
     expect(entry).toMatchObject({ appsRepo: TENANT_URL, appsImage: UNIT, appsImageTag: BUILT_TAG, apps: [{ name: "erp" }] });
     expect(prt.githubApp.created.map((c) => `${c.org}/${c.name}`)).toEqual([`${ORG}/${UNIT}`]);
     expect(Object.keys(consumerRepo.filesFor(TENANT_URL))).toContain("erp/package.json");
-    expect(await onboard.registrations.readBuildRegistration(UNIT)).not.toBeNull();
+    // ONE github-app credential for the bundle, its id on the build registration; the seed, the
+    // webhook and the dispatch each opened it to the token the App mints — nothing stored.
+    expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, plaintext: "" }]);
+    expect((await onboard.registrations.readBuildRegistration(UNIT))?.entry).toMatchObject({ repoCredentialId: "cred_1", repoURL: TENANT_URL });
+    expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass" }]);
+    expect((onboard.github as FakeGitHubConsumer).created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
+    expect((onboard.github as FakeGitHubConsumer).dispatches.map((d) => ({ repo: d.repo, token: d.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect(buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
     expect(logs.some((l) => l.includes(`${UNIT}:${BUILT_TAG}`))).toBe(true);
     expect(logs.some((l) => l.includes(`${UNIT}: ${PLACEHOLDER} -> ${BUILT_TAG}`))).toBe(true);

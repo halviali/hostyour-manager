@@ -80,6 +80,7 @@ class FakePurgeSeeder implements VaultSeeder {
   async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds postgres"); }
   async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds mongodb"); }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds a repo pat"); }
+  async refreshBuildRepoPat(): Promise<void> { throw new Error("purge never refreshes a repo pat"); }
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds tenant crypto"); }
   async deleteTenantCrypto(i: TenantCryptoDeleteInput): Promise<void> { this.deletedCrypto.push(i); }
   async deleteBuildRepoPat(): Promise<void> {}

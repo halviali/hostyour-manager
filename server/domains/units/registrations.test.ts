@@ -347,6 +347,19 @@ describe("Registrations.listAttestedBuildNames", () => {
     await expect(new Registrations(repo).listAttestedBuildNames("acme")).rejects.toThrow(/registrations\/broken\/build\.yaml/);
   });
 
+  it("listBuildRegistrations answers every unit's parsed build.yaml with its credential id, and skips a unit that carries none", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new Registrations(repo);
+    await reg.commitRegistration({ unit: unit(), builds: ["acme-backend"], deploy: deploy(), runId: "run_1" });
+    await reg.commitRegistration({ unit: unit({ name: "other", repoURL: "https://github.com/x/other.git", repoCredentialId: "cred_app" }), builds: ["other-api"], runId: "run_2" });
+    repo.seed(repo.booksBranch, "registrations/deploy-only/prod.yaml", "name: deploy-only\n");
+    const listed = await reg.listBuildRegistrations();
+    expect(listed.map((r) => [r.unit, r.entry.repoCredentialId, r.entry.builds])).toEqual([
+      ["acme", unit().repoCredentialId, ["acme-backend"]],
+      ["other", "cred_app", ["other-api"]],
+    ]);
+  });
+
   // END TO END OVER THE HAND-SEEDED FILE — the layer G16 stands on. The pure reader folding the bytes
   // proves nothing about the gate, so this seeds the installer's file into the tree and asks the
   // method the gate calls.

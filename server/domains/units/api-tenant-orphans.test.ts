@@ -126,6 +126,7 @@ function fakeTenantSeeder(): VaultSeeder {
     seedPostgres: () => Promise.reject(new Error("a tenant run never seeds postgres")),
     seedMongodb: () => Promise.reject(new Error("a tenant run never seeds mongodb")),
     seedBuildRepoPat: () => Promise.reject(new Error("a tenant run never seeds a repo pat")),
+    refreshBuildRepoPat: () => Promise.reject(new Error("a tenant run never refreshes a repo pat")),
     deleteBuildRepoPat: async () => {},
     deleteApp: async () => {},
     deletePostgres: async () => {}, deleteMongodb: async () => {},

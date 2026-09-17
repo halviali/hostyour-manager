@@ -31,7 +31,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const SHA = "a".repeat(40);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in the onboard journey"));
-const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} };
+const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} };
 
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` — onboard's planStream
@@ -226,6 +226,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
       async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
       async seedBuildRepoPat(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async refreshBuildRepoPat(): Promise<void> {}
       async deleteBuildRepoPat(): Promise<void> {}
       async deleteApp(): Promise<void> {}
       async deletePostgres(): Promise<void> {}

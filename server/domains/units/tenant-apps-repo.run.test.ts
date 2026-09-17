@@ -1,6 +1,6 @@
 // tenant-apps-repo (hostyour-manager#177): the plan's refusals, the tree written from a fake template
-// into a fake writer, its idempotency, the build-only chain driven with the App's token, and the
-// registration carrying repo and image afterwards.
+// into a fake writer, its idempotency, the build-only chain driven with a github-app credential that
+// mints the App's token at every open (#184), and the registration carrying repo and image afterwards.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { seedQuota } from "../../../shared/unit-size.ts";
@@ -40,7 +40,7 @@ afterEach(() => { db.sqlite.close(); });
 
 function fakeTenantSeeder(): VaultSeeder {
   const no = () => Promise.reject(new Error("a tenant-apps-repo run never seeds through the tenant seeder"));
-  return { seed: no, seedPostgres: no, seedMongodb: no, seedBuildRepoPat: no, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} };
+  return { seed: no, seedPostgres: no, seedMongodb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} };
 }
 
 interface Harness {
@@ -95,22 +95,26 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
   return { ports, githubApp, catalogReader, unitReader, consumerRepo, github, seeder: onboard.seeder as FakeSeeder, buildPlane };
 }
 
-/** A credential store that keeps what it sealed, so the chain's opens read the App's token back. */
-function fakeCreds(): { store: CredentialStore; seals: { id: string; kind: string; label: string; plaintext: string }[] } {
-  const seals: { id: string; kind: string; label: string; plaintext: string }[] = [];
+/** A credential store shaped like the real one for the kind under test: a `github-app` credential
+ *  opens to the token the App answers at THAT moment (security/store.ts mints it), every other kind
+ *  to what was sealed. Records every seal and every open. */
+function fakeCreds(app: FakeGitHubApp): { store: CredentialStore; seals: { id: string; kind: string; label: string; fingerprint: string; plaintext: string }[]; opened: string[] } {
+  const seals: { id: string; kind: string; label: string; fingerprint: string; plaintext: string }[] = [];
+  const opened: string[] = [];
   const store = {
     seal: async (i: { kind: string; label: string; plaintext: Buffer; fingerprint: string }) => {
       const id = `cred_${seals.length + 1}`;
-      seals.push({ id, kind: i.kind, label: i.label, plaintext: i.plaintext.toString("utf8") });
+      seals.push({ id, kind: i.kind, label: i.label, fingerprint: i.fingerprint, plaintext: i.plaintext.toString("utf8") });
       return { id, kind: i.kind, label: i.label, fingerprint: i.fingerprint };
     },
     open: async (id: string) => {
+      opened.push(id);
       const s = seals.find((x) => x.id === id);
       if (!s) throw new Error(`unknown credential ${id}`);
-      return Buffer.from(s.plaintext, "utf8");
+      return Buffer.from(s.kind === "github-app" ? await app.installationToken() : s.plaintext, "utf8");
     },
   };
-  return { store: store as unknown as CredentialStore, seals };
+  return { store: store as unknown as CredentialStore, seals, opened };
 }
 
 function ctx(p: Record<string, unknown>, logs: string[], creds: CredentialStore): StepCtx {
@@ -211,7 +215,7 @@ describe("write-tree — the tree from the template into the tenant's repository
   it("copies the root files and the chosen app folder, skips the kit and the unchosen apps, writes the manifest and the apps.yaml, in one commit", async () => {
     const h = harness();
     const p = await planned(h);
-    const creds = fakeCreds();
+    const creds = fakeCreds(h.githubApp);
     const logs: string[] = [];
     await step(h, p, "write-tree").run(ctx(p, logs, creds.store));
     const files = h.consumerRepo.filesFor(TENANT_URL);
@@ -229,14 +233,15 @@ describe("write-tree — the tree from the template into the tenant's repository
     expect(h.consumerRepo.commits).toHaveLength(1);
     expect(h.consumerRepo.commits[0]).toMatchObject({ repoURL: TENANT_URL, branch: "main", message: `Create ${UNIT} from the catalog` });
     expect(h.consumerRepo.commits[0]!.remove).toBeUndefined();
-    // The writer opened the repository with the App's installation token, sealed as a PAT of the unit.
-    expect(creds.seals).toEqual([{ id: "cred_1", kind: "pat", label: `GitHub App installation token (${UNIT})`, plaintext: h.githubApp.token }]);
+    // The writer opened the repository under the unit's github-app credential: a row that stores no
+    // token and carries the App identity's fingerprint.
+    expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, fingerprint: h.githubApp.identityFingerprint(), plaintext: "" }]);
     expect(h.consumerRepo.opened).toEqual([{ repoURL: TENANT_URL, credentialId: "cred_1" }]);
     expect(logs.some((l) => l.includes(`8 file(s) committed to ${TENANT_URL}`))).toBe(true);
   });
   it("a second run adds the missing app folder and entry, deletes nothing, overwrites nothing, and commits nothing when nothing changed", async () => {
     const h = harness();
-    const creds = fakeCreds();
+    const creds = fakeCreds(h.githubApp);
     await step(h, await planned(h), "write-tree").run(ctx({}, [], creds.store));
     // The tenant edited a root file in the meantime: it stays theirs.
     h.consumerRepo.seed(TENANT_URL, "package.json", '{ "name": "acme-apps", "edited": true }\n');
@@ -260,7 +265,7 @@ describe("write-tree — the tree from the template into the tenant's repository
     const h = harness();
     const p = await planned(h);
     h.ports.onboard = () => undefined;
-    await expect(step(h, p, "write-tree").run(ctx(p, [], fakeCreds().store))).rejects.toThrow(/consumer onboarding is not wired/);
+    await expect(step(h, p, "write-tree").run(ctx(p, [], fakeCreds(h.githubApp).store))).rejects.toThrow(/consumer onboarding is not wired/);
   });
 });
 
@@ -274,35 +279,43 @@ describe("mergeAppsManifest — never removes", () => {
   });
 });
 
-describe("create-repository and onboard-build-only — the App's token as the unit's credential", () => {
+describe("create-repository and onboard-build-only — a github-app credential as the unit's credential", () => {
   it("creates the private repository once, then finds it standing", async () => {
     const h = harness();
     const p = await planned(h);
     const logs: string[] = [];
-    await step(h, p, "create-repository").run(ctx(p, logs, fakeCreds().store));
+    await step(h, p, "create-repository").run(ctx(p, logs, fakeCreds(h.githubApp).store));
     expect(h.githubApp.created).toEqual([{ org: ORG, name: UNIT, description: expect.stringContaining("example-apps"), private: true, signal: expect.anything() }]);
-    await step(h, p, "create-repository").run(ctx(p, logs, fakeCreds().store));
+    await step(h, p, "create-repository").run(ctx(p, logs, fakeCreds(h.githubApp).store));
     expect(h.githubApp.created).toHaveLength(1);
     expect(logs.at(-1)).toContain("already stands");
   });
-  it("registers the unit build-only with the sealed App token, seeds that token as the build repo-pat, dispatches with it and watches the build", async () => {
+  it("seals the github-app credential ONCE and hands its id to the build registration, seed-repo-pat, the webhook and the dispatch — each opening a token minted then", async () => {
     const h = harness();
     const p = await planned(h);
-    const creds = fakeCreds();
+    const creds = fakeCreds(h.githubApp);
     const logs: string[] = [];
     const run = pass(h, p);
+    h.githubApp.token = "ghs_hour_one";
     await run("write-tree").run(ctx(p, logs, creds.store));
     // The tenant repository as the chain reads it back: the manifest write-tree just committed.
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": h.consumerRepo.filesFor(TENANT_URL)["deploy/platform.yaml"]! } });
+    // An hour later the App mints another token: everything the chain does now carries THAT one,
+    // although the credential was sealed under the first — the row stored no token at all.
+    h.githubApp.token = "ghs_hour_two";
     await run("onboard-build-only").run(ctx(p, logs, creds.store));
     const onboard = h.ports.onboard!()!.ports;
     const registration = await onboard.registrations.readBuildRegistration(UNIT);
     expect(registration?.entry).toMatchObject({ name: UNIT, repoURL: TENANT_URL, repoCredentialId: "cred_1", owner: SUBDOMAIN, builds: [UNIT] });
-    expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: h.githubApp.token }]);
-    expect(h.github.dispatches.map((d) => ({ repo: d.repo, token: d.token, inputs: d.inputs }))).toEqual([{ repo: UNIT, token: h.githubApp.token, inputs: { version: "0.1.0", channel: "stable", stage: "prod" } }]);
+    expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_hour_two" }]);
+    expect(h.seeder.refreshedRepoPats).toEqual([]);
+    expect(h.github.created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_hour_two" }]);
+    expect(h.github.dispatches.map((d) => ({ repo: d.repo, token: d.token, inputs: d.inputs }))).toEqual([{ repo: UNIT, token: "ghs_hour_two", inputs: { version: "0.1.0", channel: "stable", stage: "prod" } }]);
     expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
-    // The token was sealed ONCE for the whole pass, and the PAT scope preflight was not run on it.
-    expect(creds.seals).toHaveLength(1);
+    // ONE credential for the whole pass, of the kind that stores nothing; every open went to it, and
+    // the PAT scope preflight was not run on it.
+    expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, fingerprint: h.githubApp.identityFingerprint(), plaintext: "" }]);
+    expect(new Set(creds.opened)).toEqual(new Set(["cred_1"]));
     expect(logs.some((l) => l.includes("Pre-flight"))).toBe(false);
     expect(logs.at(-1)).toContain(`${UNIT} built as ${UNIT}:${IMAGE_TAG} for prod`);
   });
@@ -310,21 +323,27 @@ describe("create-repository and onboard-build-only — the App's token as the un
     const h = harness();
     h.buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
     const p = await planned(h);
-    const creds = fakeCreds();
+    const creds = fakeCreds(h.githubApp);
     const run = pass(h, p);
     await run("write-tree").run(ctx(p, [], creds.store));
-    h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": h.consumerRepo.filesFor(TENANT_URL)["deploy/platform.yaml"]! } });
+    h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
     await expect(run("onboard-build-only").run(ctx(p, [], creds.store))).rejects.toThrow(/states no image-tag result/);
   });
-  it("re-runs the release of a unit already registered build-only instead of registering it again", async () => {
+  it("re-runs the release of a unit already registered build-only: rewrites its build repo-pat with a token minted now, then dispatches with the same", async () => {
     const h = harness({ ports: { buildUnitRegistration: async (unit) => (unit === UNIT ? { form: "build-only", repoCredentialId: "cred_old" } : null) } });
     const p = await planned(h);
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
-    const creds = fakeCreds();
-    await step(h, p, "onboard-build-only").run(ctx(p, [], creds.store));
+    const creds = fakeCreds(h.githubApp);
+    h.githubApp.token = "ghs_rerun";
+    const logs: string[] = [];
+    await step(h, p, "onboard-build-only").run(ctx(p, logs, creds.store));
     expect(await h.ports.onboard!()!.ports.registrations.readBuildRegistration(UNIT)).toBeNull();
+    // Not the create-only seed: the entry stands from the onboarding and holds a dead token.
+    expect(h.seeder.buildRepoPats).toEqual([]);
+    expect(h.seeder.refreshedRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_rerun" }]);
+    expect(logs.findIndex((l) => l.includes("repo PAT rewritten"))).toBeLessThan(logs.findIndex((l) => l.includes("release workflow dispatched")));
     expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
-    expect(h.github.dispatches[0]?.token).toBe(h.githubApp.token); // a fresh token, never the stored one
+    expect(h.github.dispatches[0]?.token).toBe("ghs_rerun");
   });
 });
 
@@ -335,7 +354,7 @@ describe("record-apps-repo — the registration carries repo, image and tag", ()
   });
   /** One pass up to the build: the tag the release built is in the pass's memory after it. */
   async function built(h: Harness, p: TenantAppsRepoParams, logs: string[]): Promise<(name: string) => Step> {
-    const creds = fakeCreds();
+    const creds = fakeCreds(h.githubApp);
     const run = pass(h, p);
     await run("write-tree").run(ctx(p, logs, creds.store));
     h.unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": h.consumerRepo.filesFor(TENANT_URL)["deploy/platform.yaml"]! } });
@@ -348,10 +367,10 @@ describe("record-apps-repo — the registration carries repo, image and tag", ()
     await h.ports.registrations.commitTenant({ stage: "prod", guid: GUID, registration: registration(), runId: "run_0" });
     const logs: string[] = [];
     const run = await built(h, p, logs);
-    await run("record-apps-repo").run(ctx(p, logs, fakeCreds().store));
+    await run("record-apps-repo").run(ctx(p, logs, fakeCreds(h.githubApp).store));
     const after = await h.ports.registrations.readTenant("prod", GUID);
     expect(after?.entry).toMatchObject({ appsRepo: TENANT_URL, appsImage: UNIT, appsImageTag: IMAGE_TAG, apps: [{ name: "erp" }] });
-    await run("record-apps-repo").run(ctx(p, logs, fakeCreds().store));
+    await run("record-apps-repo").run(ctx(p, logs, fakeCreds(h.githubApp).store));
     expect(logs.at(-1)).toContain("nothing to commit");
   });
   it("says so when the tenant has no registration yet, and writes nothing", async () => {
@@ -359,13 +378,13 @@ describe("record-apps-repo — the registration carries repo, image and tag", ()
     const p = await planned(h);
     const logs: string[] = [];
     const run = await built(h, p, logs);
-    await run("record-apps-repo").run(ctx(p, logs, fakeCreds().store));
+    await run("record-apps-repo").run(ctx(p, logs, fakeCreds(h.githubApp).store));
     expect(logs.at(-1)).toMatch(/no registration at prod yet/);
     expect(await h.ports.registrations.readTenant("prod", GUID)).toBeNull();
   });
   it("refuses in a pass that did not build — a resumed pass has no tag in memory", async () => {
     const h = harness();
     const p = await planned(h);
-    await expect(step(h, p, "record-apps-repo").run(ctx(p, [], fakeCreds().store))).rejects.toThrow(/not in this pass's memory/);
+    await expect(step(h, p, "record-apps-repo").run(ctx(p, [], fakeCreds(h.githubApp).store))).rejects.toThrow(/not in this pass's memory/);
   });
 });

@@ -9,6 +9,8 @@ export class FakeGitHubApp implements GitHubApp {
   token = "ghs_fake_installation_token";
   /** What installationOrg answers — the organisation the fake installation is bound to. */
   org = "example-org";
+  /** What identityFingerprint answers — what a sealed github-app credential carries. */
+  fingerprint = "sha256:fakeappidentity0";
   /** When set, every call throws it — the App identity that GitHub refuses (a revoked key, a
    *  suspended installation, an unreachable API). */
   failWith: Error | null = null;
@@ -35,6 +37,10 @@ export class FakeGitHubApp implements GitHubApp {
   async installationOrg(): Promise<string> {
     if (this.failWith) throw this.failWith;
     return this.org;
+  }
+
+  identityFingerprint(): string {
+    return this.fingerprint;
   }
 
   async createRepository(input: CreateRepositoryInput): Promise<{ created: boolean }> {
