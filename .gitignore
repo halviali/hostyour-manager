@@ -47,3 +47,6 @@ AGENTS.md
 # The agent worktree container. Tooling state, never product — and a worktree committed into
 # the tree it is a worktree OF is a loop nobody unpicks.
 .claude/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
