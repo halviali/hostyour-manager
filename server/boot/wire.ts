@@ -244,7 +244,7 @@ export async function wire(): Promise<Wired> {
   // The deletion after each rewrite reaches the build namespaces over the master-local cluster
   // reader: they stand on this cluster whatever cluster a unit targets.
   const refreshAppTokensLater = registrations
-    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger }); }
+    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp }); }
     : async (): Promise<void> => undefined;
   // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a

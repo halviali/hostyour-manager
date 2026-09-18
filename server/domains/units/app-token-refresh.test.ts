@@ -9,7 +9,8 @@ import type { BuildRepoPatSeedInput } from "../../adapters/vault/seeder-port.ts"
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
 import { Registrations } from "./registrations.ts";
-import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshAppTokens, refreshUnitRepoPat } from "./app-token-refresh.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
+import { BUILD_TARGET_SECRETS, CATALOG_BUMP_UNIT, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshAppTokens, refreshUnitRepoPat } from "./app-token-refresh.ts";
 
 /** The three deletes one unit's refresh issues, in the order the names are declared. */
 const deletesOf = (unit: string) => BUILD_TARGET_SECRETS.map((name) => ({ op: "delete" as const, namespace: `${unit}-build`, name }));
@@ -71,6 +72,41 @@ async function registrations(): Promise<Registrations> {
   await reg.commitRegistration({ unit: unit("beta-apps", "cred_app"), builds: ["beta-apps"], runId: "run_3" });
   return reg;
 }
+
+// THE CATALOG'S BUMP ENTRY (#197): where the catalog carries no PAT and the App reaches it, the App's
+// token is written to build/catalog/repo-pat on every tick and bump-git-https is deleted in EVERY
+// build namespace, because every unit's release pushes the catalog's books branch with that one entry.
+describe("refreshAppTokens — the catalog bump credential from the App", () => {
+  const catalogOf = (org: string, token?: string) => ({ repoURL: `https://github.com/${org}/catalog.git`, ...(token !== undefined ? { token } : {}) });
+
+  it("writes the App's token to the catalog entry and deletes bump-git-https in every build namespace, the pat unit's included", async () => {
+    const { store } = fakeStore({ value: "ghs_unit" });
+    const { seeder, written } = fakeSeeder();
+    const { logger, errors } = fakeLogger();
+    const kube = new FakeClusterReader();
+    const githubApp = new FakeGitHubApp();
+    githubApp.token = "ghs_catalog_now";
+    const r = await refreshAppTokens({ store, registrations: await registrations(), seeder, kube, logger, catalog: catalogOf(githubApp.org), githubApp });
+    expect(r.refreshed).toEqual(["acme-apps", "beta-apps", CATALOG_BUMP_UNIT]);
+    expect(written.at(-1)).toEqual({ consumerName: "catalog", pat: "ghs_catalog_now" });
+    const bumpDeletes = kube.secretWrites.filter((w) => w.name === "bump-git-https").map((w) => w.namespace);
+    expect(bumpDeletes.slice(-3)).toEqual(["acme-apps-build", "shop-build", "beta-apps-build"]);
+    expect(errors).toEqual([]);
+  });
+
+  it("leaves a catalog with a configured PAT alone, and refuses by name where the App does not reach a PAT-less catalog", async () => {
+    const { store } = fakeStore({ value: "ghs_unit" });
+    const { seeder, written } = fakeSeeder();
+    const { logger, errors } = fakeLogger();
+    const githubApp = new FakeGitHubApp();
+    const withPat = await refreshAppTokens({ store, registrations: await registrations(), seeder, kube: new FakeClusterReader(), logger, catalog: catalogOf("other-org", "ghp_x"), githubApp });
+    expect(withPat.refreshed).toEqual(["acme-apps", "beta-apps"]);
+    expect(written.some((w) => w.consumerName === "catalog")).toBe(false);
+    const unreached = await refreshAppTokens({ store, registrations: await registrations(), seeder, kube: new FakeClusterReader(), logger, catalog: catalogOf("other-org"), githubApp });
+    expect(unreached.failed).toEqual([CATALOG_BUMP_UNIT]);
+    expect(errors.at(-1)).toContain("does not reach it");
+  });
+});
 
 describe("refreshAppTokens", () => {
   it("rewrites the repo-pat of every unit whose build registration names a github-app credential with the value opened NOW, deletes its three build Secrets behind the rewrite, and skips the pat unit", async () => {

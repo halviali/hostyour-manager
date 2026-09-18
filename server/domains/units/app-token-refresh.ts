@@ -23,6 +23,8 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { ClusterReader } from "../../adapters/kube/port.ts";
 import type { Registrations } from "./registrations.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
+import type { GitHubApp } from "../../adapters/github-app/port.ts";
+import { appReachesRepoURL } from "./repo-identity.ts";
 
 /** The three Secrets of a unit's build namespace that carry its repo-pat, by the `target.name` of
  *  the ExternalSecret that materializes each — hostyour-cloud
@@ -31,10 +33,20 @@ import { unitBuildNamespace } from "./build-rbac.ts";
  *  (the package read). Deleting one is what makes its ExternalSecret read Vault again. */
 export const BUILD_TARGET_SECRETS = ["build-git-https", "bump-git-https", "build-npmrc"] as const;
 
+/** The entry the release pipeline's bump pushes the catalog's books branch with
+ *  (hostyour-cloud consumer-build externalsecret-bump.yaml reads secret/build/catalog/repo-pat):
+ *  the seeder addresses it as the "unit" named catalog, which is exactly its path. */
+export const CATALOG_BUMP_UNIT = "catalog";
+
 export interface AppTokenRefreshDeps {
   store: Pick<CredentialStore, "list" | "open">;
   registrations: Pick<Registrations, "listBuildRegistrations">;
   seeder: Pick<VaultSeeder, "refreshBuildRepoPat">;
+  /** The catalog as configured (config.catalog): where it carries no token and the App reaches it,
+   *  the bump entry is the Manager's to write on every tick (#197). Absent ⇒ no tenant family. */
+  catalog?: { repoURL: string; token?: string | undefined } | undefined;
+  /** The platform's GitHub App — measured against the catalog and minting the bump token. */
+  githubApp?: Pick<GitHubApp, "reachesRepository" | "installationToken"> | undefined;
   /** The build plane's cluster reader — the master's own, the cluster this Manager runs on. Absent
    *  on a Manager whose kube is not wired: the entries are still rewritten, and the deletion that
    *  would carry them into the Secrets is logged as skipped, per unit. */
@@ -84,9 +96,11 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   const refreshed: string[] = [];
   const failed: string[] = [];
   const units: { unit: string; credentialId: string }[] = [];
+  const buildUnits: string[] = [];
   try {
     const appCredentials = new Set((await deps.store.list({ kind: "github-app" })).map((c) => c.id));
     for (const { unit, entry } of await deps.registrations.listBuildRegistrations()) {
+      buildUnits.push(unit);
       if (entry.repoCredentialId && appCredentials.has(entry.repoCredentialId)) units.push({ unit, credentialId: entry.repoCredentialId });
     }
   } catch (err) {
@@ -116,6 +130,49 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
     }
   }
   if (undeleted.length > 0) deps.logger.warn({ units: undeleted }, "no kube is wired on this Manager, so the build Secrets of these units were not deleted after the rewrite — ESO keeps the Secrets it wrote before, and the next clone reads the old token");
-  if (units.length > 0) deps.logger.info({ refreshed, failed }, "App tokens refreshed into the build repo-pat entries and their build Secrets deleted");
+  await refreshCatalogBumpToken(deps, buildUnits, refreshed, failed);
+  if (units.length > 0 || refreshed.includes(CATALOG_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "App tokens refreshed into the build repo-pat entries and their build Secrets deleted");
   return { refreshed, failed };
+}
+
+/** The catalog's bump entry, written from the App where the App is the catalog's identity — the
+ *  catalog configured with no token and the App's installation reaching it, measured now
+ *  (repo-identity.ts, the rule of #194). Then `bump-git-https` deleted in EVERY build namespace, because
+ *  every unit's release pushes the catalog's books branch with this one entry. A catalog with a
+ *  configured PAT is left alone: the installer seeded it and it does not expire. */
+async function refreshCatalogBumpToken(deps: AppTokenRefreshDeps, buildUnits: readonly string[], refreshed: string[], failed: string[]): Promise<void> {
+  const { catalog, githubApp } = deps;
+  if (!catalog || catalog.token !== undefined || !githubApp) return;
+  try {
+    if (!(await appReachesRepoURL(githubApp, catalog.repoURL))) {
+      deps.logger.error({ repoURL: catalog.repoURL }, "the catalog carries no CATALOG_WRITE_PAT and the GitHub App's installation does not reach it — the release pipeline's bump has no credential (readiness row catalog.identity)");
+      failed.push(CATALOG_BUMP_UNIT);
+      return;
+    }
+    const token = Buffer.from(await githubApp.installationToken(), "utf8");
+    try {
+      await deps.seeder.refreshBuildRepoPat({ consumerName: CATALOG_BUMP_UNIT, pat: token.toString("utf8") });
+    } finally {
+      token.fill(0);
+    }
+  } catch (err) {
+    failed.push(CATALOG_BUMP_UNIT);
+    deps.logger.error({ repoURL: catalog.repoURL, err: err instanceof Error ? err.message : String(err) }, "the App's token could not be written into the catalog's bump entry — the next release bumps the catalog with the value that stands, which dies an hour after it was minted");
+    return;
+  }
+  if (!deps.kube) {
+    refreshed.push(CATALOG_BUMP_UNIT);
+    if (buildUnits.length > 0) deps.logger.warn({ units: buildUnits }, "no kube is wired on this Manager, so bump-git-https was not deleted in the build namespaces after the catalog rewrite — the next bump reads the old token");
+    return;
+  }
+  const kept: string[] = [];
+  for (const unit of buildUnits) {
+    try {
+      await deps.kube.deleteSecret(unitBuildNamespace(unit), "bump-git-https");
+    } catch (err) {
+      kept.push(unit);
+      deps.logger.error({ unit, namespace: unitBuildNamespace(unit), err: err instanceof Error ? err.message : String(err) }, "the catalog's bump entry was rewritten but this unit's bump-git-https could not be deleted — its next bump reads the old token");
+    }
+  }
+  (kept.length > 0 ? failed : refreshed).push(CATALOG_BUMP_UNIT);
 }
