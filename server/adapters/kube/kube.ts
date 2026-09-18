@@ -392,6 +392,17 @@ export class KubeClusterReader implements ClusterReader {
     return { deleted: binding || policy };
   }
 
+  async listAdmissionPolicies(): Promise<string[]> {
+    let raw: unknown;
+    try {
+      raw = await this.custom.listClusterCustomObject({ ...ADMISSION_POLICY });
+    } catch (e) {
+      throw upstream(`list ${ADMISSION_POLICY.plural}`, e);
+    }
+    const items = ((raw as { items?: { metadata?: { name?: string } }[] }).items ?? []);
+    return items.map((i) => i.metadata?.name).filter((n): n is string => typeof n === "string");
+  }
+
   /** Does either half of the unit's admission boundary still stand? Asked of BOTH kinds, matching the
    *  delete above, which reports the pair as one. NEEDS a live cluster — integration-tested there. */
   async admissionPolicyExists(name: string): Promise<boolean> {

@@ -145,6 +145,10 @@ export const TenantPurgeRequest = z.object({
   guid: guidSchema, // the sole tenant identity: namespace == AppProject == pointer dir == <guid>
   stage: z.enum(STAGE),
   clusterId: z.string().startsWith("cls_"),
+  // The members an OBJECTS orphan's purge aims at (#190): read off the AppProjects, policies and
+  // namespaces the scan found, because neither an inventory row nor a pointer names them any more.
+  // Unioned into the unresolved target's members; absent for every other purge.
+  orphanMembers: z.array(z.string().min(1)).optional(),
 }) satisfies z.ZodType<TenantPurgeInput>;
 export type TenantPurgeRequest = z.infer<typeof TenantPurgeRequest>;
 
@@ -237,8 +241,10 @@ function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
  *  may by now belong to a tenant that took the subdomain after this one was offboarded, and remove-dns
  *  deletes by name. It is left empty; remove-dns reads the emptiness as "no record of this tenant's own
  *  stands" and removes nothing (an offboard already removed it). */
-function unresolvedTeardownTarget(db: Db, c: TenantPurgeCluster): TenantTeardownTarget {
-  const members = tenantTeardownMembers(db, c.guid, c.stage);
+function unresolvedTeardownTarget(db: Db, c: TenantPurgeCluster, named: readonly string[] = []): TenantTeardownTarget {
+  // The inventory's members unioned with the ones the orphan scan read off the cluster's objects
+  // (#190) — for a guid the inventory never recorded, the objects are the only source left.
+  const members = [...new Set([...tenantTeardownMembers(db, c.guid, c.stage), ...named])];
   return TenantTeardownTargetSchema.parse({
     guid: c.guid,
     subdomain: "",
@@ -505,7 +511,7 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
           `tenant ${req.guid} lives on cluster ${resolved.clusterId} ("${resolved.cluster}"), tenant-purge targets ${c.clusterId} — refusing to purge on the wrong cluster`,
         );
       }
-      const target = resolved ?? unresolvedTeardownTarget(ctx.db, c);
+      const target = resolved ?? unresolvedTeardownTarget(ctx.db, c, req.orphanMembers ?? []);
       ctx.log(
         target.tenantId
           ? `tenant ${req.guid} ("${target.subdomain}") resolved from inventory on ${target.cluster} — ${target.watchNames.length} fan-out Application(s) to prune`

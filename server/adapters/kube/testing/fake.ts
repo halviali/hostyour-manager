@@ -220,6 +220,10 @@ export class FakeClusterReader implements ClusterReader {
     return this.admissionPolicies.has(name);
   }
 
+  async listAdmissionPolicies(): Promise<string[]> {
+    return [...this.admissionPolicies.keys()];
+  }
+
   async readDeployState(): Promise<DeployState | null> {
     return this.scripted.deployState ?? null;
   }
@@ -375,6 +379,10 @@ export class FakeMasterProjectWriter implements MasterProjectWriter {
     }
     this.store.delete(key);
     return { deleted: true };
+  }
+
+  async listAppProjects(namespace: string): Promise<string[]> {
+    return [...this.store.keys()].filter((k) => k.startsWith(`${namespace}/`)).map((k) => k.slice(namespace.length + 1));
   }
 
   /** Unguarded like the live presence read — a look never refuses. */

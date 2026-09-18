@@ -293,6 +293,9 @@ export interface ClusterReader {
   /** Offboard teardown: delete the unit's policy AND its binding by name. Idempotent — an
    *  already-absent pair resolves { deleted: false }. */
   deleteAdmissionPolicy(name: string): Promise<{ deleted: boolean }>;
+  /** Every admission policy's name on the cluster — what the orphan scan reads to find a tenant
+   *  member's fence standing with no tenant behind it (#190). */
+  listAdmissionPolicies(): Promise<string[]>;
   /** Does EITHER half of the unit's admission boundary still stand? The mirror of the delete above,
    *  which reports the pair as one, so this answers for the pair as one: a policy left without its
    *  binding is inert and a binding left without its policy is a dangling reference, and both are a
@@ -500,6 +503,9 @@ export interface MasterProjectWriter {
   /** Idempotent delete — an already-absent project resolves { deleted: false }. Refuses a reserved
    *  name; refuses to delete a project that is not consumer-owned. */
   deleteAppProject(namespace: string, name: string): Promise<{ deleted: boolean }>;
+  /** Every AppProject's name in the ArgoCD namespace — what the orphan scan reads to find a tenant
+   *  member's isolation project standing with no tenant behind it (#190). */
+  listAppProjects(namespace: string): Promise<string[]>;
   /** Does the project still stand? The offboard orphan scan reads it back after the delete: the
    *  isolation project is written outside any chart, so nothing but this Manager ever removes it,
    *  and a project outliving its unit is what a re-onboard of the same name would then find. */

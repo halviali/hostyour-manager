@@ -15,10 +15,13 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
         return (
           <li key={`${o.stage}/${o.guid}`}>
             <div className="row">
-              <span className="badge badge--degraded">orphan</span>
-              <span className="row__title">{o.subdomain}</span>
+              <span className="badge badge--degraded">{o.kind === "objects" ? "objects" : "orphan"}</span>
+              <span className="row__title">{o.kind === "objects" ? `${o.guid} (member objects, no pointer)` : o.subdomain}</span>
               <span className="row__meta">
                 {o.guid} · {o.stage} · {o.cluster}
+                {o.objects
+                  ? ` · ${o.objects.appProjects.length} AppProject(s), ${o.objects.policies.length} admission polic${o.objects.policies.length === 1 ? "y" : "ies"}, ${o.objects.namespaces.length} namespace(s) — members ${(o.members ?? []).join(", ")}`
+                  : ""}
               </span>
               <span className="row__end">
                 {clusterId === null ? (
@@ -32,7 +35,7 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
                   <button
                     type="button"
                     className="btn btn--danger"
-                    onClick={() => onPurge({ guid: o.guid, subdomain: o.subdomain, stage: o.stage, clusterId })}
+                    onClick={() => onPurge({ guid: o.guid, subdomain: o.subdomain, stage: o.stage, clusterId, ...(o.members ? { orphanMembers: o.members } : {}) })}
                   >
                     Purge…
                   </button>
@@ -96,8 +99,8 @@ export function TenantOrphanPanel(props: {
                   pointers it would claim the manager accounted for tenants it never even parsed. */}
               <p>
                 {scan.skipped.length === 0
-                  ? "No orphaned tenants — every deployed tenant pointer has a matching inventory row."
-                  : "Every pointer that could be read has a matching inventory row — but the pointers below could not be read, so this is not an all-clear."}
+                  ? "No orphaned tenants — every deployed tenant pointer has a matching inventory row, and no tenant member object stands on an active cluster without one."
+                  : "Every pointer that could be read has a matching inventory row — but the pointers or clusters below could not be read, so this is not an all-clear."}
               </p>
             </div>
           ) : (

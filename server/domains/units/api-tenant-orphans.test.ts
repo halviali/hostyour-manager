@@ -223,7 +223,7 @@ describe("GET /api/tenants/orphans (the pointer scan)", () => {
     await seedPointer(registrations, ORPHAN_GUID, "ghost");
     const body = (await (await app.request("/api/tenants/orphans", authed(cookie))).json()) as { orphans: Array<Record<string, unknown>>; skipped: unknown[] };
     // Everything the operator needs to recognise it (subdomain/stage/slave) AND to aim a purge (clusterId).
-    expect(body.orphans).toEqual([{ guid: ORPHAN_GUID, subdomain: "ghost", stage: "prod", cluster: "s2", clusterId: "cls_2" }]);
+    expect(body.orphans).toEqual([{ kind: "pointer", guid: ORPHAN_GUID, subdomain: "ghost", stage: "prod", cluster: "s2", clusterId: "cls_2" }]);
     expect(body.skipped).toEqual([]); // every pointer was read — the list is a complete answer
   });
 

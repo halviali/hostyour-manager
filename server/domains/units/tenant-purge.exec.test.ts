@@ -261,6 +261,24 @@ describe("tenant-purge execution", () => {
     expect(logs.some((l) => l.includes("pointer already removed"))).toBe(true); // remove-pointer no-op
   });
 
+  it("OBJECTS ORPHAN (#190): the members the scan named are torn down — AppProjects and policies both — without any inventory", async () => {
+    seedCluster(); // no row, no pointer: the objects are the only source
+    const projects = new FakeMasterProjectWriter();
+    const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, namespacesByLabel: { [TENANT_LABEL]: NAMESPACES } });
+    for (const member of MEMBERS) {
+      await projects.applyAppProject(ARGO_NS, renderTenantAppProject({ guid: GUID, member, stage: "prod", argoNamespace: ARGO_NS, catalogRepoUrl: DEPLOY_REPO, platformRepoURL: PLATFORM_REPO, cluster: "s1" }));
+      await cluster.applyAdmissionPolicy({ metadata: { name: `tenant-${memberNamespace(GUID, member, "prod")}` } } as never, { metadata: { name: `tenant-${memberNamespace(GUID, member, "prod")}` } } as never);
+    }
+    const prt = ports(new TenantRegistrations(new FakePlatformRepo()), { projects, cluster });
+    const { params } = await planned(prt, { ...REQUEST, orphanMembers: [...MEMBERS] });
+    expect(params.target.members).toEqual([...MEMBERS]);
+    await runAll(prt, params, []);
+    for (const member of MEMBERS) {
+      expect(projects.get(ARGO_NS, memberAppProject(GUID, member, "prod"))).toBeUndefined();
+      expect(cluster.deletedAdmissionPolicies).toContain(`tenant-${memberNamespace(GUID, member, "prod")}`);
+    }
+  });
+
   it("INVENTORIED tenant: removes the pointer, RECORDS THE ROWS PURGED (not offboarded), then deprovisions", async () => {
     // A purge settling its rows to "offboarded" — the very
     // status tenant-offboard writes — makes a tenant whose Tenant CR, Vault path, object-storage

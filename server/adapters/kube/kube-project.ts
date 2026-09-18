@@ -83,6 +83,17 @@ export class KubeMasterProjectWriter implements MasterProjectWriter {
     return (await this.getAppProject(namespace, name)) !== null;
   }
 
+  async listAppProjects(namespace: string): Promise<string[]> {
+    let raw: unknown;
+    try {
+      raw = await this.custom.listNamespacedCustomObject({ ...APPPROJECT, namespace });
+    } catch (e) {
+      throw upstream(`list AppProjects in ${namespace}`, e);
+    }
+    const items = ((raw as { items?: { metadata?: { name?: string } }[] }).items ?? []);
+    return items.map((i) => i.metadata?.name).filter((n): n is string => typeof n === "string");
+  }
+
   /** GET the raw AppProject, mapping a 404 to null (the 1.x custom-objects API returns the object
    *  directly, so metadata.labels / metadata.resourceVersion read off the result). */
   private async getAppProject(namespace: string, name: string): Promise<unknown> {

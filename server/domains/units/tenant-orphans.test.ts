@@ -8,6 +8,9 @@ import { scanOrphanTenants, resolveRunTenantState, CreateTenantPurgeTarget } fro
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
+import { FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
+import { renderTenantAppProject } from "./appproject.ts";
+import { memberNamespace, TENANT_LABEL_KEY } from "./tenant-fanout.ts";
 
 // The DISCOVERY half of surfacing unrecorded tenants: what makes one nameable at all. The
 // load-bearing property throughout is the DIFF — inventory vs the live GitOps pointers — plus the
@@ -80,12 +83,56 @@ async function deployedWithRaw(raw: Record<string, string>, ...entries: TenantFi
   return registrations;
 }
 
+// THE OBJECTS SIDE (#190): member objects standing on an active cluster whose guid has no live row and
+// no pointer at that stage — a purge on a Manager that missed members, a teardown that died between
+// steps. Grouped into ONE orphan naming the members, so a purge can aim at them without any inventory.
+describe("scanOrphanTenants — member objects with no pointer", () => {
+  const LEFT = "xn26w46g8rk8";
+  async function clusterWith(guids: readonly string[]): Promise<FakeClusterKubeResolver> {
+    const projects = new FakeMasterProjectWriter();
+    const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, namespacesByLabel: { [TENANT_LABEL_KEY]: guids.flatMap((g) => ["erp", "web"].map((m) => memberNamespace(g, m, "prod"))) } });
+    for (const g of guids) {
+      for (const member of ["erp", "web"]) {
+        await projects.applyAppProject("argocd", renderTenantAppProject({ guid: g, member, stage: "prod", argoNamespace: "argocd", catalogRepoUrl: "https://github.com/x/catalog.git", platformRepoURL: "https://github.com/x/platform.git", cluster: "s1" }));
+        await cluster.applyAdmissionPolicy({ metadata: { name: `tenant-${memberNamespace(g, member, "prod")}` } } as never, { metadata: { name: `tenant-${memberNamespace(g, member, "prod")}` } } as never);
+      }
+    }
+    return new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: new FakeMasterArgoReader(), projectWriter: projects, argoNamespace: "argocd" });
+  }
+
+  it("lists the objects of a purged guid with no pointer as ONE orphan naming its members, and never a live tenant's", async () => {
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_1", guid: LEFT, subdomain: "left", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "purged" }).run();
+    const resolver = await clusterWith([GUID, LEFT]);
+    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme")), resolver });
+    expect(found.orphans).toEqual([{
+      kind: "objects", guid: LEFT, subdomain: "", stage: "prod", cluster: "s1", clusterId: "cls_1", members: ["erp", "web"],
+      objects: {
+        appProjects: [memberNamespace(LEFT, "erp", "prod"), memberNamespace(LEFT, "web", "prod")],
+        policies: [`tenant-${memberNamespace(LEFT, "erp", "prod")}`, `tenant-${memberNamespace(LEFT, "web", "prod")}`],
+        namespaces: [memberNamespace(LEFT, "erp", "prod"), memberNamespace(LEFT, "web", "prod")],
+      },
+    }]);
+    expect(found.skipped).toEqual([]);
+  });
+
+  it("leaves a pointer orphan's objects to the pointer, and reports a cluster it cannot read instead of clearing it", async () => {
+    const resolver = await clusterWith([ORPHAN]);
+    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(ORPHAN, "ghost")), resolver });
+    expect(found.orphans.map((o) => o.kind)).toEqual(["pointer"]);
+    const unreadable = new FakeClusterKubeResolver({ clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, throwOnListNamespaces: new Error("401 Unauthorized") }), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });
+    const red = await scanOrphanTenants({ db: db.db, registrations: await deployed(), resolver: unreadable });
+    expect(red.orphans).toEqual([]);
+    expect(red.skipped.map((s) => s.reason)).toEqual([expect.stringContaining("cluster s1 (cls_1) could not be read for member objects: 401 Unauthorized")]);
+  });
+});
+
 describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
   it("returns only the pointers inventory does not know, resolved to their cluster row", async () => {
     db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const registrations = await deployed(entry(GUID, "acme"), entry(ORPHAN, "ghost"));
     expect(await scanOrphanTenants({ db: db.db, registrations })).toEqual({
-      orphans: [{ guid: ORPHAN, subdomain: "ghost", stage: "prod", cluster: "s1", clusterId: "cls_1" }],
+      orphans: [{ kind: "pointer", guid: ORPHAN, subdomain: "ghost", stage: "prod", cluster: "s1", clusterId: "cls_1" }],
       skipped: [],
     });
   });
@@ -121,7 +168,7 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
     // pointer path itself is keyed on (registrations/<guid>/<stage>.yaml).
     db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "dev", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme")) });
-    expect(found.orphans).toEqual([{ guid: GUID, subdomain: "acme", stage: "prod", cluster: "s1", clusterId: "cls_1" }]);
+    expect(found.orphans).toEqual([{ kind: "pointer", guid: GUID, subdomain: "acme", stage: "prod", cluster: "s1", clusterId: "cls_1" }]);
   });
 
   it("scans every stage in one pass — an orphan is found wherever it was left", async () => {
@@ -136,7 +183,7 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
     // exactly the leftover the operator is scanning for. The UI says why it offers no action.
     const registrations = await deployed(entry(STRANDED, "stranded", { cluster: "s9" }));
     expect(await scanOrphanTenants({ db: db.db, registrations })).toEqual({
-      orphans: [{ guid: STRANDED, subdomain: "stranded", stage: "prod", cluster: "s9", clusterId: null }],
+      orphans: [{ kind: "pointer", guid: STRANDED, subdomain: "stranded", stage: "prod", cluster: "s9", clusterId: null }],
       skipped: [],
     });
   });

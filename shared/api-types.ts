@@ -665,6 +665,11 @@ export interface TenantPurgeInput {
   guid: string;
   stage: Stage;
   clusterId: string;
+  /** The members an OBJECTS orphan's purge tears down (#190): read off the objects the scan found,
+   *  because no inventory row and no pointer names them any more. Absent for every other purge. Not
+   *  `members`: a create-tenant run's frozen params carry member RECORDS under that name, and the
+   *  purge target is parsed off those params too (tenant-orphans.ts CreateTenantPurgeTarget). */
+  orphanMembers?: string[] | undefined;
 }
 
 /** What a purge is AIMED at: the three fields the run is keyed on plus the subdomain, which is the only
@@ -673,6 +678,7 @@ export interface TenantPurgeInput {
  *  the orphan scan and a create-tenant run's own frozen params (server CreateTenantPurgeTarget, a zod
  *  extension of TenantPurgeRequest checked against this type). */
 export interface PurgeTenantTarget extends TenantPurgeInput {
+  /** Empty for an objects orphan (#190): nothing records its subdomain any more. */
   subdomain: string;
 }
 
@@ -691,6 +697,15 @@ export interface OrphanTenantView {
    *  clusterId, so an unresolvable orphan cannot be purged through the product at all — the UI must show
    *  it and say why rather than offer an action that would 400. */
   clusterId: string | null;
+  /** WHAT the scan found (#190): `pointer` — a deployed pointer with no inventory row, the case the
+   *  scan was born for; `objects` — member objects standing on a cluster (AppProjects, admission
+   *  policies, labelled namespaces) whose guid has no live row and no pointer at that stage: a purge
+   *  that missed members, a teardown that died between steps, a machine restored under a standing
+   *  master. The subdomain of an objects orphan is empty — nothing records it any more. */
+  kind: "pointer" | "objects";
+  /** The members the objects name, so a purge can aim at them without any inventory. */
+  members?: string[];
+  objects?: { appProjects: string[]; policies: string[]; namespaces: string[] };
 }
 
 /** One registrations/<guid>/<stage>.yaml the scan could NOT read (a drifted/corrupt body, or one

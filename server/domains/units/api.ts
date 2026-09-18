@@ -610,7 +610,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   app.get("/api/tenants/orphans", async (c) => {
     if (!registrations) return c.json({ orphans: [], skipped: [], reason: "onboarding-not-configured" } satisfies OrphanScanView);
     try {
-      const { orphans, skipped } = await scanOrphanTenants({ db, registrations });
+      const { orphans, skipped } = await scanOrphanTenants({ db, registrations, ...(resolver ? { resolver } : {}) });
       return c.json({ orphans, skipped } satisfies OrphanScanView);
     } catch (e) {
       return c.json({ orphans: [], skipped: [], error: errText(e) } satisfies OrphanScanView);

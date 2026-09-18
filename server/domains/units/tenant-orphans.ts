@@ -41,8 +41,10 @@
 import { z } from "zod";
 import { and, eq, notInArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
-import { tenants } from "../../db/schema/inventory.ts";
-import { STAGE, TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
+import { clusters, servers, tenants } from "../../db/schema/inventory.ts";
+import { STAGE, TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
+import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
+import { TENANT_LABEL_KEY } from "./tenant-fanout.ts";
 // The wire shapes this module ANSWERS IN, declared once in shared/api-types.ts and consumed unchanged by
 // the browser (web/src/api.ts + the run/tenant screens). Both functions below return one of them by
 // declared type, which is the whole compile-time link: a member added to RunTenantStateView, or a field
@@ -67,10 +69,13 @@ import { resolveClusterIdByName } from "./tenant-values.ts";
  *  catalog cannot be read at all — the route turns that into a visible, fail-soft "the scan itself
  *  failed", which must never be flattened into an empty result (that would read as "no orphans", the
  *  exact opposite of the truth). */
-export async function scanOrphanTenants(deps: { db: Db; registrations: TenantRegistrations }): Promise<OrphanScan> {
+export async function scanOrphanTenants(deps: { db: Db; registrations: TenantRegistrations; resolver?: ClusterKubeResolver }): Promise<OrphanScan> {
   const { db, registrations } = deps;
   const found: OrphanTenantView[] = [];
   const skipped: SkippedTenantPointerView[] = [];
+  /** Every guid a pointer names at a stage, orphan or not — a member object of such a guid is the
+   *  pointer's, and its purge (by pointer) takes the object down. */
+  const pointed = new Map<Stage, Set<string>>();
   for (const stage of STAGE) {
     // The inventory side of the diff: every tenant this manager BELIEVES is deployed at this stage.
     // A settled row (offboarded or purged) is deliberately not "known" — see the header.
@@ -84,10 +89,12 @@ export async function scanOrphanTenants(deps: { db: Db; registrations: TenantReg
     );
     const scan = await registrations.listTenantPointers(stage);
     skipped.push(...scan.skipped); // reported, never dropped — see OrphanScan
+    pointed.set(stage, new Set([...known, ...scan.pointers.map((p) => p.guid), ...scan.skipped.map((s) => s.guid)]));
     for (const pointer of scan.pointers) {
       if (known.has(pointer.guid)) continue;
       const resolved = resolveClusterIdByName(db, pointer.cluster);
       found.push({
+        kind: "pointer",
         guid: pointer.guid,
         subdomain: pointer.subdomain,
         stage,
@@ -96,7 +103,59 @@ export async function scanOrphanTenants(deps: { db: Db; registrations: TenantReg
       });
     }
   }
+  if (deps.resolver) found.push(...(await scanOrphanObjects(db, deps.resolver, pointed, skipped)));
   return { orphans: found, skipped };
+}
+
+/** A member object's name, `<guid>-<member>-<stage>` (memberNamespace/memberAppProject), or the
+ *  admission policy's `tenant-` prefixed form of it; null for any name of another shape. */
+function parseMemberName(name: string): { guid: string; member: string; stage: Stage } | null {
+  const m = /^(?:tenant-)?([0-9a-hjkmnp-tv-z]{12})-(.+)-(dev|test|prod)$/.exec(name);
+  return m ? { guid: m[1]!, member: m[2]!, stage: m[3] as Stage } : null;
+}
+
+/** THE OBJECTS SIDE OF THE DIFF (#190): on every active cluster, every AppProject, admission policy
+ *  and labelled namespace of a tenant member whose guid has no live row and no pointer at that stage —
+ *  grouped per guid and stage into ONE orphan that names its members, so a purge can aim at them
+ *  without any inventory. A cluster that cannot be read is reported in `skipped` under its own name,
+ *  never flattened into "nothing standing there". */
+async function scanOrphanObjects(db: Db, resolver: ClusterKubeResolver, pointed: Map<Stage, Set<string>>, skipped: SkippedTenantPointerView[]): Promise<OrphanTenantView[]> {
+  const out: OrphanTenantView[] = [];
+  const active = db.select({ id: clusters.id, serverId: clusters.serverId }).from(clusters).where(eq(clusters.status, "active")).all();
+  for (const cluster of active) {
+    const server = db.select({ name: servers.name }).from(servers).where(eq(servers.id, cluster.serverId)).get();
+    const clusterName = server?.name ?? cluster.id;
+    let read: { appProjects: string[]; policies: string[]; namespaces: string[] };
+    try {
+      const kube = await resolver.resolve(cluster.id);
+      read = {
+        appProjects: await kube.projectWriter.listAppProjects(kube.argoNamespace),
+        policies: await kube.clusterReader.listAdmissionPolicies(),
+        namespaces: await kube.clusterReader.listNamespaces(TENANT_LABEL_KEY),
+      };
+    } catch (e) {
+      skipped.push({ guid: clusterName, stage: "prod", reason: `cluster ${clusterName} (${cluster.id}) could not be read for member objects: ${e instanceof Error ? e.message : String(e)}` });
+      continue;
+    }
+    const groups = new Map<string, OrphanTenantView>();
+    const take = (name: string, into: "appProjects" | "policies" | "namespaces") => {
+      const parsed = parseMemberName(name);
+      if (!parsed || pointed.get(parsed.stage)?.has(parsed.guid)) return;
+      const key = `${parsed.guid}/${parsed.stage}`;
+      const group = groups.get(key) ?? { kind: "objects" as const, guid: parsed.guid, subdomain: "", stage: parsed.stage, cluster: clusterName, clusterId: cluster.id, members: [], objects: { appProjects: [], policies: [], namespaces: [] } };
+      if (!group.members!.includes(parsed.member)) group.members!.push(parsed.member);
+      group.objects![into].push(name);
+      groups.set(key, group);
+    };
+    for (const n of read.appProjects) take(n, "appProjects");
+    for (const n of read.policies) take(n, "policies");
+    for (const n of read.namespaces) take(n, "namespaces");
+    for (const group of groups.values()) {
+      group.members!.sort();
+      out.push(group);
+    }
+  }
+  return out;
 }
 
 /** The purge target carried by a create-tenant run's FROZEN params — literally TenantPurgeRequest

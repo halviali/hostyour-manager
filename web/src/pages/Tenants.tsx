@@ -205,7 +205,7 @@ export function Tenants() {
   async function purge(target: PurgeTenantTarget): Promise<void> {
     setError(null);
     try {
-      const { runId } = await purgeTenant({ guid: target.guid, stage: target.stage, clusterId: target.clusterId });
+      const { runId } = await purgeTenant({ guid: target.guid, stage: target.stage, clusterId: target.clusterId, ...(target.orphanMembers ? { orphanMembers: target.orphanMembers } : {}) });
       nav(`/runs/${runId}`);
     } catch (e) {
       setError(msg(e));
