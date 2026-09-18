@@ -147,6 +147,9 @@ const ClusterMarkingFileSchema = z.object({
     objectStorage: z.object({
       r2: z.object({ accountId: z.string().min(1), jurisdiction: z.string().min(1) }),
     }).optional(),
+    // The platform's GitHub App switch, one optional line the same way (hostyour-deploy#36): read by
+    // every chart of the installation, carried through globalRest and written back unchanged.
+    githubApp: z.object({ appId: z.string().min(1) }).optional(),
   // PASSTHROUGH, and only here. The global block carries every value the charts of this platform
   // read, and this process has no business refusing a key a chart added — it would fail every map
   // read on the next release that introduces one. What it does refuse is an unknown key at the TOP,

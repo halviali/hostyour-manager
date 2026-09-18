@@ -255,6 +255,8 @@ const FULL_MAP = [
   // It is carried and never read here, so the round trip below is the whole of what proves a rewrite
   // gives it back rather than deleting the only record of which account a tenant's bucket is in.
   "  objectStorage: {r2: {accountId: '7d6b0eaa', jurisdiction: 'eu'}}",
+  // The App switch, one line the same way and for the same reason.
+  "  githubApp: {appId: '4982222'}",
   "  endpoints:",
   "    registry:",
   "      host: zot.m1.example.com",
