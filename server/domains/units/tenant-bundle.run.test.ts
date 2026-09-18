@@ -164,6 +164,7 @@ function fakeCreds(app?: FakeGitHubApp): { store: CredentialStore; seals: { id: 
       }
       return Buffer.from(sealed?.plaintext ?? "ghp_test", "utf8");
     },
+    list: async ({ kind }: { kind: string }) => seals.filter((x) => x.kind === kind).map(({ id, kind: k, label }) => ({ id, kind: k, label, fingerprint: "sha256:app" })),
   } as unknown as CredentialStore;
   return { store, seals };
 }

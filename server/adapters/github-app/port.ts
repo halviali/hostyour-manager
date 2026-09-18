@@ -42,6 +42,13 @@ export interface GitHubApp {
    *  run re-planned after a crash must find the repository rather than fail on it. Any other refusal
    *  throws GitHubAppError carrying GitHub's own message. */
   createRepository(input: CreateRepositoryInput): Promise<{ created: boolean }>;
+  /** MEASURED, never inferred from an owner string: whether THIS installation reaches the repository
+   *  (GET /repos/{owner}/{repo}/installation with the App's JWT answers the installation that covers
+   *  it, or 404). True only when that installation is this one — the App installed in a second
+   *  organisation reaches that organisation's repositories with a token this Manager never mints.
+   *  The rule every repository credential follows (#194): reached ⇒ the App is its identity and no
+   *  PAT is asked; not reached ⇒ the repository's own PAT, exactly as before the App existed. */
+  reachesRepository(input: { owner: string; repo: string; signal?: AbortSignal }): Promise<boolean>;
 }
 
 /** Any GitHub App API failure — a transport error, or a non-2xx that is not the idempotent

@@ -3,11 +3,13 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import type { Executor } from "../../executor/executor.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import { fingerprintSecret } from "../../security/fingerprint.ts";
+import type { GitHubApp } from "../../adapters/github-app/port.ts";
+import { resolveRepoIdentity, sealRepoIdentity } from "./repo-identity.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type TenantStatus, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
-import type { OrphanScanView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView, ChannelStagesView } from "../../../shared/api-types.ts";
+import type { OrphanScanView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView } from "../../../shared/api-types.ts";
+import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
 // The live reconciliation comparison — driftOf/the per-kind EXPECTED records/the consumer live probe —
@@ -66,6 +68,9 @@ export interface ConsumerOnboardApiDeps extends ConsumerApiDeps {
   github?: GitHubConsumer;
   /** The platform repository on GitHub, for the platform's own release line (release-version.ts). */
   platformGitHub?: { owner: string; repo: string };
+  /** The platform's GitHub App: the identity of every repository its installation reaches, measured
+   *  per onboarding (repo-identity.ts). Absent ⇒ every repository is onboarded with its own PAT. */
+  githubApp?: GitHubApp;
   /** The platform GitOps repo — the channel-table read (GET /api/consumers/channels) serves
    *  global.channelStages LITERALLY from clusters/platform/values-common.yaml, so the manager keeps no
    *  copy of the one table the release pipeline enforces. Absent ⇒ the route answers 501. */
@@ -117,7 +122,7 @@ function targetClusters(db: Db): Array<{ id: string; domain: string; stage: Stag
 }
 
 export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardApiDeps): void {
-  const { executor, db, store, onboardingEnabled, resolver, registrations, platformRepo, github, platformGitHub } = deps;
+  const { executor, db, store, onboardingEnabled, resolver, registrations, platformRepo, github, platformGitHub, githubApp } = deps;
 
   // The consumer inventory: every onboarded app, its own stage, and which cluster it runs on
   // (apps.clusterId -> clusters.domain). provenance "manager" marks a consumer this Manager onboarded
@@ -262,21 +267,22 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager — the gate-runner and git/kube/vault adapters must be wired first");
     const parsed = OnboardRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) throw errValidation(`invalid onboard request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    // Seal the raw repo PAT BEFORE the run exists: planStreamed persists its raw params verbatim
-    // (params_json), so only the sealed reference may enter the executor — the raw value lives in
-    // the request body (TLS), the sealed store, and the Vault app tier, nowhere else.
-    // Fail-closed: a seal failure is a thrown error, no run is created. The zod issues above carry
-    // field paths + generic messages only, never the submitted value.
+    // The repository's identity is chosen and sealed BEFORE the run exists: planStreamed persists
+    // its raw params verbatim (params_json), so only the sealed reference may enter the executor —
+    // a raw PAT lives in the request body (TLS), the sealed store, and the Vault app tier, nowhere
+    // else. The App where its installation reaches the repository, the PAT where it does not
+    // (repo-identity.ts): measured, so a repository outside the App's organisation asks its own PAT
+    // and one inside it asks none. Fail-closed: a seal failure is a thrown error, no run is created.
+    // The zod issues above carry field paths + generic messages only, never the submitted value.
     const { repoPat, ...req } = parsed.data;
     if (!github) throw errNotConfigured("onboarding is not configured on this manager — the GitHub client that reads a repository's release tags is not wired");
-    // The version the onboarding releases: the next number after the release tags, read with the raw
-    // PAT before it is sealed. Nobody types it, so no onboarding can name a release that already
-    // stands at another commit (hostyour-manager#139).
-    const { version } = await resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: repoPat, signal: c.req.raw.signal });
-    const plaintext = Buffer.from(repoPat, "utf8");
-    const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
-    const ref = await store.seal({ kind: "pat", label: `consumer repo PAT (${req.consumerName})`, plaintext, fingerprint });
-    return c.json(await executor.planStreamed("consumer-onboard", { ...req, version, repoCredentialId: ref.id }), 201);
+    const identity = await resolveRepoIdentity({ repoURL: req.repoURL, repoPat, githubApp, signal: c.req.raw.signal });
+    // The version the onboarding releases: the next number after the release tags, read with the
+    // identity's token before it is sealed. Nobody types it, so no onboarding can name a release that
+    // already stands at another commit (hostyour-manager#139).
+    const { version } = await resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: identity.token, signal: c.req.raw.signal });
+    const repoCredentialId = await sealRepoIdentity(store, identity, req.consumerName, githubApp);
+    return c.json(await executor.planStreamed("consumer-onboard", { ...req, version, repoCredentialId }), 201);
   });
 
   // Lifecycle: offboard/suspend/resume plan synchronously (no gate-runner) — approve via the Runs API.

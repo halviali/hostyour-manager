@@ -298,6 +298,7 @@ export function buildUnits(
       ports: consumer.onboardPorts,
       ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),
       ...(platformRepo ? { platformRepo } : {}),
+      ...(githubApp ? { githubApp } : {}),
     };
   }
   // The sanctioned type-erasure (registrations.ts): each typed RunDefinition<P> is stored executor-facing

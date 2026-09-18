@@ -68,6 +68,8 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   private readonly tags = new Map<string, string[]>();
   /** Every listReleaseTags call, so a test can assert which repositories the next-version read spanned. */
   readonly tagReads: Array<{ owner: string; repo: string }> = [];
+  /** The token each tag listing was made with — the identity the read ran under. */
+  readonly tokensSeen: string[] = [];
 
   seedTags(owner: string, repo: string, names: readonly string[]): void {
     this.tags.set(this.key(owner, repo), [...names]);
@@ -75,6 +77,7 @@ export class FakeGitHubConsumer implements GitHubConsumer {
 
   async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]> {
     this.tagReads.push({ owner: input.owner, repo: input.repo });
+    this.tokensSeen.push(input.token);
     return [...(this.tags.get(this.key(input.owner, input.repo)) ?? [])];
   }
 

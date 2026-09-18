@@ -246,16 +246,13 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
           form: "build-only", consumerName: unit, repoURL: url, repoCredentialId: credentialId, owner: p.owner,
           version, channel, stage: p.stage, resolvedSha: ungated.resolvedSha, domain: master.domain, builds: ungated.builds, ungated,
         };
-        // The App's rights are the installation's permissions (repository administration, contents,
-        // workflows, webhooks), not a PAT's scopes: GitHub answers no X-OAuth-Scopes for an
-        // installation token, which preflight-scopes reads as a fine-grained token and refuses. It is
-        // left out by name; a permission the App lacks fails loud at the step that needs it.
         // A registered unit's release re-run rewrites its build repo-pat first: the entry seeded at
         // the onboarding holds a token that died an hour later, and the pipeline's clone reads it.
+        // The chain's scope preflight skips itself for the App credential (onboard-preflight-scopes.ts).
         const release: ReleaseCycleRuntime = {};
         const chain: Step[] = p.registered
           ? [refreshRepoPatStep(onboard, params), triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]
-          : buildOnlySteps(onboard, params, release).filter((s) => s.name !== "preflight-scopes");
+          : buildOnlySteps(onboard, params, release);
         ctx.log("meta", `${unit}: version ${version}, channel ${channel}, release run on ${p.stage}, build plane ${master.domain} — ${p.registered ? "registered build-only, its release is re-run" : "onboarded build-only by this run"}`);
         for (const step of chain) {
           ctx.log("meta", `${unit}: ${step.title}`);

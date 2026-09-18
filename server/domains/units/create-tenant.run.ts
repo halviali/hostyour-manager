@@ -656,7 +656,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // The tenant's own bundle is left out: the apps-repo steps build it, with the App's token.
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage, probe: ports.registryProbe,
-        registration: ports.buildUnitRegistration ?? (async () => null), stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
+        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       const built = planned.builds;

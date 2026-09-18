@@ -107,6 +107,15 @@ export class HttpGitHubApp implements GitHubApp {
     return this.org;
   }
 
+  async reachesRepository(input: { owner: string; repo: string; signal?: AbortSignal }): Promise<boolean> {
+    const path = `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/installation`;
+    const res = await this.send(this.appJwt(), path, input.signal ? { signal: input.signal } : undefined);
+    if (res.status === 404) return false;
+    if (!res.ok) throw new GitHubAppError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubApp.ghMessage(res)}`, res.status);
+    const body = (await res.json()) as { id?: number };
+    return String(body.id ?? "") === String(this.opts.installationId);
+  }
+
   async createRepository(input: CreateRepositoryInput): Promise<{ created: boolean }> {
     const path = `/orgs/${encodeURIComponent(input.org)}/repos`;
     const res = await this.send(await this.installationToken(input.signal), path, {

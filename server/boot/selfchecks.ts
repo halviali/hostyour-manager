@@ -477,6 +477,31 @@ async function checkGitHubAppInstallation(githubApp: GitHubApp | undefined): Pro
 }
 
 /**
+ * WHICH IDENTITY WRITES THE CATALOG — the platform's GitHub App where its installation reaches the
+ * catalog repository, else CATALOG_WRITE_PAT (wire-tenants.ts, #194). MEASURED here, because a
+ * config cannot ask GitHub: the App reaching the catalog beside a configured PAT is red, so the
+ * unused credential is removed rather than carried into the next installation; the App configured
+ * and NOT reaching it with no PAT is red, because the tenant family was wired on a promise GitHub
+ * refuses; neither configured SKIPS. DEGRADING, as every check that reaches a remote is.
+ */
+async function checkCatalogIdentity(config: Config, githubApp: GitHubApp | undefined): Promise<CheckResult> {
+  const name = "catalog.identity";
+  const catalog = config.catalog;
+  if (!catalog) return { name, kind: "skipped", ok: false, detail: "no catalog is configured on this manager (CATALOG_REPO) — no tenant family, nothing to write" };
+  const [owner, repo] = catalog.repoURL.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "").split("/");
+  if (!githubApp) return { name, kind: "degrading", ok: catalog.token !== undefined, detail: catalog.token !== undefined ? `${owner}/${repo} is written with CATALOG_WRITE_PAT (no GitHub App on this manager)` : `${owner}/${repo} has no identity: no GitHub App and no CATALOG_WRITE_PAT` };
+  try {
+    const reached = await githubApp.reachesRepository({ owner: owner ?? "", repo: repo ?? "" });
+    if (reached && catalog.token !== undefined) return { name, kind: "degrading", ok: false, detail: `the GitHub App reaches ${owner}/${repo} and CATALOG_WRITE_PAT is set beside it — the PAT is unused, remove it from the installation's config` };
+    if (reached) return { name, kind: "degrading", ok: true, detail: `${owner}/${repo} is written with the GitHub App (its installation reaches it)` };
+    if (catalog.token !== undefined) return { name, kind: "degrading", ok: true, detail: `${owner}/${repo} is written with CATALOG_WRITE_PAT (the GitHub App's installation does not reach it)` };
+    return { name, kind: "degrading", ok: false, detail: `the GitHub App's installation does not reach ${owner}/${repo} and no CATALOG_WRITE_PAT is set — the tenant family has no identity for its catalog` };
+  } catch (e) {
+    return { name, kind: "degrading", ok: false, detail: messageOf(e) };
+  }
+}
+
+/**
  * DOES EVERY STANDING REGISTRATION STAND IN THE SCHEMA THIS RELEASE SHIPS? The boot migration
  * (domains/units/registrations-migration.ts) rewrites every registration the schema can fill and
  * names every one it REFUSES — a file every reader refuses the same way, so the unit it names is not
@@ -529,6 +554,7 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; p
   results.push(await checkAnsiwisePinReadable(deps.platformRepo));
   results.push(await checkInstallOrder(deps.platformRepo, deps.runDefinitions));
   results.push(await checkGitHubAppInstallation(deps.githubApp));
+  results.push(await checkCatalogIdentity(deps.config, deps.githubApp));
   return results;
 }
 

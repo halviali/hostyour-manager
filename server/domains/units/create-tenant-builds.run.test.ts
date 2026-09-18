@@ -150,6 +150,7 @@ function ctx(p: Record<string, unknown>, logs: string[], secrets: Record<string,
   const creds = {
     seal: async (i: { kind: string; label: string; fingerprint: string }) => ({ id: "cred_sealed", kind: i.kind, label: i.label, fingerprint: i.fingerprint }),
     open: async () => Buffer.from("ghp_test"),
+    list: async () => [],
   };
   return {
     runId: "run_bld", stepName: "build", db: db.db, creds: creds as unknown as CredentialStore, params: p,
@@ -185,6 +186,22 @@ describe("resolveBuildUnits — the missing images grouped by the repository tha
     expect(r.unmapped).toEqual([{ repo: "example-nobody", tag: "1" }]);
     // One PAT per unit without a stored credential, keyed the way the approve card labels it.
     expect(buildUnitSecrets(r.units)).toEqual([buildRepoPatSecret("example-jobs")]);
+  });
+
+  // The measured rule (#194): an unregistered unit the App reaches is planned `viaApp` and asks no
+  // PAT; one the App does not reach asks its own, exactly as before; a registered unit is never asked.
+  it("asks no PAT for an unregistered unit the App reaches, and still asks one for a unit it does not", async () => {
+    const asked: string[] = [];
+    const r = await resolveBuildUnits({
+      missing: [{ repo: "example-jobs", tag: "0.2.0" }, { repo: "example-engine", tag: "0.4.0" }],
+      buildRepos: BUILD_REPOS,
+      registration: async () => null,
+      reaches: async (repoURL) => { asked.push(repoURL); return repoURL === JOBS_REPO; },
+    });
+    expect(asked.sort()).toEqual([JOBS_REPO, PLATFORM_REPO].sort());
+    expect(r.units.find((u) => u.unit === "example-jobs")?.viaApp).toBe(true);
+    expect(r.units.find((u) => u.unit === "example-platform")?.viaApp).toBeUndefined();
+    expect(buildUnitSecrets(r.units)).toEqual([buildRepoPatSecret("example-platform")]);
   });
 });
 

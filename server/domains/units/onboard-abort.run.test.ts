@@ -78,7 +78,7 @@ const REQUEST = {
 
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
-const fakeCreds = { open: async () => Buffer.from("github_pat_test", "utf8") } as unknown as CredentialStore;
+const fakeCreds = { open: async () => Buffer.from("github_pat_test", "utf8"), list: async () => [] } as unknown as CredentialStore;
 
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database

@@ -28,6 +28,7 @@ import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
@@ -128,8 +129,8 @@ function lifecyclePorts(): LifecyclePorts {
   };
 }
 
-async function make(onboardingEnabled: boolean, resolver?: FakeClusterKubeResolver): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string; store: CredentialStore }> {
-  const store = new CredentialStore({ db: db.db, logger });
+async function make(onboardingEnabled: boolean, resolver?: FakeClusterKubeResolver, githubApp?: FakeGitHubApp): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string; store: CredentialStore }> {
+  const store = new CredentialStore({ db: db.db, logger, ...(githubApp ? { githubApp } : {}) });
   const bus = new RunEventBus();
   const lc = lifecyclePorts();
   const extra = onboardingEnabled
@@ -142,7 +143,7 @@ async function make(onboardingEnabled: boolean, resolver?: FakeClusterKubeResolv
     registerAuth: () => undefined,
     // The live reconciliation read (GET /api/consumers/:id/live) reads the cluster + ArgoCD through
     // the resolver; when absent (or onboarding disabled) it degrades to SQL-only.
-    registerProtected: (a) => registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled, github: new FakeGitHubConsumer(), ...(resolver ? { resolver } : {}) }),
+    registerProtected: (a) => registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled, github: new FakeGitHubConsumer(), ...(resolver ? { resolver } : {}), ...(githubApp ? { githubApp } : {}) }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, executor, cookie, store };
@@ -202,12 +203,33 @@ describe("consumer API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("400 when the repo PAT is missing — one PAT per consumer is REQUIRED at onboarding", async () => {
+  it("400 when the repo PAT is missing and no GitHub App reaches the repository — the external consumer needs its own PAT", async () => {
     seedCluster();
     const { app, cookie } = await make(true);
     const { repoPat: _drop, ...withoutPat } = REQ;
     const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(withoutPat) });
     expect(res.status).toBe(400);
+  });
+
+  // The measured rule (#194): a repository the App's installation reaches is onboarded with NO PAT —
+  // the credential row is the App's, storing nothing — and one it does not reach asks its own PAT
+  // exactly as before, App or no App.
+  it("onboards a repository the GitHub App reaches with no PAT, under a github-app credential that stores nothing", async () => {
+    seedCluster();
+    const githubApp = new FakeGitHubApp();
+    const { app, executor, cookie, store } = await make(true, undefined, githubApp);
+    const { repoPat: _drop, ...withoutPat } = REQ;
+    const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...withoutPat, repoURL: `https://github.com/${githubApp.org}/acme.git` }) });
+    expect(res.status).toBe(201);
+    const { runId } = (await res.json()) as { runId: string };
+    await executor.settle(runId);
+    const params = JSON.parse((db.sqlite.prepare("SELECT params_json FROM runs WHERE id = ?").get(runId) as { params_json: string }).params_json) as { repoCredentialId: string };
+    const sealed = (await store.list({ kind: "github-app" })).find((c) => c.id === params.repoCredentialId);
+    expect([sealed?.label, sealed?.fingerprint]).toEqual(["GitHub App (acme)", githubApp.identityFingerprint()]);
+    // A repository outside the installation still asks its PAT, App or no App.
+    const outside = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(withoutPat) });
+    expect(outside.status).toBe(400);
+    expect(await outside.text()).toContain("does not reach x/acme");
   });
 
   it("seals the raw PAT before the run exists — params_json carries ONLY the sealed reference, never the value", async () => {

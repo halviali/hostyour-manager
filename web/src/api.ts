@@ -15,14 +15,12 @@ import type {
   // The DETECTED-consumer surface: the scan result the Detected tab renders and
   // the row-less live probe its rows are verified with. One declaration, both ends — as above.
   DetectedScanView, ConsumerLiveProbeView,
-  // The channel table the onboard wizard reads — served literally from the platform repo's
-  // clusters/platform/values-common.yaml (global.channelStages); the manager keeps no copy.
-  ChannelStagesView,
-  // What the onboard wizard's prefill answers: the version and channel the repository states.
-  OnboardPrefillView,
   // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
   OperatorKeyView,
 } from "../../shared/api-types.ts";
+// The onboard wizard's two read views: the channel table (served literally from the platform repo's
+// clusters/platform/values-common.yaml) and what the prefill answers, identity included.
+import type { ChannelStagesView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { MailDnsPublishInput, MailDnsView } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
@@ -293,15 +291,17 @@ export interface OnboardInput {
   clusterId?: string;
   owner: string;
   chartPath?: string;
-  /** The ONE per-consumer GitHub PAT (required — every consumer repo is private). Sent once over
-   *  TLS; the Manager seals it server-side and it never appears in any run/params/log. */
-  repoPat: string;
+  /** The consumer's own GitHub PAT, for a repository the platform's GitHub App does not reach (an
+   *  external consumer). Sent once over TLS; the Manager seals it server-side and it never appears
+   *  in any run/params/log. Left out for a repository the App reaches: the Manager measures that and
+   *  refuses by name where neither identity serves. */
+  repoPat?: string;
 }
 /** What the wizard's "Check the repository" sends (POST /api/consumers/prefill): the repository and
  *  the PAT that reads its release tags — used for that one read and not kept. */
 export interface OnboardPrefillInput {
   repoURL: string;
-  repoPat: string;
+  repoPat?: string;
 }
 export const listConsumers = (): Promise<ConsumerView[]> => req<ConsumerView[]>("/api/consumers");
 export const getConsumerLive = (appId: string): Promise<ConsumerLiveView> => req<ConsumerLiveView>(`/api/consumers/${appId}/live`);

@@ -447,7 +447,10 @@ const OnboardRequestFields = z.object({
   // their own ceiling is not a ceiling. Defaulted to the frugal preset, so an onboard that names none
   // lands there and is raised deliberately afterwards rather than sold generously by omission.
   size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
-  repoPat: z.string().min(1), // the raw GitHub PAT — sealed by the API handler, never persisted/logged
+  // The raw GitHub PAT — sealed by the API handler, never persisted/logged. OPTIONAL: a repository
+  // the platform's GitHub App reaches needs none (repo-identity.ts), and the handler refuses by
+  // name where the App does not reach it and no PAT came.
+  repoPat: z.string().min(1).optional(),
   // The unit's own stage, for both forms. Held against the channel ceiling at plan time.
   stage: z.enum(STAGE),
   // The target cluster of a DEPLOYABLE unit, any active one. Absent ⇒ the build-only form.

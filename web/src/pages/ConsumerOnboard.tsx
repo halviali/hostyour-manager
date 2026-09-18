@@ -1,6 +1,6 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types.ts";
+import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, type OnboardTargetView } from "../api.ts";
 
@@ -81,7 +81,7 @@ export function ConsumerOnboard() {
     setReading(true);
     setError(null);
     try {
-      const view = await prefillOnboard({ repoURL: form.repoURL.trim(), repoPat: repoPat.trim() });
+      const view = await prefillOnboard({ repoURL: form.repoURL.trim(), ...(repoPat.trim() ? { repoPat: repoPat.trim() } : {}) });
       setPrefill(view);
       setForm((f) => ({ ...f, channel: view.channel, stage: "" }));
     } catch (err) {
@@ -110,7 +110,7 @@ export function ConsumerOnboard() {
         ...(buildOnly ? {} : { clusterId: form.clusterId }),
         owner: form.owner.trim(),
         ...(form.chartPath.trim() ? { chartPath: form.chartPath.trim() } : {}),
-        repoPat: repoPat.trim(),
+        ...(repoPat.trim() ? { repoPat: repoPat.trim() } : {}),
       });
       nav(`/runs/${runId}`); // the Run screen streams the live gate report + the approve card
     } catch (err) {
@@ -121,7 +121,7 @@ export function ConsumerOnboard() {
 
   const noTargets = targets !== null && activeTargets.length === 0;
   const targetChosen = buildOnly || form.clusterId !== "";
-  const canRead = form.repoURL.trim() !== "" && repoPat.trim() !== "" && !reading && !busy;
+  const canRead = form.repoURL.trim() !== "" && !reading && !busy;
   const namespace = form.consumerName && form.stage ? `${form.consumerName}-${form.stage}` : "<name>-<stage>";
 
   return (
@@ -163,10 +163,12 @@ export function ConsumerOnboard() {
           </label>
           <label className="field">
             <span className="field__label">Repository PAT</span>
-            <input type="password" value={repoPat} onChange={(e) => setRepoPat(e.target.value)} placeholder="github_pat_…" autoComplete="off" required />
+            <input type="password" value={repoPat} onChange={(e) => setRepoPat(e.target.value)} placeholder="github_pat_… (empty where the platform's GitHub App reaches the repository)" autoComplete="off" />
             <span className="field__hint">
-              The one GitHub PAT for this consumer (repo + workflow + admin:repo_hook + read:packages). The Manager seals it, clones
-              and pushes with it, and seeds it for the unit&apos;s build — it never appears in logs or the sandbox.
+              Needed only for a repository the platform&apos;s GitHub App does not reach — an external consumer: one classic PAT
+              (repo + workflow + admin:repo_hook + read:packages). The Manager seals it, clones and pushes with it, and seeds it
+              for the unit&apos;s build — it never appears in logs or the sandbox. For a repository in the App&apos;s own
+              organisation leave it empty: the App is the identity, and the check below says which one applies.
             </span>
           </label>
           <div className="field">
@@ -175,9 +177,11 @@ export function ConsumerOnboard() {
               {reading ? "Checking…" : "Check the repository"}
             </button>
             <span className="field__hint">
-              A check, not a step of the onboarding: lists the repository&apos;s release tags with the PAT — so the PAT is
-              proven to read the repository — and shows the version the onboarding will release under Version. Nothing is
-              cloned and nothing is kept.
+              A check, not a step of the onboarding: lists the repository&apos;s release tags with the identity the
+              onboarding will run with — the platform&apos;s GitHub App where it reaches the repository, else the PAT above —
+              so that identity is proven to read the repository, and shows the version the onboarding will release under
+              Version. Nothing is cloned and nothing is kept.
+              {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App (no PAT needed)" : "the PAT above"}.` : ""}
             </span>
           </div>
           <label className="field">
@@ -289,8 +293,7 @@ export function ConsumerOnboard() {
               !form.channel ||
               !form.stage ||
               !targetChosen ||
-              !form.owner ||
-              !repoPat.trim()
+              !form.owner
             }
           >
             {busy ? "Validating…" : "Validate & plan"}

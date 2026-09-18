@@ -37,6 +37,16 @@ export function preflightScopesStep(ports: OnboardPorts, p: OnboardParams): Step
         throw errValidation(`onboard "${p.consumerName}" requires the GitHub client to pre-flight the consumer PAT scopes but none is wired on this manager — refusing to onboard without verifying ${REQUIRED_CONSUMER_PAT_SCOPES.join(" + ")} up front`);
       }
       const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
+      // An App credential has no scopes to read: its rights are the installation's permissions
+      // (administration, contents, workflows, webhooks — the six the App is created with), and
+      // GitHub answers no X-OAuth-Scopes for an installation token, which the read below would take
+      // for a fine-grained token and refuse. A permission the App lacks fails loud at the step that
+      // needs it; nothing here can prove it up front.
+      if ((await ctx.creds.list({ kind: "github-app" })).some((row) => row.id === p.repoCredentialId)) {
+        ctx.checkpoint({ owner, repo, identity: "github-app" });
+        ctx.log("meta", `${owner}/${repo} is reached by the platform's GitHub App — its installation permissions stand in for PAT scopes, nothing to pre-flight`);
+        return;
+      }
       const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:preflight-scopes", runId: ctx.runId });
       let token;
       try {

@@ -16,6 +16,7 @@ import { booksBranch } from "../domains/inventory/read.ts";
 import { CredentialStore } from "../security/store.ts";
 import { storeBackend } from "../boot/store-backend.ts";
 import { createGitHubPlatform, type GitHubPlatformConfig } from "../adapters/github-platform/github-platform-http.ts";
+import { HttpGitHubApp } from "../adapters/github-app/github-app-http.ts";
 import { GitPlatformRepo, GitRepoReader } from "../adapters/git/git.ts";
 import { HttpRegistryMaintenance } from "../adapters/registry/registry-http.ts";
 import { reap } from "../domains/registry-cleanup/reap.ts";
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
   }
   const deployCfg = config.catalog;
   if (!deployCfg) {
-    logger.error({}, "registry-reaper: CATALOG_WRITE_PAT unset — the tenant catalog's pins cannot be read, so the referenced floor would miss every tenant image (fail-closed, nothing deleted)");
+    logger.error({}, "registry-reaper: CATALOG_REPO unset — the tenant catalog's pins cannot be read, so the referenced floor would miss every tenant image (fail-closed, nothing deleted)");
     process.exit(1);
   }
 
@@ -95,7 +96,14 @@ async function main(): Promise<void> {
     logger.error({ repoURL: deployCfg.repoURL }, "registry-reaper: CATALOG_REPO is not owner/repo — the tenant catalog's branches cannot be enumerated (fail-closed, nothing deleted)");
     process.exit(1);
   }
-  const deploy = carrierRepo({ owner: deployOwner, repo: deployRepo, token: deployCfg.token }, config.dataDir, "reaper-deploy", books);
+  // The catalog's identity, the way wire-tenants.ts chooses it: the configured PAT, else the App's
+  // installation token — minted ONCE here, because this job runs for minutes and the token for an hour.
+  const deployToken = deployCfg.token ?? (config.githubApp ? await new HttpGitHubApp(config.githubApp).installationToken() : undefined);
+  if (deployToken === undefined) {
+    logger.error({}, "registry-reaper: no identity reads the tenant catalog — neither CATALOG_WRITE_PAT nor the platform's GitHub App is configured (fail-closed, nothing deleted)");
+    process.exit(1);
+  }
+  const deploy = carrierRepo({ owner: deployOwner, repo: deployRepo, token: deployToken }, config.dataDir, "reaper-deploy", books);
   const unit = new GitRepoReader({ openCredential: (id) => store.open(id, { purpose: "registry-reaper:read-unit-chart" }) });
   const registry = new HttpRegistryMaintenance({ registryHost, dockerConfigPath });
 

@@ -62,6 +62,7 @@ function buildOnlyParams(): OnboardParams {
 function fakeCreds(openedIds: string[] = []): CredentialStore {
   return {
     open: (id: string) => { openedIds.push(id); return Promise.resolve(Buffer.from("github_pat_test", "utf8")); },
+    list: () => Promise.resolve([]),
   } as unknown as CredentialStore;
 }
 

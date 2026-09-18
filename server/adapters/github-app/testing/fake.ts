@@ -16,6 +16,10 @@ export class FakeGitHubApp implements GitHubApp {
   failWith: Error | null = null;
   /** Every repository standing in the fake, as `org/name`. */
   private readonly repos = new Set<string>();
+  /** What reachesRepository answers beyond the default: the default is every repository of `org`
+   *  (an installation on all repositories of its organisation) and no other; a test that needs a
+   *  repository outside the organisation reached, or one inside it not reached, sets it here. */
+  readonly reachable = new Map<string, boolean>();
   /** Only the calls that actually created a repository — not the idempotent-skip calls. */
   readonly created: CreateRepositoryInput[] = [];
 
@@ -41,6 +45,11 @@ export class FakeGitHubApp implements GitHubApp {
 
   identityFingerprint(): string {
     return this.fingerprint;
+  }
+
+  async reachesRepository(input: { owner: string; repo: string }): Promise<boolean> {
+    if (this.failWith) throw this.failWith;
+    return this.reachable.get(`${input.owner}/${input.repo}`) ?? input.owner === this.org;
   }
 
   async createRepository(input: CreateRepositoryInput): Promise<{ created: boolean }> {

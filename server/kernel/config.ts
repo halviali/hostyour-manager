@@ -312,8 +312,11 @@ const EnvSchema = z.object({
 }).refine((e) => Boolean(e.GITHUB_REPO) === Boolean(e.GITHUB_WRITE_PAT), {
   message: "GITHUB_REPO and GITHUB_WRITE_PAT must be set together (both enable the Branches/Reset feature, or neither)",
   path: ["GITHUB_REPO"],
-}).refine((e) => Boolean(e.CATALOG_REPO) === Boolean(e.CATALOG_WRITE_PAT), {
-  message: "CATALOG_REPO and CATALOG_WRITE_PAT must be set together (both enable the tenant Run family, or neither)",
+}).refine((e) => !e.CATALOG_WRITE_PAT || Boolean(e.CATALOG_REPO), {
+  message: "CATALOG_WRITE_PAT names a credential for a catalog CATALOG_REPO does not name — set CATALOG_REPO, or drop the PAT",
+  path: ["CATALOG_REPO"],
+}).refine((e) => !e.CATALOG_REPO || Boolean(e.CATALOG_WRITE_PAT) || Boolean(e.GITHUB_APP_ID), {
+  message: "CATALOG_REPO is set with no identity to read and write it — the platform's GitHub App (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY, where its installation reaches the catalog) or CATALOG_WRITE_PAT",
   path: ["CATALOG_REPO"],
 }).refine((e) => {
   const set = [e.STORAGE_BOX_HOST, e.STORAGE_BOX_USER, e.STORAGE_BOX_PASSWORD].filter(Boolean).length;
@@ -413,14 +416,16 @@ export interface Config {
     kubeVersion: string;
   };
   /** Present ⇒ tenant (multi-app) onboarding is wired: the central catalog GitOps repo the
-   *  live ApplicationSets read (repoURL, a platform constant) + the Manager's first-party,
-   *  write-capable PAT for it (token). The SAME PAT clones catalog for manager-side
-   *  validation and pushes tenant pointers to master. Independent of `onboarding` (the consumer
-   *  gate-runner) — tenant charts are trusted first-party, validated manager-side; kube access
-   *  is in-cluster via the pod SA. Absent ⇒ the tenant Run family answers 501. */
+   *  live ApplicationSets read (repoURL, the installation's own answer) and, where the platform's
+   *  GitHub App does not reach it, the Manager's first-party, write-capable PAT for it (token). ONE
+   *  identity clones catalog for manager-side validation and pushes tenant pointers to master: the
+   *  App where its installation reaches the catalog (the token minted at every open), else the PAT
+   *  (#194). Independent of `onboarding` (the consumer gate-runner) — tenant charts are trusted
+   *  first-party, validated manager-side; kube access is in-cluster via the pod SA. Absent ⇒ the
+   *  tenant Run family answers 501. */
   catalog?: {
     repoURL: string;
-    token: string;
+    token?: string;
   };
   /** The consumer build webhook. `subdomain` is the image-builder
    *  EventListener ingress label (default "build") the onboard step points the hook at
@@ -585,11 +590,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
           },
         }
       : {}),
-    // catalog is a platform constant (CATALOG_REPO defaults), so the WRITE PAT is the
-    // sole discriminator: present ⇒ tenant onboarding is configured; the repoURL is built the same
-    // way the consumer platform URL is (https, never with embedded credentials).
-    ...(e.CATALOG_WRITE_PAT
-      ? { catalog: { repoURL: `https://github.com/${e.CATALOG_REPO}.git`, token: e.CATALOG_WRITE_PAT } }
+    // CATALOG_REPO is the discriminator: present ⇒ tenant onboarding is configured, and the refine
+    // above holds an identity behind it — the App or the PAT. The repoURL is built the same way the
+    // consumer platform URL is (https, never with embedded credentials).
+    ...(e.CATALOG_REPO
+      ? { catalog: { repoURL: `https://github.com/${e.CATALOG_REPO}.git`, ...(e.CATALOG_WRITE_PAT ? { token: e.CATALOG_WRITE_PAT } : {}) } }
       : {}),
     // Always present: the subdomain always has its "build" default; only the HMAC secret is optional
     // (absent ⇒ the onboard setup-webhook step fails loud, never a silent no-build).

@@ -6,7 +6,6 @@ import type {
   TargetKind, LockResource, ClusterStatus,
   Stage, TenantStatus, AppStatus, ArgoSync, ArgoHealth, DriftVerdict,
 } from "./enums.ts";
-import type { ReleaseChannel } from "./release.ts";
 import type { OperatorInput } from "./approve.ts";
 
 export type ApiErrorCode =
@@ -931,19 +930,3 @@ export type RunTenantStateView =
   | { state: "live"; target: PurgeTenantTarget; row: RunTenantRowView }
   | { state: "offboarded"; target: PurgeTenantTarget; row: RunTenantRowView }
   | { state: "purged"; target: PurgeTenantTarget; row: RunTenantRowView };
-
-/** GET /api/consumers/channels — the channel table the onboard wizard reads: WHICH stages a release
- *  channel may reach. Served LITERALLY from the platform repo's clusters/platform/values-common.yaml
- *  (global.channelStages) — the ONE table, enforced in the release pipeline at the point that
- *  writes; the manager keeps no copy. Keys are the channels the file states (normally all
- *  three), each value the stages that channel admits, in the file's own order. */
-export interface ChannelStagesView {
-  channelStages: Partial<Record<ReleaseChannel, Stage[]>>;
-}
-
-/** POST /api/consumers/prefill — what the onboard wizard fills its Version and Channel fields with
- *  before the operator confirms them, read off the consumer's repository: `package.json` `version`
- *  when it is in the release grammar, else the chart's `Chart.yaml` `appVersion`, else `0.1.0`;
- *  the channel is `stable`. Each value names its SOURCE in a sentence the wizard prints as the
- *  field's hint, so the operator sees whether the number was read or defaulted. Both stay editable. */
-export interface OnboardPrefillView { version: string; versionSource: string; channel: ReleaseChannel; channelSource: string }

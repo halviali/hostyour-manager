@@ -116,6 +116,8 @@ function fakeCreds(app: FakeGitHubApp): { store: CredentialStore; seals: { id: s
       if (!s) throw new Error(`unknown credential ${id}`);
       return Buffer.from(s.kind === "github-app" ? await app.installationToken() : s.plaintext, "utf8");
     },
+    // The scope preflight asks the store which rows are the App's, and skips itself for one of them.
+    list: async ({ kind }: { kind: string }) => seals.filter((x) => x.kind === kind).map(({ id, kind: k, label, fingerprint }) => ({ id, kind: k, label, fingerprint })),
   };
   return { store: store as unknown as CredentialStore, seals, opened };
 }
@@ -317,10 +319,11 @@ describe("create-repository and onboard-build-only — a github-app credential a
     expect(h.github.dispatches.map((d) => ({ repo: d.repo, token: d.token, inputs: d.inputs }))).toEqual([{ repo: UNIT, token: "ghs_hour_two", inputs: { version: "0.1.0", channel: "stable", stage: "prod" } }]);
     expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
     // ONE credential for the whole pass, of the kind that stores nothing; every open went to it, and
-    // the PAT scope preflight was not run on it.
+    // the PAT scope preflight read no scopes off it — the step itself stood aside for the App's row.
     expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, fingerprint: h.githubApp.identityFingerprint(), plaintext: "" }]);
     expect(new Set(creds.opened)).toEqual(new Set(["cred_1"]));
-    expect(logs.some((l) => l.includes("Pre-flight"))).toBe(false);
+    expect(logs.some((l) => l.includes("installation permissions stand in for PAT scopes"))).toBe(true);
+    expect(logs.some((l) => l.includes("PAT scopes OK"))).toBe(false);
     expect(logs.at(-1)).toContain(`${UNIT} built as ${UNIT}:${IMAGE_TAG} for prod`);
   });
   it("refuses a release run that states no image-tag result — the registration could name no tag", async () => {

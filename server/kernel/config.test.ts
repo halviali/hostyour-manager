@@ -170,12 +170,21 @@ describe("tenant onboarding config (catalog)", () => {
     expect(parseConfig(validEnv).catalog).toBeUndefined();
   });
 
-  it("refuses each half without the other, because a catalogue nobody named is not a catalogue", () => {
+  it("refuses a PAT without the repository, and a repository without any identity, because a catalogue nobody named is not a catalogue", () => {
     // The repository is the INSTALLATION's own and has no default: one that binds a whole tenant
     // family to a repository nobody chose is worse than a refusal, because a clone that SUCCEEDS
     // against the wrong repository says nothing at all.
     expect(() => parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant" })).toThrow(ConfigError);
     expect(() => parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" })).toThrow(ConfigError);
+  });
+
+  // The measured rule (#194): the App is the catalog's identity where its installation reaches it,
+  // so a config carrying the App and the repository needs no PAT; the row catalog.identity measures
+  // which one applies at boot.
+  it("takes CATALOG_REPO with the GitHub App and no CATALOG_WRITE_PAT — the App is the catalog's identity", () => {
+    const pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }) as string;
+    const c = parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog", GITHUB_APP_ID: "12345", GITHUB_APP_INSTALLATION_ID: "42", GITHUB_APP_PRIVATE_KEY: pem });
+    expect(c.catalog).toEqual({ repoURL: "https://github.com/acme/acme-catalog.git" });
   });
 
   it("honors a custom CATALOG_REPO", () => {

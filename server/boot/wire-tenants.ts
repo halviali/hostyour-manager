@@ -113,12 +113,18 @@ export function buildTenantOnboarding(
 
   const repoURL = config.catalog.repoURL;
   const platformRepoURL = `https://github.com/${config.github.owner}/${config.github.repo}.git`;
-  // ONE first-party PAT (Contents: read+write on catalog) does BOTH jobs: the reader clones the
-  // repo at a ref for manager-side validation, and the platform repo pushes tenant pointers. An
-  // inline opener returns the configured token (never the store) — the SAME shape the consumer write
-  // path uses for GITHUB_WRITE_PAT.
+  // ONE identity does BOTH jobs: the reader clones the repo at a ref for manager-side validation, and
+  // the platform repo pushes tenant pointers. The configured PAT where the installation answered one
+  // (an inline opener returning it, never the store — the SAME shape the consumer write path uses for
+  // GITHUB_WRITE_PAT); else the App's installation token, minted at every open, because a token
+  // GitHub issues for an hour must never be held (#194). The readiness row catalog.identity says
+  // which of the two this installation writes the catalog with, and whether the App reaches it.
   const deployToken = config.catalog.token;
-  const openDeployToken = (): Promise<Buffer> => Promise.resolve(Buffer.from(deployToken, "utf8"));
+  const app = githubApp;
+  if (deployToken === undefined && !app) return { defs: [], enabled: false };
+  const openDeployToken = deployToken !== undefined
+    ? (): Promise<Buffer> => Promise.resolve(Buffer.from(deployToken, "utf8"))
+    : async (): Promise<Buffer> => Buffer.from(await app!.installationToken(), "utf8");
 
   // The reader clones the catalog and the apps template under the catalog's own read credential,
   // and a tenant's OWN repository under the credential its build registration names

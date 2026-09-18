@@ -26,8 +26,11 @@ function params(over: Partial<OnboardParams> = {}): OnboardParams {
   });
 }
 
-function fixedCreds(bufOut?: (b: Buffer) => void): CredentialStore {
-  return { open: () => { const b = Buffer.from("github_pat_secret", "utf8"); bufOut?.(b); return Promise.resolve(b); } } as unknown as CredentialStore;
+function fixedCreds(bufOut?: (b: Buffer) => void, appRows: string[] = []): CredentialStore {
+  return {
+    open: () => { const b = Buffer.from("github_pat_secret", "utf8"); bufOut?.(b); return Promise.resolve(b); },
+    list: ({ kind }: { kind: string }) => Promise.resolve(kind === "github-app" ? appRows.map((id) => ({ id, kind, label: id, fingerprint: "sha256:app" })) : []),
+  } as unknown as CredentialStore;
 }
 
 function ctx(logs: string[], creds: CredentialStore = fixedCreds()): StepCtx {
@@ -87,6 +90,17 @@ describe("onboard preflight-scopes step", () => {
     const github = new FakeGitHubConsumer();
     github.tokenInvalid = true;
     await expect(step({ github }).run(ctx([]))).rejects.toThrow(/invalid or expired/);
+  });
+
+  // The measured rule (#194): a repository the App reaches runs under a `github-app` row, and that
+  // row has no scopes to read — the installation's permissions stand in for them, and no PAT is opened.
+  it("skips itself for a github-app credential: nothing opened, the identity logged, no scope asked", async () => {
+    const logs: string[] = [];
+    let opened = 0;
+    const creds = fixedCreds(() => { opened += 1; }, ["cred_pat"]);
+    await step({ github: new FakeGitHubConsumer() }).run(ctx(logs, creds));
+    expect(opened).toBe(0);
+    expect(logs.join("\n")).toContain("reached by the platform's GitHub App");
   });
 
   it("FAILS LOUD when no GitHub client is wired (never a silent skip)", async () => {

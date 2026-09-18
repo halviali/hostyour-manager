@@ -37,6 +37,8 @@ import { buildRepoPatSecret } from "../../../shared/approve.ts";
 import { unitNameFromRepoURL, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { fingerprintSecret } from "../../security/fingerprint.ts";
+import type { GitHubApp } from "../../adapters/github-app/port.ts";
+import { appReachesRepoURL } from "./repo-identity.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import { buildOnlySteps, type BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
@@ -58,8 +60,10 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
 
 /** One build unit the tenant run onboards or re-releases before it fans out. Frozen into the run
- *  params at plan time; the credential id is present only for a unit already registered, every
- *  other unit's PAT rides the approve ceremony and is sealed by the step itself. */
+ *  params at plan time; the credential id is present only for a unit already registered. Every
+ *  other unit's identity is the platform's GitHub App where its installation reaches the repository
+ *  (`viaApp`, measured at plan — repo-identity.ts), sealed by the step itself; else its PAT rides
+ *  the approve ceremony and the step seals that. */
 export const BuildUnitSchema = z.object({
   unit: z.string().min(1), // basename(repoURL), the identity every registration holds
   repoURL: z.string().min(1),
@@ -67,6 +71,7 @@ export const BuildUnitSchema = z.object({
   registered: z.boolean(),
   form: z.enum(["build-only", "deployable"]).optional(), // known for a registered unit only
   repoCredentialId: z.string().min(1).optional(),
+  viaApp: z.boolean().optional(),
 });
 export type BuildUnit = z.infer<typeof BuildUnitSchema>;
 
@@ -87,6 +92,9 @@ export async function resolveBuildUnits(input: {
   missing: readonly RequiredImage[];
   buildRepos: TenantSpec["buildRepos"];
   registration: (unit: string) => Promise<RegisteredUnit | null>;
+  /** Whether the App reaches a repository — asked for every unit not registered yet; absent ⇒ no
+   *  App on this manager, every such unit asks its PAT. */
+  reaches?: (repoURL: string) => Promise<boolean>;
 }): Promise<BuildUnitResolution> {
   const repoOf = new Map<string, string>();
   for (const entry of input.buildRepos) for (const image of entry.builds) repoOf.set(image, entry.repo);
@@ -106,6 +114,7 @@ export async function resolveBuildUnits(input: {
   for (const [repoURL, images] of byRepo) {
     const unit = unitNameFromRepoURL(repoURL);
     const found = await input.registration(unit);
+    const viaApp = found === null && input.reaches !== undefined && (await input.reaches(repoURL));
     units.push({
       unit,
       repoURL,
@@ -113,15 +122,17 @@ export async function resolveBuildUnits(input: {
       registered: found !== null,
       ...(found ? { form: found.form } : {}),
       ...(found?.repoCredentialId ? { repoCredentialId: found.repoCredentialId } : {}),
+      ...(viaApp ? { viaApp: true } : {}),
     });
   }
   units.sort((a, b) => a.unit.localeCompare(b.unit));
   return { units, unmapped };
 }
 
-/** The approve-time secrets the plan demands: one PAT per unit that carries no stored credential. */
+/** The approve-time secrets the plan demands: one PAT per unit that carries no stored credential and
+ *  that the App does not reach. */
 export function buildUnitSecrets(units: readonly BuildUnit[]): string[] {
-  return units.filter((u) => u.repoCredentialId === undefined).map((u) => buildRepoPatSecret(u.unit));
+  return units.filter((u) => u.repoCredentialId === undefined && !u.viaApp).map((u) => buildRepoPatSecret(u.unit));
 }
 
 export interface PlannedBuilds {
@@ -145,6 +156,8 @@ export async function planBuildUnits(input: {
   appsBundle?: TenantSpec["appsBundle"];
   appsImage?: string | undefined;
   registration: (unit: string) => Promise<RegisteredUnit | null>;
+  /** The platform's GitHub App, to measure which unregistered unit it reaches (repo-identity.ts). */
+  githubApp?: Pick<GitHubApp, "reachesRepository"> | undefined;
   probe: RegistryProbe;
   stage: Stage;
   subdomain: string;
@@ -163,7 +176,11 @@ export async function planBuildUnits(input: {
     if (img.repo === input.appsImage) continue;
     if (!(await input.probe.imageExists({ registryHost: input.registryHost, repo: img.repo, tag: img.tag }, { signal: input.signal }))) missing.push(img);
   }
-  const { units, unmapped } = await resolveBuildUnits({ missing, buildRepos: input.buildRepos, registration: input.registration });
+  const app = input.githubApp;
+  const { units, unmapped } = await resolveBuildUnits({
+    missing, buildRepos: input.buildRepos, registration: input.registration,
+    ...(app ? { reaches: (repoURL: string) => appReachesRepoURL(app, repoURL, input.signal) } : {}),
+  });
   if (unmapped.length > 0) {
     return {
       outcome: "rejected",
@@ -178,10 +195,11 @@ export async function planBuildUnits(input: {
     };
   }
   for (const u of units) {
-    input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — ${u.registered ? "registered, its release is re-run" : "not registered, onboarded build-only by this run"}${u.repoCredentialId ? "" : "; its PAT is asked at approve"}`);
+    input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — ${u.registered ? "registered, its release is re-run" : "not registered, onboarded build-only by this run"}${u.repoCredentialId ? "" : u.viaApp ? "; reached by the platform's GitHub App, no PAT asked" : "; its PAT is asked at approve"}`);
   }
+  const askingPat = units.filter((u) => u.repoCredentialId === undefined && !u.viaApp);
   const warnings = units.length > 0
-    ? [`${units.length} build unit(s) are onboarded by this run before the tenant is deployed (${units.map((u) => `${u.unit}: ${u.images.join(", ")}`).join("; ")}) — each releases its next version onto ${input.stage} and pins it on the books branch; a unit not registered on this installation asks for its repository's PAT at approve.`]
+    ? [`${units.length} build unit(s) are onboarded by this run before the tenant is deployed (${units.map((u) => `${u.unit}: ${u.images.join(", ")}`).join("; ")}) — each releases its next version onto ${input.stage} and pins it on the books branch${askingPat.length > 0 ? `; ${askingPat.map((u) => u.unit).join(", ")} ${askingPat.length === 1 ? "is" : "are"} not reached by the platform's GitHub App and ask${askingPat.length === 1 ? "s" : ""} for the repository's PAT at approve` : ""}.`]
     : [];
   return { outcome: "planned", builds: { units, requiredSecrets: buildUnitSecrets(units), warnings } };
 }
@@ -193,6 +211,8 @@ export interface TenantBuildDeps {
   ports: OnboardPorts;
   platformGitHub?: { owner: string; repo: string };
   platformRepo?: PlatformRepo;
+  /** The platform's GitHub App — what a unit the App reaches is sealed under (repo-identity.ts). */
+  githubApp?: Pick<GitHubApp, "identityFingerprint">;
 }
 
 /** What the build steps hand the steps after them, in-run memory (the run's own closure): the image
@@ -215,6 +235,15 @@ export function channelReaching(table: ChannelStages, stage: Stage): ReleaseChan
 
 export function buildUnitStepName(unit: string): string {
   return `build-unit:${unit}`;
+}
+
+/** The identity of a unit not registered yet, sealed by this step: a `github-app` row storing no
+ *  token where the plan measured the App reaches the repository (the store mints the App's token at
+ *  every open), else the PAT given at approve. */
+async function sealUnitIdentity(ctx: StepCtx, d: TenantBuildDeps, unit: BuildUnit): Promise<string> {
+  if (!unit.viaApp) return sealApprovedPat(ctx, unit);
+  if (!d.githubApp) throw errValidation(`build unit "${unit.unit}" (${unit.repoURL}) was planned as reached by the platform's GitHub App, and this manager holds no App to seal it under`);
+  return (await ctx.creds.seal({ kind: "github-app", label: `GitHub App (${unit.unit})`, plaintext: Buffer.alloc(0), fingerprint: d.githubApp.identityFingerprint() })).id;
 }
 
 async function sealApprovedPat(ctx: StepCtx, unit: BuildUnit): Promise<string> {
@@ -262,7 +291,7 @@ export function buildUnitStep(
         throw errValidation(`tenant ${p.guid} needs the build unit "${unit.unit}" (${unit.repoURL}) onboarded, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
       }
       const { ports } = d;
-      const repoCredentialId = unit.repoCredentialId ?? (await sealApprovedPat(ctx, unit));
+      const repoCredentialId = unit.repoCredentialId ?? (await sealUnitIdentity(ctx, d, unit));
       const master = resolveMasterCluster(ctx.db);
       const version = await nextVersion(ctx, d, unit, repoCredentialId);
       const channel = channelReaching(await ports.channelStages(), p.stage);

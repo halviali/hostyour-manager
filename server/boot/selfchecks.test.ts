@@ -451,6 +451,26 @@ describe("boot self-checks", () => {
     expect(readinessOf(results).checks).toContainEqual({ name: "github-app.installation", ok: false });
   });
 
+  // WHICH IDENTITY WRITES THE CATALOG (#194): measured against the App's installation, so an unused
+  // PAT beside a reaching App is red and removed, and a family wired on a promise GitHub refuses is red.
+  it("catalog.identity names the App where it reaches the catalog, is RED beside an unused PAT, and takes the PAT where the App does not reach", async () => {
+    const { db } = fresh();
+    const withCatalog: Config = { ...config, catalog: { repoURL: "https://github.com/example-org/catalog.git" } };
+    const githubApp = new FakeGitHubApp();
+    const row = async (cfg: Config, app: FakeGitHubApp | undefined) => (await runAsyncSelfChecks({ db, config: cfg, ...(app ? { githubApp: app } : {}) })).find((r) => r.name === "catalog.identity");
+    const viaApp = await row(withCatalog, githubApp);
+    expect(viaApp?.ok).toBe(true);
+    expect(viaApp?.detail).toBe("example-org/catalog is written with the GitHub App (its installation reaches it)");
+    const unusedPat = await row({ ...withCatalog, catalog: { repoURL: "https://github.com/example-org/catalog.git", token: "ghp_x" } }, githubApp);
+    expect(unusedPat?.ok).toBe(false);
+    expect(unusedPat?.detail).toContain("CATALOG_WRITE_PAT is set beside it — the PAT is unused");
+    const outside = { ...withCatalog, catalog: { repoURL: "https://github.com/other-org/catalog.git", token: "ghp_x" } };
+    expect((await row(outside, githubApp))?.detail).toBe("other-org/catalog is written with CATALOG_WRITE_PAT (the GitHub App's installation does not reach it)");
+    const nothing = await row({ ...withCatalog, catalog: { repoURL: "https://github.com/other-org/catalog.git" } }, githubApp);
+    expect(nothing?.ok).toBe(false);
+    expect((await row(config, undefined))?.kind).toBe("skipped");
+  });
+
   it("github-app.installation SKIPS without the identity instead of reporting a pass, naming the three keys", async () => {
     const { db } = fresh();
     const results = await runAsyncSelfChecks({ db, config });

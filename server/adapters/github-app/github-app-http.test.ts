@@ -169,3 +169,27 @@ describe("github-app adapter — createRepository", () => {
     expect((err as GitHubAppError).status).toBe(404);
   });
 });
+
+describe("github-app adapter — reachesRepository, the measured rule behind every repository credential", () => {
+  it("answers true only when the installation covering the repository IS this one, with the App's JWT and never a token", async () => {
+    const stub = stubFetch({ "GET /repos/example-org/acme/installation": { status: 200, body: { id: 42, account: { login: "example-org" } } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    expect(await client.reachesRepository({ owner: "example-org", repo: "acme" })).toBe(true);
+    expect(verifies(bearerOf(stub.seen[0]!), publicKey)).toBe(true);
+  });
+
+  it("answers false for a repository another installation of the App covers — that token is never minted here", async () => {
+    const stub = stubFetch({ "GET /repos/other-org/acme/installation": { status: 200, body: { id: 77, account: { login: "other-org" } } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    expect(await client.reachesRepository({ owner: "other-org", repo: "acme" })).toBe(false);
+  });
+
+  it("answers false on GitHub's 404 — no installation reaches the repository — and refuses any other status by name", async () => {
+    const stub = stubFetch({ "GET /repos/other-org/acme/installation": { status: 404, body: { message: "Not Found" } }, "GET /repos/example-org/down/installation": { status: 502, body: { message: "Bad Gateway" } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    expect(await client.reachesRepository({ owner: "other-org", repo: "acme" })).toBe(false);
+    const err = await client.reachesRepository({ owner: "example-org", repo: "down" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubAppError);
+    expect((err as GitHubAppError).status).toBe(502);
+  });
+});
