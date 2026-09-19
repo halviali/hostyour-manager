@@ -3,32 +3,24 @@ import { useNavigate } from "react-router";
 import type { Stage } from "../../../shared/enums.ts";
 import { HOST_LABEL_RE } from "../../../shared/unit-host.ts";
 import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "../../../shared/unit-size.ts";
-import { appSelectionsToRequest } from "../../../shared/app-selections.ts";
-import type { AppEntry } from "../../../shared/apps-manifest.ts";
-import { listTenantTargets, listTenantAppCatalog, createTenant, type TenantTargetView } from "../api.ts";
+import { listTenantTargets, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
 /** Onboard-tenant wizard — the tenant analogue of
  *  ConsumerOnboard. Unlike a consumer it does NOT point at an external repo: a tenant's charts
  *  always live in the fixed catalog repo, so the operator only declares WHAT to fan out —
- *  a subdomain, an owner, the target cluster (any active one, whose stage the tenant takes) and
- *  the optional per-app rows. The apps chosen live in the tenant's own repository
- *  `<org>/<subdomain>-apps`, which the run creates from the catalog's template and builds; the
- *  wizard names neither the organisation nor the tag, the server derives both. The trio
- *  auth/jobs/report is NOT offered: every tenant has those three members, always. There is NO secret
- *  field (v1 seeds no secrets; charts pull from Vault via ExternalSecret). Submit hands off to the
- *  Run screen, where the T1..T4 fan-out gates stream gate-by-gate and the operator approves. */
+ *  a subdomain, an owner, the target cluster (any active one, whose stage the tenant takes), the
+ *  size and the first administrator's mailbox. THE PLATFORM ALONE (hostyour-manager#211): the
+ *  standing members auth, jobs and report, always those three and no app. Apps are added
+ *  afterwards from the tenant's page, where the first one creates the tenant's own repository
+ *  `<org>/<subdomain>-apps` from the catalog's template, copies the app in, builds and deploys it
+ *  (tenant-apps-repo, tenant-add-app). There is NO secret field (v1 seeds no secrets; charts pull
+ *  from Vault via ExternalSecret) and no user seed: the first administrator comes by invitation.
+ *  Submit hands off to the Run screen, where the T1..T4 fan-out gates stream gate-by-gate and the
+ *  operator approves. */
 export function TenantCreate() {
   const nav = useNavigate();
   const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
-  // The app catalog (null = still loading) + the operator's choice: app name → selection name →
-  // checked. The catalog is the SOLE source of app names AND of selection names — a checkbox can
-  // only choose what the apps repository's apps.yaml declares, which is exactly what gate T4
-  // requires (no free text, no selection the wizard invented). An app is selected iff it has an
-  // entry here; deselecting it drops its (now-hidden) selections with it.
-  const [catalog, setCatalog] = useState<AppEntry[] | null>(null);
-  const [chosen, setChosen] = useState<Record<string, Record<string, boolean>>>({});
-  const [seedUsers, setSeedUsers] = useState(false);
   const [targets, setTargets] = useState<TenantTargetView[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,15 +31,6 @@ export function TenantCreate() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  useEffect(() => {
-    // Fail-soft: a catalog error is NOT a page error — an empty catalog (unavailable, or genuinely no
-    // app-types) just disables the picker with an inline note; onboarding without apps stays valid. The
-    // server route is itself fail-soft, so this catch only covers a transport/parse failure.
-    listTenantAppCatalog()
-      .then((c) => setCatalog(c.apps))
-      .catch(() => setCatalog([]));
-  }, []);
-
   const set = (k: keyof typeof form) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   // The stage is the cluster's and no other is offered: the tenant's Vault policies and its
   // tenant-eso role are bound to the platform's stage, and the server refuses a mismatch
@@ -56,20 +39,6 @@ export function TenantCreate() {
     const clusterId = e.target.value;
     setForm((f) => ({ ...f, clusterId, stage: (targets ?? []).find((t) => t.id === clusterId)?.stage ?? "" }));
   };
-  // Selecting an app starts every selection at the default its catalog entry declares; deselecting
-  // it drops the whole entry, so a hidden checkbox never leaks into the payload.
-  const toggleApp = (app: AppEntry) => (e: ChangeEvent<HTMLInputElement>) => {
-    const checked = e.target.checked;
-    setChosen((prev) => {
-      const next = { ...prev };
-      if (checked) next[app.name] = Object.fromEntries(Object.entries(app.selections).map(([k, v]) => [k, v.default]));
-      else delete next[app.name];
-      return next;
-    });
-  };
-  const toggleSelection = (app: string, selection: string) => (e: ChangeEvent<HTMLInputElement>) =>
-    setChosen((prev) => ({ ...prev, [app]: { ...prev[app], [selection]: e.target.checked } }));
-
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
     setBusy(true);
@@ -81,9 +50,8 @@ export function TenantCreate() {
         subdomain: form.subdomain.trim(),
         owner: form.owner.trim(),
         size: form.size as UnitSize,
-        // the checked catalog apps + their selections, in the request's shape (buildCreateTenantBody trims + de-dupes)
-        apps: Object.entries(chosen).map(([name, selections]) => appSelectionsToRequest(name, selections)),
-        seedUsers,
+        apps: [], // the platform alone; apps are added from the tenant's page (#211)
+        seedUsers: false,
         adminEmail: form.adminEmail.trim(), // empty ⇒ buildCreateTenantBody omits it (no first-admin invite)
       });
       nav(`/runs/${runId}`); // the Run screen streams the live T1..T4 gate report + the approve card
@@ -97,7 +65,7 @@ export function TenantCreate() {
   const noTargets = targets !== null && activeTargets.length === 0;
   // Where the tenant lands, derived from the chosen stage and cluster (tenantPlacement.ts). Null until
   // both are chosen, and it changes NOTHING about what is submitted.
-  const placement = tenantPlacement(form.stage, form.clusterId, targets, Object.keys(chosen));
+  const placement = tenantPlacement(form.stage, form.clusterId, targets);
 
   return (
     <section className="page">
@@ -109,11 +77,12 @@ export function TenantCreate() {
       </header>
 
       <p className="callout">
-        A tenant fans one registration out to one self-contained member per service — auth, jobs and report always, plus
-        one per app you declare — each with its own namespace <code>&lt;guid&gt;-&lt;member&gt;-&lt;stage&gt;</code> and its own
-        AppProject, all rendered from the fixed catalog repo. The apps you choose live in the tenant&apos;s own repository{" "}
-        <code>&lt;subdomain&gt;-apps</code>, created from the catalog and built by the same run. The Manager renders and
-        validates the entire fan-out (T1..T4) before anything is deployed; you approve on the next screen.
+        A tenant fans one registration out to one self-contained member per service — auth, jobs and report, the
+        platform every tenant has — each with its own namespace <code>&lt;guid&gt;-&lt;member&gt;-&lt;stage&gt;</code> and its
+        own AppProject, all rendered from the fixed catalog repo. Apps are added afterwards from the tenant&apos;s page: the
+        first one creates the tenant&apos;s own repository <code>&lt;subdomain&gt;-apps</code> from the catalog and builds it.
+        The Manager renders and validates the entire fan-out (T1..T4) before anything is deployed; you approve on the next
+        screen.
       </p>
 
       {error && (
@@ -214,53 +183,6 @@ export function TenantCreate() {
               Once the tenant is live, its identity provider is invited to bootstrap this first administrator. The activation
               link is shown once on the run screen and stored nowhere. Leave blank to invite an admin later.
             </span>
-          </label>
-        </div>
-
-        <div className="field">
-          <span className="field__label">
-            Apps <em className="field__opt">optional</em>
-          </span>
-          <span className="field__hint">
-            Each app becomes a member of its own: namespace and Application{" "}
-            <code>&lt;guid&gt;-&lt;name&gt;-&lt;stage&gt;</code>, reached at <code>&lt;name&gt;.&lt;subdomain&gt;.&lt;stage apex&gt;</code>,
-            rendered from the product&apos;s per-app charts in catalog. Pick from the catalog below — the apps repository&apos;s
-            own <code>apps.yaml</code>, with the selections each app offers; the standing members every tenant has are not
-            offered, they are always there.
-          </span>
-          {catalog === null ? (
-            <span className="field__hint">Loading the app catalog…</span>
-          ) : catalog.length === 0 ? (
-            <span className="field__hint" role="note">
-              App catalog unavailable — none selectable. You can still create the tenant with no apps and add them later.
-            </span>
-          ) : (
-            catalog.map((app) => (
-              <div key={app.name}>
-                <label className="checkbox-field">
-                  <input type="checkbox" checked={app.name in chosen} onChange={toggleApp(app)} />
-                  <span className="field__label">
-                    {app.title} <code>{app.name}</code>
-                  </span>
-                </label>
-                {app.description && <span className="field__hint">{app.description}</span>}
-                {app.name in chosen &&
-                  Object.entries(app.selections).map(([selection, { title }]) => (
-                    <label key={selection} className="checkbox-field checkbox-field--nested">
-                      <input type="checkbox" checked={chosen[app.name]?.[selection] === true} onChange={toggleSelection(app.name, selection)} />
-                      <span className="field__label">{title}</span>
-                    </label>
-                  ))}
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="field">
-          <span className="field__label">Identity provider</span>
-          <label className="checkbox-field">
-            <input type="checkbox" checked={seedUsers} onChange={(e) => setSeedUsers(e.target.checked)} />
-            <span className="field__label">Seed users (bootstrap the tenant's IdP with initial accounts)</span>
           </label>
         </div>
 
