@@ -8,6 +8,7 @@ const LEGAL_RUN = new Set([
   "approved>running",
   "running>succeeded", "running>failed", "running>cancelled",
   "failed>running",
+  "cancelled>running", // a cancelled run that had started resumes (hostyour-manager#203)
 ]);
 
 // Restated here rather than derived from the table, so a change to the table has to be made twice —
@@ -68,7 +69,7 @@ describe("executor transition tables", () => {
     }
   });
 
-  it("terminal run states are succeeded and cancelled (failed is not terminal)", () => {
+  it("terminal run states are succeeded and cancelled — the end a stream reports; failed is not terminal", () => {
     expect(isTerminalRun("succeeded")).toBe(true);
     expect(isTerminalRun("cancelled")).toBe(true);
     expect(isTerminalRun("failed")).toBe(false);

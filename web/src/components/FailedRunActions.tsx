@@ -4,8 +4,9 @@ import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import type { AbortOffer } from "../runScreen.ts";
 import { secretFieldLabel } from "../approveFields.ts";
 
-/** Everything a FAILED run offers: re-enter whatever the failed step needs and retry it, skip that step,
- *  ABORT it, or soft-delete the run. Split out of RunDetail exactly the way RunApproveForm is — the
+/** Everything a FAILED run offers — and a run CANCELLED after it started, which the executor resumes
+ *  the same way (runScreen.ts recoverable): re-enter whatever the interrupted step needs and retry it,
+ *  skip that step, ABORT it, or soft-delete the run. Split out of RunDetail exactly the way RunApproveForm is — the
  *  page stays the frame and hands each action back as a callback, the ceremony owns its own fields.
  *
  *  The abort is the load-bearing part. It is NOT "stop this run": it appends the run's registered
@@ -87,7 +88,7 @@ export function FailedRunActions(props: {
           />
         ))}
         <button type="button" className="btn btn--primary" onClick={retry}>
-          Retry from failed step
+          {run.status === "cancelled" ? "Resume from the interrupted step" : "Retry from failed step"}
         </button>
         <button type="button" className="btn" onClick={props.onSkip}>
           Skip…

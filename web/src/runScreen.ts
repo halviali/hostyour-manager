@@ -151,6 +151,14 @@ export function abortOffer(kind: RunKind, tenant: RunTenantStateView | null, ten
  *
  *  Only a PLANNED run that is still there can be approved; anything else needs no field, whatever its
  *  plan once asked for. */
+/** Whether the failed-run action bar (retry / skip / abort / delete) is this run's: it failed, or it
+ *  was cancelled AFTER it started — the executor resumes such a run from the step the cancel
+ *  interrupted (hostyour-manager#203). A plan discarded before its approve ran nothing; it offers
+ *  Delete alone, and is planned again rather than resumed. */
+export function recoverable(run: RunView): boolean {
+  return run.deletedAt === null && (run.status === "failed" || (run.status === "cancelled" && run.startedAt !== null));
+}
+
 export function secretsToSupply(run: RunView): string[] {
   return run.deletedAt === null && run.status === "planned" ? run.requiredSecrets : [];
 }

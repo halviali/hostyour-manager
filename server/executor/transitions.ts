@@ -14,7 +14,12 @@ const RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   running: ["succeeded", "failed", "cancelled"],
   failed: ["running"], // recovery: retry / skip / abort
   succeeded: [], // terminal
-  cancelled: [], // terminal
+  // A cancelled run that had STARTED is recoverable exactly like a failed one — retry from the step
+  // the cancel interrupted, skip it, abort with cleanup: the executor asks `startedAt` for that
+  // (retryFromStep, skipStep), because a plan discarded before its approve never ran a step and has
+  // nothing to resume. Terminal it was until hostyour-manager#203: a deploy-slave cancelled in its
+  // machine layer had moved the master's marking and could be neither finished nor taken back.
+  cancelled: ["running"],
 };
 
 // The step table's ONE invariant: `ok` is reachable ONLY from `running`. No path may declare a step
@@ -58,6 +63,9 @@ export function assertStepTransition(from: StepStatus, to: StepStatus): void {
   if (!canStepTransition(from, to)) throw errIllegalTransition(`step status ${from} → ${to}`);
 }
 
+/** Settled with nothing left to run of its own — what ends an event stream (domains/runs/api.ts).
+ *  `cancelled` stays here: a cancel is an END the stream reports, and the retry that may follow
+ *  opens a stream of its own on a run standing `running` again. */
 export const isTerminalRun = (s: RunStatus): boolean => s === "succeeded" || s === "cancelled";
 
 // Deletion is NOT a transition — it removes the run from the operator's view (SOFT

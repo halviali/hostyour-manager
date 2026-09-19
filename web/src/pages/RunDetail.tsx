@@ -4,7 +4,7 @@ import type { RunView, RunEventView, RunTenantStateView } from "../../../shared/
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { getRun, approveRun, deleteRun, cancelRun, retryRun, skipRun, abortRun, getRunTenantState } from "../api.ts";
 import { coalesced, RUN_REFRESH_WINDOW_MS } from "../coalesce.ts";
-import { abortOffer, runOnScreen } from "../runScreen.ts";
+import { abortOffer, recoverable, runOnScreen } from "../runScreen.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
 import { RunApproveForm } from "../components/RunApproveForm.tsx";
@@ -53,7 +53,7 @@ export function RunDetail() {
   const run = runOnScreen(loaded, runId);
   // Whether the tenant question is worth asking at all. ONE flag for both the GET below and the callout
   // that renders its answer, so the fetch condition and the render condition can never drift apart.
-  const asksTenantState = run !== null && run.deletedAt === null && run.status === "failed" && run.kind === "tenant-create";
+  const asksTenantState = run !== null && recoverable(run) && run.kind === "tenant-create";
 
   function refresh() {
     getRun(runId)
@@ -272,7 +272,7 @@ export function RunDetail() {
           approve ceremony above. `abort` is the gate on abort-with-cleanup: on a create-tenant an abort
           UN-DEPLOYS the tenant the run created, so it is decided against the server-resolved tenant state
           rather than against "the run failed" — runScreen.ts spells out why. */}
-      {run.deletedAt === null && run.status === "failed" && (
+      {recoverable(run) && (
         <FailedRunActions
           run={run}
           abort={abortOffer(run.kind, tenant, tenantError)}
@@ -292,9 +292,9 @@ export function RunDetail() {
           dialog standing. */}
       {asksTenantState && <FailedCreateTenantCallout key={runId} tenant={tenant} error={tenantError} />}
 
-      {run.deletedAt === null && run.status === "cancelled" && (
+      {run.deletedAt === null && run.status === "cancelled" && !recoverable(run) && (
         <div className="actionbar">
-          <span className="actionbar__text">This run was cancelled — nothing more will happen.</span>
+          <span className="actionbar__text">This plan was discarded before it started — nothing ran, and nothing is left to resume; plan it again if you still want it.</span>
           <button type="button" className="btn btn--danger" onClick={() => setConfirmDelete(true)}>
             Delete run
           </button>

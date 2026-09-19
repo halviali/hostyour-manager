@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { abortOffer, approvePayload, readyToApprove, runOnScreen, runTenantPurgeTarget, secretsToSupply } from "./runScreen.ts";
+import { abortOffer, approvePayload, readyToApprove, recoverable, runOnScreen, runTenantPurgeTarget, secretsToSupply } from "./runScreen.ts";
 import type { PurgeTenantTarget, RunTenantStateView, RunView } from "../../shared/api-types.ts";
 
 // The Run screen's honesty rules. All of them are about the same failure mode — the screen saying one
@@ -184,6 +184,16 @@ describe("abortOffer", () => {
     for (const kind of ["consumer-onboard", "tenant-offboard", "tenant-purge", "tenant-add-app", "cluster-deploy-slave", "cluster-redeploy"] as const) {
       expect(abortOffer(kind, null, null)).toEqual({ offered: true, tenant: null });
     }
+  });
+});
+
+describe("recoverable — which runs get the retry / skip / abort bar", () => {
+  it("a failed run, and a run cancelled after it started; not a plan discarded before its approve, not a deleted run", () => {
+    expect(recoverable(run("run_1", "noop", "failed"))).toBe(true);
+    expect(recoverable({ ...run("run_1", "noop", "cancelled"), startedAt: 1 })).toBe(true);
+    expect(recoverable({ ...run("run_1", "noop", "cancelled"), startedAt: null })).toBe(false);
+    expect(recoverable({ ...run("run_1", "noop", "failed"), deletedAt: 1 })).toBe(false);
+    expect(recoverable(run("run_1", "noop", "succeeded"))).toBe(false);
   });
 });
 

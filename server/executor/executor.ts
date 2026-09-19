@@ -9,6 +9,7 @@ import type { CredentialStore } from "../security/store.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { RunKind, RunStatus, StepStatus, TargetKind } from "../../shared/enums.ts";
+import { assertRecoverable, stepToResume } from "./recover.ts";
 import { assertRunTransition, isDeletableRun } from "./transitions.ts";
 import { acquireLocks, releaseLocks, deriveServerLocks } from "./locks.ts";
 import { runGuards, isMutatingPrecondition } from "./guards.ts";
@@ -238,8 +239,8 @@ export class Executor {
    *  first. Skipping was the only way to walk past a precondition without asking it. */
   async retryFromStep(runId: string, stepName?: string, secrets?: Record<string, Buffer>): Promise<void> {
     const run = this.loadRun(runId);
-    if (run.status !== "failed") throw errValidation(`run ${runId} is not failed`);
-    const target = stepName ? this.stepRowFull(runId, stepName) : this.firstFailedStep(runId);
+    assertRecoverable(run, "retry");
+    const target = stepName ? this.stepRowFull(runId, stepName) : stepToResume(this.deps.db, runId, run.status);
     if (target.status !== "failed" && target.status !== "skipped" && target.status !== "pending") {
       throw errValidation(`cannot retry from step ${target.name} (status ${target.status})`);
     }
@@ -284,7 +285,7 @@ export class Executor {
    *  executor BEFORE any step row exists (assertAbortable) and was therefore always unskippable. */
   async skipStep(runId: string, stepName: string, reason: string): Promise<void> {
     const run = this.loadRun(runId);
-    if (run.status !== "failed") throw errValidation(`run ${runId} is not failed`);
+    assertRecoverable(run, "skip");
     if (!reason.trim()) throw errValidation("a skip reason is required");
     const step = this.stepRowFull(runId, stepName);
     if (step.status !== "failed") throw errValidation(`step ${stepName} is not the failed step`);
@@ -572,11 +573,6 @@ export class Executor {
     return { id: row.id, name: row.name, status: row.status, ordinal: row.ordinal };
   }
 
-  private firstFailedStep(runId: string): { id: string; name: string; status: StepStatus; ordinal: number } {
-    const row = this.deps.db.select().from(steps).where(and(eq(steps.runId, runId), eq(steps.status, "failed"))).orderBy(steps.ordinal).get();
-    if (!row) throw errValidation(`run ${runId} has no failed step to retry`);
-    return { id: row.id, name: row.name, status: row.status, ordinal: row.ordinal };
-  }
 
   private allStepRows(runId: string): { id: string; name: string; title: string; status: StepStatus; ordinal: number; checkpoint: unknown }[] {
     return this.deps.db

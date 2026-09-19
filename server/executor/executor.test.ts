@@ -315,6 +315,13 @@ describe("Executor — cancel between steps + concurrent resume", () => {
     expect(run?.steps.find((s) => s.name === "mutate-3")?.status).toBe("pending");
     expect(events(db).some((t) => t.includes("✕ cancelled before: Mutate 2"))).toBe(true);
     expect(events(db).some((t) => t.includes("Run succeeded"))).toBe(false);
+
+    // THE CANCELLED RUN RESUMES from the step the cancel stopped short of (#203): the ok step is not
+    // re-run, the two pending ones are, and the run settles succeeded.
+    await executor.retryFromStep(runId);
+    await executor.settle(runId);
+    expect(executed).toEqual(["slow", "mutate-2", "mutate-3"]);
+    expect(getRun(db.db, runId)?.status).toBe("succeeded");
   });
 
   it("resumeOnBoot starts every resumed run at once, and a cancel on any of them is honest", async () => {
