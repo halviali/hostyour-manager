@@ -142,6 +142,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
           provenance: apps.provenance,
           status: apps.status,
           lastRunId: apps.lastRunId,
+          check: apps.checkJson,
           createdAt: apps.createdAt,
         })
         .from(apps)

@@ -1,3 +1,4 @@
+import { CheckChip } from "../components/CheckChip.tsx";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
@@ -290,7 +291,7 @@ export function Consumers() {
                     it arrives with the live payload below. */}
                 <div className="servercard__chips">
                   <span className="chip">{c.provenance}</span>
-                  {c.repoUrl && <span className="chip">{c.repoUrl.replace(/^https:\/\//, "").replace(/\.git$/, "")}</span>}
+                  {c.repoUrl && <span className="chip">{c.repoUrl.replace(/^https:\/\//, "").replace(/\.git$/, "")}</span>} <CheckChip check={c.check} />
                 </div>
 
                 <ConsumerLive appId={c.id} />

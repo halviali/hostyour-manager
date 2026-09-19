@@ -1,3 +1,4 @@
+import type { UnitCheck } from "../../../shared/preflight.ts";
 import { sqliteTable, text, integer, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import {
@@ -166,6 +167,9 @@ export const apps = sqliteTable("apps", {
   // Loose ref to runs(id), same convention as above.
   lastRunId: text("last_run_id"),
   status: text("status", { enum: APP_STATUS }).notNull().default("active"),
+  // What the scheduled check last measured on this unit (shared/preflight.ts UnitCheck): the probes
+  // of its onboarding, run again. Null until the first check lands — never "fine" by default.
+  checkJson: text("check_json", { mode: "json" }).$type<UnitCheck>(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
 }, (t) => [uniqueIndex("apps_name_stage_uq").on(t.name, t.stage)]);
 
@@ -221,6 +225,8 @@ export const tenants = sqliteTable("tenants", {
   // and no answer at all say opposite things and one column must not conflate them.
   adminCount: integer("admin_count"),
   adminCheckedAt: integer("admin_checked_at", { mode: "timestamp_ms" }),
+  // What the scheduled check last measured on this tenant (its wildcard record), like apps.checkJson.
+  checkJson: text("check_json", { mode: "json" }).$type<UnitCheck>(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),
 }, (t) => [uniqueIndex("tenants_guid_stage_uq").on(t.guid, t.stage)]);

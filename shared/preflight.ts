@@ -27,6 +27,19 @@ export interface PreflightReport {
   checks: PreflightCheck[];
 }
 
+/** What the scheduled check last measured on a standing unit (hostyour-manager#210): the probes
+ *  of its onboarding run again, their findings recorded on the unit's own row. Null on a row no
+ *  check has reached — never "fine" by default. */
+export interface UnitCheck {
+  checkedAt: number;
+  findings: PreflightCheck[];
+}
+
+/** The findings of a check worth a look: a failure of either severity, or a warning. */
+export function checkAttention(check: UnitCheck | null): PreflightCheck[] {
+  return check?.findings.filter((c) => c.status !== "pass") ?? [];
+}
+
 /** The gate: only a HARD check that FAILED blocks. Soft fails ride along as warnings
  *  (they become hard at provision time). */
 export function hasHardFailure(report: PreflightReport): boolean {

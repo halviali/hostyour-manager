@@ -76,6 +76,7 @@ CREATE TABLE `apps` (
 	`provenance` text DEFAULT 'manager' NOT NULL,
 	`last_run_id` text,
 	`status` text DEFAULT 'active' NOT NULL,
+	`check_json` text,
 	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	FOREIGN KEY (`cluster_id`) REFERENCES `clusters`(`id`) ON UPDATE no action ON DELETE restrict
 );
@@ -151,6 +152,7 @@ CREATE TABLE `tenants` (
 	`admin_state` text,
 	`admin_count` integer,
 	`admin_checked_at` integer,
+	`check_json` text,
 	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	FOREIGN KEY (`cluster_id`) REFERENCES `clusters`(`id`) ON UPDATE no action ON DELETE restrict

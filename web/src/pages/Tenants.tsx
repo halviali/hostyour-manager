@@ -8,6 +8,7 @@ import {
 import { TENANT_RUN_KINDS } from "../runKinds.ts";
 import { splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
 import { adminBadge, neverChecked, withoutAnAdministrator } from "../tenantAdmin.ts";
+import { CheckChip } from "../components/CheckChip.tsx";
 import { SectionRuns } from "../components/SectionRuns.tsx";
 import { InviteAdminDialog } from "../components/InviteAdminDialog.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
@@ -366,6 +367,7 @@ export function Tenants() {
                         </span>
                       );
                     })()}
+                    <CheckChip check={t.check} />
                   </div>
 
                   {unfinished && (

@@ -26,6 +26,7 @@ import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberHost } from "./unit-dns.ts";
+import { checkUnitsStep, type CheckUnitsPorts } from "./check-units.ts";
 
 /** The header the tenant's auth reads its bootstrap token from — the same one the invite uses. */
 const BOOTSTRAP_TOKEN_HEADER = "X-Bootstrap-Token";
@@ -41,6 +42,9 @@ export interface CheckTenantsPorts {
   resolver: ClusterKubeResolver;
   health: TenantHealthReader;
   resolveUnitApex: (domain: string, stage: Stage) => Promise<string>;
+  /** The second step's ports (check-units.ts): every standing unit's probes, run again. Optional so
+   *  a harness of the administrator check alone needs none; the wiring hands them. */
+  units?: CheckUnitsPorts;
 }
 
 /** No parameters: the check is over every tenant this manager knows, and a check that could be
@@ -209,13 +213,16 @@ export function makeCheckTenantsDef(ports: CheckTenantsPorts): RunDefinition<Che
         kind: "tenant-check",
         targetKind: "self",
         targetId: "manager",
-        summary: `Ask each of ${total} tenant(s) whether anybody can still administer it, and record the answer.`,
-        steps: [{ name: "check-administrators", title: "Ask every tenant whether it still has an administrator" }],
+        summary: `Ask each of ${total} tenant(s) whether anybody can still administer it, run every standing unit's probes, and record the answers.`,
+        steps: [
+          { name: "check-administrators", title: "Ask every tenant whether it still has an administrator" },
+          ...(ports.units ? [{ name: "check-units", title: "Run every standing unit's probes and record what they found" }] : []),
+        ],
         warnings: [],
         requiredSecrets: [],
       };
     },
-    steps: () => [checkStep(ports)],
+    steps: () => [checkStep(ports), ...(ports.units ? [checkUnitsStep(ports.units)] : [])],
   };
 }
 

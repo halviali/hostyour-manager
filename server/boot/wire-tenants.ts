@@ -303,6 +303,9 @@ export function buildTenantOnboarding(
       resolver: onboardPorts.resolver,
       resolveUnitApex: onboardPorts.resolveUnitApex,
       health: new HttpTenantHealthReader(),
+      // Every standing unit's probes, run again on the same schedule (#210): the consumer
+      // onboarding's ports are handed late, the way the build units get them.
+      units: { onboard: () => onboard(), tenant: onboardPorts },
     }),
     makeAddAppDef(onboardPorts),
     // The tenant's own apps repository, created from the catalog's apps bundle through the GitHub App

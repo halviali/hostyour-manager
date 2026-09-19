@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c3a12915-8ed6-40a6-9f55-fbebb8413103",
+  "id": "f7d170ad-4882-4fb7-b948-4bcf2adf7028",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit": {
@@ -367,6 +367,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
+        },
+        "check_json": {
+          "name": "check_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
@@ -891,6 +898,13 @@
         "admin_checked_at": {
           "name": "admin_checked_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "check_json": {
+          "name": "check_json",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

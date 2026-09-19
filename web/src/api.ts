@@ -1,3 +1,4 @@
+import type { UnitCheck } from "../../shared/preflight.ts";
 import type {
   ClustersView, ReleasesView, RunView, ServerView, HealthView,
   BranchesView, BranchDiffView, ResetRequest, ResetResult, ApiErrorCode,
@@ -276,6 +277,8 @@ export interface ConsumerView {
   provenance: AppProvenance;
   status: "active" | "suspended" | "offboarded";
   lastRunId: string | null;
+  /** What the scheduled check last measured (#210), or null where none has reached this unit. */
+  check: UnitCheck | null;
   createdAt: number;
 }
 export interface OnboardInput {
@@ -466,6 +469,8 @@ export interface TenantView {
    *  no answer at all say opposite things. */
   adminCount: number | null;
   adminCheckedAt: number | null;
+  /** What the scheduled check last measured (#210), or null where none has reached this tenant. */
+  check: UnitCheck | null;
   lastRunId: string | null;
   createdAt: number;
   updatedAt: number;

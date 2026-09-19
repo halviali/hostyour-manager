@@ -28,6 +28,7 @@ export const TENANT_COLUMNS = {
   adminState: tenants.adminState,
   adminCount: tenants.adminCount,
   adminCheckedAt: tenants.adminCheckedAt,
+  check: tenants.checkJson,
   lastRunId: tenants.lastRunId,
   createdAt: tenants.createdAt,
   updatedAt: tenants.updatedAt,
