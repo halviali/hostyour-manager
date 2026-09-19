@@ -33,6 +33,7 @@ import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } f
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
+import { probeAppsRepository } from "./tenant-probes.ts";
 
 const repoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
 
@@ -164,6 +165,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
     {
       name: "create-repository",
       title: `Create the private repository ${unit}`,
+      probe: (ctx) => probeAppsRepository(ports, { org: p.org ?? "", templateRepoURL: p.templateRepoURL ?? "", subdomain: p.subdomain ?? "" }, ctx),
       run: async (ctx) => {
         const app = requireGitHubApp(ports);
         const { created } = await app.createRepository({ org: p.org, name: unit, description: `The apps of tenant ${p.subdomain} (${p.guid}), created from the catalog's ${p.templateBuild}`, private: true, signal: ctx.signal });

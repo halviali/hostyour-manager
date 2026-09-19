@@ -321,7 +321,7 @@ const CLEAN_DOCS: RenderedDoc[] = [
 // A resolver whose master path yields fresh master-local fakes + argoNamespace "argocd".
 function tenantResolver(): FakeClusterKubeResolver {
   return new FakeClusterKubeResolver({
-    clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } }),
+    clusterReader: new FakeClusterReader({ deployState: { domain: "s2.example", stage: "prod", writtenAt: "x", generation: 1 } }),
     argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
   });
 }

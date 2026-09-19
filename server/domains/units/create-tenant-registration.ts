@@ -12,6 +12,7 @@ import type { TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "./unit-size.ts";
+import { probeCatalog } from "./tenant-probes.ts";
 
 /** The reset nonce a fresh tenant starts at, in its registration. Nothing acts on a change to it: no
  *  reconciler on this platform reads it, so nothing drops the tenant's databases and restarts its pods
@@ -24,6 +25,7 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
   return {
     name: "write-registration",
     title: "Commit the tenant registration (GitOps deploy)",
+    probe: () => probeCatalog(ports, p),
     run: async (ctx) => {
       // The bundle's tag: the one the apps-repo steps read off the release in this pass. A pass
       // resumed after them has none, and a registration naming an image without its tag would hand

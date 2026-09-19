@@ -106,9 +106,13 @@ const CLEAN_DOCS: RenderedDoc[] = [
   tdoc("Deployment"),
 ];
 
+/** The target's reader, ONE per file so a test can move its deploy-state between the plan and the
+ *  run: the plan's probe (#209) measures it, and attest-target measures it again at run time. */
+let targetReader: FakeClusterReader;
+beforeEach(() => { targetReader = new FakeClusterReader({ deployState: { domain: "s2.example", stage: "prod", writtenAt: "x", generation: 1 } }); });
 function tenantResolver(): FakeClusterKubeResolver {
   return new FakeClusterKubeResolver({
-    clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } }),
+    clusterReader: targetReader,
     argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
   });
 }
@@ -314,8 +318,9 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
 
   it("REFUSED at attest-target: NOT-DEPLOYED — the run mutated nothing, so nothing is described or offered", async () => {
     // The other row-less run, and the opposite truth from the orphan above. This one is REAL, end to end:
-    // the seeded slave cluster is s2.example while its deploy-state reports s1.example, so
-    // attest-target (assertDeployState) refuses — the "deploy-state mismatch / unreachable slave" case.
+    // the seeded slave cluster is s2.example and its deploy-state reports s1.example BY RUN TIME — it
+    // moved after the plan's probe measured it fresh (#209) — so attest-target (assertDeployState)
+    // refuses: the "deploy-state mismatch / unreachable slave" case.
     // record-provisional is the FIRST step after it and the only step before any mutation, so nothing was
     // deployed and no cleanup was armed. Read as "orphan" (the state a bare "no row" yields) the
     // screen would tell the operator the run "failed after it had started deploying" and that a fan-out,
@@ -325,6 +330,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     seedSlaveCluster();
     const { app, executor, cookie } = await makeTenant(true);
     const { runId } = await planned(app, executor, cookie);
+    targetReader.setDeployState({ domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 });
     await executor.approve(runId, {
       // create-tenant demands the tenant's object storage at approve; without it the run refuses
       // before it reaches what this case is about.

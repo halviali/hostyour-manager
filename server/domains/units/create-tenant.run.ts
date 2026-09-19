@@ -38,6 +38,8 @@ import { tenantActivateStep } from "./create-tenant-activate.ts";
 import { writeRegistrationStep } from "./create-tenant-registration.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
 import { assertReplacesOnTargetCluster, ensureSubdomainFreeStep, resolveReplaceTargets, ReplaceTargetSchema } from "./tenant-replace.ts";
+import { probeTenantTarget, probeTenantDns, probeBuildUnit } from "./tenant-probes.ts";
+import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
@@ -329,6 +331,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     {
       name: "attest-target",
       title: "Attest the target cluster (deploy-state fresh)",
+      probe: () => probeTenantTarget(ports, p),
       run: async (ctx) => {
         // Fail closed on an absent/drifted deploy-state (shared assertDeployState, lifecycle.ts).
         // Read it on the TARGET cluster's own reader (a slave over its bearer).
@@ -371,7 +374,10 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     ...replaceSteps,
     // The build units BEFORE the tenant's own writes: a build that fails leaves a provisioning row and
     // nothing else — no Vault entry, no bucket, no key, no AppProject (the first-write law of #151).
-    ...(p.buildUnits ?? []).map((unit) => buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit)),
+    ...(p.buildUnits ?? []).map((unit) => ({
+      ...buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit),
+      probe: (ctx: ProbeCtx) => probeBuildUnit(() => ports.onboard?.(), ports, p, unit, ctx),
+    })),
     // The tenant's own apps repository, after the platform's images and for the same reason: created
     // through the App, written from the template with the chosen apps, onboarded build-only and built
     // once — its tag lands in the runtime for refresh-images and write-registration.
@@ -474,6 +480,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     {
       name: "provision-dns",
       title: "Provision the tenant's public DNS record",
+      probe: (ctx) => probeTenantDns(ports, p, ctx),
       run: async (ctx) => {
         // ONE wildcard record per tenant STAGE: every member sits exactly one level below the tenant's
         // zone `<subdomain>.<stage apex>` (`<member>.`; nothing lives on the bare zone), so
