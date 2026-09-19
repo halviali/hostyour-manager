@@ -173,11 +173,9 @@ describe("apps.stage", () => {
   });
 });
 
-// The one-master invariant as an EXPRESSION index. Its whole point is that it is indexed on the
-// predicate rather than on the role column: an index on the column is unique per distinct VALUE, so
-// "master" and "master+slave" would sit side by side and the platform would carry two management
-// planes. drizzle-kit cannot generate the expression correctly (it splits it on the comma), so the
-// baseline SQL is hand-corrected and this suite is what catches a regenerate that undoes the fix.
+// The one-master invariant as an EXPRESSION index with a partial WHERE: the slaves stay out of
+// the index entirely, and the predicate reads as the rule it enforces. This suite is what catches
+// a regenerate of the one migration that undoes it.
 describe("servers_one_master_uq", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
@@ -193,23 +191,14 @@ describe("servers_one_master_uq", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  const add = (db: DbHandle, id: string, role: "master" | "slave" | "master+slave"): void => {
+  const add = (db: DbHandle, id: string, role: "master" | "slave"): void => {
     db.db.insert(servers).values({ id, name: id, host: `${id}.example`, sshUser: "root", role, status: "healthy" }).run();
   };
 
-  it("refuses a master+slave beside a master — at most ONE server carries the master part", () => {
-    const db = fresh();
-    add(db, "srv_m", "master");
-    expect(() => add(db, "srv_ms", "master+slave")).toThrow(/UNIQUE/i);
-  });
-
-  it("refuses a second master, and a second master+slave", () => {
+  it("refuses a second master — at most ONE server carries the master part", () => {
     const db = fresh();
     add(db, "srv_m", "master");
     expect(() => add(db, "srv_m2", "master")).toThrow(/UNIQUE/i);
-    const db2 = fresh();
-    add(db2, "srv_ms", "master+slave");
-    expect(() => add(db2, "srv_ms2", "master+slave")).toThrow(/UNIQUE/i);
   });
 
   it("admits a master and TWO slaves — the slaves are outside the index entirely", () => {

@@ -64,8 +64,8 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
     return { deps, built, slaveReader };
   }
 
-  function seedMasterCluster(db: DbHandle, role: "master" | "master+slave" = "master"): string {
-    db.db.insert(servers).values({ id: "srv_master", name: "m1", host: "m1.example", sshUser: "ops", role, status: "healthy" }).run();
+  function seedMasterCluster(db: DbHandle): string {
+    db.db.insert(servers).values({ id: "srv_master", name: "m1", host: "m1.example", sshUser: "ops", role: "master", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_master", serverId: "srv_master", stage: "prod", domain: "m1.example", status: "active", planeState: "ready" }).run();
     return "cls_master";
   }
@@ -100,19 +100,6 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
     expect(r.projectWriter).toBe(masterProjects);
     expect(r.argoNamespace).toBe("argocd");
     expect(built).toHaveLength(0); // no per-slave client built for the master
-  });
-
-  it("master+slave takes the SAME master branch: pod SA, ns 'argocd', and NO bearer harvested for its own cluster", async () => {
-    // The union role is a regular role. Its own cluster is the one the manager pod already sits on,
-    // so a per-cluster client over a harvested cluster-admin bearer would be a second, sealed copy of
-    // the access it has anyway — and there is no plane on a self-cluster to build one from.
-    const { db, store } = setup();
-    const id = seedMasterCluster(db, "master+slave");
-    const { deps, built } = spyDeps(db, store);
-    const r = await makeClusterKubeResolver(deps).resolve(id);
-    expect(r.clusterReader).toBe(masterReader);
-    expect(r.argoNamespace).toBe("argocd");
-    expect(built).toHaveLength(0);
   });
 
   it("slave cluster → per-slave clusterReader over plane.kube + unsealed bearer + caData; argo/projects stay master-local, ns == slave name", async () => {

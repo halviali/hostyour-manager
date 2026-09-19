@@ -109,17 +109,17 @@ describe("boot/seed-master — master self-registration", () => {
     expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
   });
 
-  it("finds an existing master+slave row instead of inserting a second master", async () => {
-    // The control host may equally carry the union role, and then the row this seed reconciles is
-    // that one. Keying on the literal "master" alone would miss it, try to INSERT, and die on
-    // servers_one_master_uq — leaving a live master+slave without its pinned host key and self-SSH key.
+  it("finds the existing master row through MASTER_ROLES instead of inserting a second master", async () => {
+    // The row this seed reconciles is found through the named set, not a hand-spelled literal: a
+    // reader keyed on anything else would miss it, try to INSERT, and die on servers_one_master_uq
+    // — leaving a live master without its pinned host key and self-SSH key.
     const { db, store, dir } = setup();
     const key = generateServerKeypair("m1-master");
     const keyFile = join(dir, "master-ssh-key");
     writeFileSync(keyFile, key.privateOpenSsh);
     db.db.insert(servers).values({
       id: "srv_existing", name: "m1", host: "m1.example.com", sshUser: "m1",
-      role: "master+slave", status: "healthy",
+      role: "master", status: "healthy",
     }).run();
 
     await seedMaster(db.db, store, cfg({
@@ -129,7 +129,7 @@ describe("boot/seed-master — master self-registration", () => {
 
     const rows = db.db.select().from(servers).all();
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: "srv_existing", role: "master+slave" });
+    expect(rows[0]).toMatchObject({ id: "srv_existing", role: "master" });
     expect((rows[0]?.preflightJson as { hostKey?: string } | null)?.hostKey).toBe(FP);
     expect(await store.list({ serverId: "srv_existing", kind: "ssh_key" })).toHaveLength(1);
   });

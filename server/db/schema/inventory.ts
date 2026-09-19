@@ -98,14 +98,13 @@ export const servers = sqliteTable("servers", {
 }, (t) => [
   uniqueIndex("servers_name_uq").on(t.name),
   uniqueIndex("servers_host_port_uq").on(t.host, t.sshPort),
-  // At most ONE server carries the master part. Indexed on the PREDICATE, not on `role`: an index
-  // on the column would be unique per distinct VALUE, so a "master" row and a "master+slave" row
-  // would sit side by side and the platform would have two management planes. The expression is 1
-  // for every indexed row, and the partial WHERE keeps the slaves (whose predicate is 0) out of the
-  // index entirely — otherwise every slave would collide with every other slave on 0.
+  // At most ONE server carries the master part. Indexed on the PREDICATE with a partial WHERE, so
+  // the slaves (whose predicate is 0) stay out of the index entirely — otherwise every slave would
+  // collide with every other slave on 0. The predicate is the one MASTER_ROLES (shared/enums.ts)
+  // spells, kept as an expression so the index reads as the rule it enforces.
   uniqueIndex("servers_one_master_uq")
-    .on(sql`(role IN ('master', 'master+slave'))`)
-    .where(sql`role IN ('master', 'master+slave')`),
+    .on(sql`(role = 'master')`)
+    .where(sql`role = 'master'`),
 ]);
 
 export const clusters = sqliteTable("clusters", {

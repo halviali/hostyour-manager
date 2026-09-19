@@ -94,11 +94,6 @@ describe("resolveClusterMarking", () => {
     await expect(buildPlaneFqdnFromMarkings(repoWith({ [MASTER]: masterMap }))(SLAVE)).rejects.toThrow(/no cluster map for/);
   });
 
-  it("carries the union role master+slave", async () => {
-    const repo = repoWith({ [MASTER]: `stage: prod\nrole: master+slave\n\nglobal:\n  domain: ${MASTER}\n  buildPlane: ${MASTER}\n` });
-    expect((await resolveClusterMarking(repo, "m1")).role).toBe("master+slave");
-  });
-
   it("a missing map is a typed error naming the path — never a default role or stage", async () => {
     await expect(resolveClusterMarking(repoWith({ [MASTER]: masterMap }), "s1")).rejects.toThrow(
       /no cluster map for "s1".*clusters\/active\/s1\.yaml/s,
@@ -162,13 +157,13 @@ describe("projectClusterMarking", () => {
   afterEach(() => { db.sqlite.close(); });
 
   it("moves servers.role + clusters.stage onto what the map says, and audits the move", async () => {
-    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: prod\nrole: master+slave\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n` }), SLAVE);
+    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: prod\nrole: master\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n` }), SLAVE);
     expect(projectClusterMarking(db.db, marking, { actor: "op_test", runId: "run_1" })).toEqual({
       stage: { from: "dev", to: "prod" },
-      role: { from: "slave", to: "master+slave" },
+      role: { from: "slave", to: "master" },
     });
     expect(db.db.select().from(clusters).where(eq(clusters.id, "cls_1")).get()?.stage).toBe("prod");
-    expect(db.db.select().from(servers).where(eq(servers.id, "srv_1")).get()?.role).toBe("master+slave");
+    expect(db.db.select().from(servers).where(eq(servers.id, "srv_1")).get()?.role).toBe("master");
     // The audit table has ONE writer (db/audit-writer.ts), so a test reads it as raw SQL.
     const entry = db.sqlite.prepare("SELECT action, target_id FROM audit ORDER BY ts DESC LIMIT 1").get() as { action: string; target_id: string } | undefined;
     expect(entry).toEqual({ action: "cluster.marking_projected", target_id: "cls_1" });

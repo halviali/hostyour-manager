@@ -5,9 +5,9 @@
 // inventory (the clusters/servers rows) — never a hardcoded cluster-name list (POLICY: derive
 // everything from the servers.role + the plane, so adding a slave needs no code change):
 //
-//  - A cluster carrying the MASTER part (isMasterRole — "master" AND "master+slave", i.e. the
+//  - A cluster carrying the MASTER part (isMasterRole, i.e. the
 //    manager's own host): return the master-local trio (built from the master kube input —
-//    in-cluster SA by default) and argoNamespace "argocd". A master+slave takes this branch for its
+//    in-cluster SA by default) and argoNamespace "argocd". The master takes this branch for its
 //    OWN cluster: the pod already sits on it, so there is nothing to harvest a bearer for, and its
 //    root ArgoCD in namespace "argocd" IS its instance.
 //  - A SLAVE cluster: a per-slave `clusterReader` over the harvested cluster-admin bearer
@@ -140,7 +140,7 @@ export function makeClusterKubeResolver(deps: ClusterKubeDeps): ClusterKubeResol
       const server = deps.db.select().from(servers).where(eq(servers.id, cluster.serverId)).get();
       if (!server) throw errNotFound(`server ${cluster.serverId} for cluster ${clusterId}`);
 
-      // The MASTER part (master, and a master+slave's own cluster): the master-local trio verbatim
+      // The MASTER part (the master's own cluster): the master-local trio verbatim
       // + ns "argocd". No bearer is harvested for it — the pod's ServiceAccount already reaches this
       // cluster, and a harvested cluster-admin bearer for the host the manager runs on would be a
       // second, sealed copy of the access it already has.

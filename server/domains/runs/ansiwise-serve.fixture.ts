@@ -52,7 +52,7 @@ export const elevationOnly = (): Record<string, Buffer> => ({ [ANSIWISE_ELEVATIO
 export const composedAnswers = (email: string): Record<string, string> => ({
   fqdn: MASTER_FQDN,
   stage: "prod",
-  role: "master+slave",
+  role: "master",
   operator_user: "m1",
   letsencrypt_email: email,
   letsencrypt_server: MAP_LETSENCRYPT_SERVER,
@@ -102,10 +102,8 @@ const clientRunKindYaml = (name: string, word: string): string => [
  *  declared. */
 export function fixturePrograms(): Record<string, string> {
   return {
-    // TWO run kinds run deploy-cluster — redeploy's master arm (m1, whose harness row carries the
-    // union role master+slave and whose composition must send it WHOLE, never flattened to
-    // "master") and deploy-slave's machine layer (s1/slave) — so the identity rows take either
-    // spelling.
+    // TWO run kinds run deploy-cluster — redeploy's master arm (m1, role master) and
+    // deploy-slave's machine layer (s1/slave) — so the identity rows take either spelling.
     //
     // BOOKS_FQDN AND BUILD_PLANE_FQDN ARE MEASURED LIKE THE REST, because every arm that drives this
     // program reads both off the cluster map (defs/deploy-slave.ts slaveMachineAnswers). An arm that
@@ -114,7 +112,7 @@ export function fixturePrograms(): Record<string, string> {
     "deploy-cluster": programYaml("deploy-cluster", [
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^(master\\+slave|slave)$" },
+      { answer: "role", pattern: "^(master|slave)$" },
       { answer: "operator_user", pattern: "^(m1|ubuntu)$" },
       { answer: "letsencrypt_email", pattern: "^[^@]+@[^@]+$" },
       { answer: "letsencrypt_server", pattern: "^https://" },
@@ -139,7 +137,7 @@ export function fixturePrograms(): Record<string, string> {
     "deploy-platform-services": programYaml("deploy-platform-services", [
       { answer: "fqdn", pattern: "^(m1|s1)\\.example\\.com$" },
       { answer: "stage", pattern: "^prod$" },
-      { answer: "role", pattern: "^(master\\+slave|slave)$" },
+      { answer: "role", pattern: "^(master|slave)$" },
       { answer: "books_fqdn", pattern: "^m1\\.example\\.com$" },
     ]),
     // The deploy-slave family. NO BRANCH PROGRAM IS AMONG THEM: a pure slave has no install branch,
@@ -249,7 +247,6 @@ export async function liveMaster(serve: ServeFixture, overrides: Partial<HostsSc
     ...overrides,
   });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
-  h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
   h.db.db.insert(clusters).values({
     id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com",
     status: "active", planeState: "ready",

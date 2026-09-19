@@ -108,9 +108,9 @@ function errText(e: unknown): string {
 }
 
 /** The target picker both wizards read: the ACTIVE clusters whose server carries the slave part
- *  (SLAVE_ROLES). The master's self-cluster row stays in the inventory and enters this list the
- *  moment cluster-deploy-slave turns its server into master+slave. No cluster-name list anywhere:
- *  who qualifies is a row question, read at request time. The `stage` here is the CLUSTER's, the
+ *  (SLAVE_ROLES) — every role, since a master carries it as well (hostyour-cloud#232). No
+ *  cluster-name list anywhere: who qualifies is a row question, read at request time, and the set
+ *  stays the one named place the question is answered. The `stage` here is the CLUSTER's, the
  *  platform's own; it decides nothing about the unit, whose stage the wizard asks separately. */
 function targetClusters(db: Db): Array<{ id: string; domain: string; stage: Stage; status: string }> {
   return db
@@ -567,7 +567,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
 
   // The tenant target picker: the clusters a tenant can be created on — every ACTIVE cluster,
   // whatever role or stage it carries. Placement is not a function of the role; a tenant runs on a
-  // slave and equally on a master+slave, and the tenant's own stage is the wizard's separate input.
+  // slave and equally on a master, and the tenant's own stage is the wizard's separate input.
   // The same list the consumer picker offers, and the create-tenant plan re-checks `active` itself
   // (resolveCluster), so this route is the UI convenience it always was.
   app.get("/api/tenants/targets", (c) => c.json(targetClusters(db)));

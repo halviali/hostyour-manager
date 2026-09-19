@@ -35,28 +35,19 @@ import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectCl
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
-import { masterSlavePartSteps, masterSlavePartPlan } from "./deploy-slave.master.ts";
 
 // "cluster-deploy-slave" — the Run that gives a server the SLAVE PART, over the deployment PROGRAMS
 // of the machine's own catalogue (hostyour-deploy ansiwise/programs/), each driven over
 // `ansiwise-rest serve` and proven by a dry run the machine's gate then admits the real run against.
 //
-// TWO ARMS, decided by the target's ROLE and by nothing an operator states, the way redeploy decides
-// between its own — because giving a machine the slave part is a different set of acts on a machine
-// that already carries the master part:
-//   pure slave        the list below, over TWO HOSTS: the MASTER marks the slave in its books and
-//                     takes its registration (register-slave); the SLAVE is built by the same three
-//                     machine-layer programs every cluster is (deploy-host, deploy-cluster,
-//                     deploy-platform-services), joins the private network with a credential the
-//                     master mints, and emits the one credentials file the registration is made
-//                     from. NO BRANCH IS CUT: a pure slave has none, its map stands on the books
-//                     branch beside every other map of the installation, and its checkout stands on
-//                     that same branch (deploy-branch names `master` alone in its own roles line).
-//   master, master+   deploy-slave.master.ts, over ONE host: the machine takes the slave part by
-//     slave           regenerating its OWN branch under the combined role. One machine, one branch,
-//                     one cluster — no ordinal, no second cluster row, no per-slave management plane,
-//                     and not one compensating action armed, because every one of them would act on
-//                     the control host itself.
+// ONE ARM, over TWO HOSTS: the MASTER marks the slave in its books and takes its registration
+// (register-slave); the SLAVE is built by the same three machine-layer programs every cluster is
+// (deploy-host, deploy-cluster, deploy-platform-services), joins the private network with a
+// credential the master mints, and emits the one credentials file the registration is made from.
+// NO BRANCH IS CUT: a slave has none, its map stands on the books branch beside every other map of
+// the installation, and its checkout stands on that same branch (deploy-branch names `master` alone
+// in its own roles line). The master is never a target of this run: it carries the slave part from
+// its own installation (hostyour-cloud#232), and the plan refuses it by name.
 //
 // IT STARTS ON A BARE MACHINE, and that is why first contact is the head of its step list rather
 // than a run kind of its own. Holding a key for a machine is a STATE, not an act somebody performs
@@ -124,8 +115,8 @@ function armed(cleanup: Cleanup, step: Step): Step {
  *  which for a slave would install a second books keeper); build_plane_fqdn is the map's, whose
  *  self-naming form the programs read the same way as "this machine".
  *
- *  A MACHINE THAT KEEPS THE BOOKS ITSELF is answered by the same reading, and that is why the master
- *  arm (deploy-slave.master.ts) composes this one rather than a second copy: its map names no books
+ *  A MACHINE THAT KEEPS THE BOOKS ITSELF is answered by the same reading, and that is why redeploy's
+ *  master arm (redeploy.ts) composes this one rather than a second copy: its map names no books
  *  cluster, so books_fqdn is omitted and the programs default to the machine's own — which for that
  *  machine is the right answer, because it IS where the books are kept. */
 export function slaveMachineAnswers(target: SlaveTarget, ports: DeploySlavePorts & AnsiwisePorts): ExtraAnswers {
@@ -500,13 +491,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
             `${domain} lists no address of its own (\`${HOST_ADDRESS_COMMAND}\`), and global.nodeCidrs is what the gate sandbox draws its fence from — a map written without it would fence nothing`,
           );
         }
-        // EVERY PART THE MACHINE CARRIES, never one of them. This run adds the slave part; a
-        // machine that already carries the master part therefore becomes "master+slave" — the
-        // union SERVER_ROLE declares for one server doing both jobs. A flat "slave" here would
-        // demote the books-keeping cluster in its own map, and the projection below would then
-        // write that word onto the server row, where every reader keyed on MASTER_ROLES stops
-        // finding the master.
-        const role = isMasterRole(server.role) ? "master+slave" as const : "slave" as const;
+        // The machine is a slave and nothing else: the plan refused the master as a target, so the
+        // word written here never demotes the books-keeping cluster in its own map.
+        const role = "slave" as const;
         const slaveMarking: ClusterMarking = {
           ...installation,
           // WHAT THIS MACHINE IS, and nothing else.
@@ -560,8 +547,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         const { changed } = await writeClusterMarking(repo, slaveMarking, ctx.runId);
         // THE ROW FOLLOWS THE MAP. The map is the writable place and the inventory columns are the
         // copy every role and stage decision in this process queries, so the act that rewrites the
-        // map moves the copy in the same step — this is the code path that puts "master+slave" on
-        // a server row when the slave part lands on a machine already carrying the master part.
+        // map moves the copy in the same step.
         projectClusterMarking(ctx.db, slaveMarking, { actor: "system", runId: ctx.runId });
         ctx.log("meta", changed
           ? `${clusterMapPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role ${role}, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
@@ -676,7 +662,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         ctx.log("meta", `Application ${appName} is Synced — the ${clusterShortName(domain)} slave-ArgoCD now drives the slave from branch ${domain}`);
       },
     },
-    // verify-slave (master+slave): HARD — the instance's ESO-materialized credentials Ready
+    // verify-slave: HARD — the instance's ESO-materialized credentials Ready
     // in ns <name> (repo + cluster; with a force-sync kick against ESO error backoff), every
     // Application in ns <name> Synced/Healthy, every slave ESO SecretStore Ready (one bounded
     // retry window, with a rate-limited master-side diagnostic bundle while a gate fails);
@@ -698,21 +684,19 @@ function installInput(params: DeploySlaveParams): SlaveInstallInput {
   };
 }
 
-/** Does this run's target already carry the MASTER part? The whole arm choice, asked of the
- *  inventory, because a role is a fact of the row and never something an operator states.
- *
- *  ONE predicate for both plan() and steps(), each handing it the database it has — the planner its
- *  own, and steps() the one the def holds as a port, because steps() is given the persisted params
- *  and no database. Two spellings of this question could disagree, and a plan whose card described
- *  one arm while its steps ran the other is exactly what that would look like.
- *
- *  A server the lookup does not resolve is answered NO and takes the pure-slave arm: that is the arm
- *  of a machine this manager has no row for yet, and it is also what the boot check needs, which
- *  calls steps({}) with no params at all purely to assert that step 0 is attest-target — a question
- *  the two arms answer alike. */
-function carriesMasterPart(db: Db, serverId: string): boolean {
-  const role = db.select({ role: servers.role }).from(servers).where(eq(servers.id, serverId)).get()?.role;
-  return role !== undefined && isMasterRole(role);
+/** The master is refused as a target BY THE PLAN: it carries the slave part from its own
+ *  installation (hostyour-cloud#232), so there is nothing this run could add, and every act below
+ *  — the ordinal, the second cluster row, the per-slave management plane, the compensations that
+ *  leave the machine — would act on the control host itself. Asked of the inventory, because a role
+ *  is a fact of the row and never something an operator states. */
+function refuseMaster(db: Db, serverId: string): void {
+  const row = db.select({ name: servers.name, role: servers.role }).from(servers).where(eq(servers.id, serverId)).get();
+  if (row && isMasterRole(row.role)) {
+    throw errValidation(
+      `${row.name} stands at role ${row.role}: a master carries the slave part from its own installation, so there is nothing this run adds to it — ` +
+      "what rebuilds the machine layer of a master is the cluster-redeploy run kind",
+    );
+  }
 }
 
 export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<DeploySlaveParams> {
@@ -721,10 +705,7 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
   paramsSchema: DeploySlaveParams,
   mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted where the run definitions are assembled at boot
   plan: async (params, { db }) => {
-    // WHICH ARM, asked before anything is composed. The master arm plans a run over ONE host and ONE
-    // cluster, so it carries its own card, its own targets and its own locks rather than a branch
-    // inside the ones below (deploy-slave.master.ts).
-    if (carriesMasterPart(db, params.serverId)) return masterSlavePartPlan(params, ports, db);
+    refuseMaster(db, params.serverId);
     const slave = loadServer(db, params.serverId);
     const master = loadMaster(db);
     const stepDefs = deploySlaveSteps(installInput(params), ports);
@@ -783,9 +764,7 @@ export function makeDeploySlaveDef(ports: DeploySlaveDefPorts): RunDefinition<De
       requiredSecrets: [ANSIWISE_ELEVATION_SECRET],
     };
   },
-  steps: (params) => carriesMasterPart(ports.db, params.serverId)
-    ? masterSlavePartSteps(params, ports)
-    : deploySlaveSteps(installInput(params), ports),
+  steps: (params) => deploySlaveSteps(installInput(params), ports),
   // Every compensating action this run's steps may register, and each one has to be here: the
   // executor resolves the persisted __cleanups by NAME against this list, so a name it does not
   // carry ends an abort with a step that has no implementation.

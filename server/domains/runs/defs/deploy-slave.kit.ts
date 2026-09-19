@@ -174,7 +174,7 @@ export function slaveApiHost(server: typeof servers.$inferSelect): string {
 
 /** The one-master invariant (servers_one_master_uq guarantees ≤1; we require exactly 1):
  *  the master hosts the slave-management plane, so deploying a slave without one is
- *  meaningless. A master+slave carries that part and is found here too. */
+ *  meaningless. */
 export function loadMaster(db: Db): typeof servers.$inferSelect {
   const row = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
   if (!row) throw errValidation("no master server registered — the platform needs exactly one role=master server (this manager's host) before a slave can be deployed");

@@ -42,9 +42,8 @@ describe("machineIdentityBlock — what the card says this manager holds the mac
   it("offers the master the one number a statement can move there: the recorded machine-id", () => {
     // A fingerprint stated on the card would not survive a boot — seed-master reads the configured
     // value again every time — but the machine-id is recorded by this manager alone and configured
-    // nowhere, so the card is the only route back for a control host that was re-imaged. Both master
-    // roles answer the same, because both carry the master part.
-    for (const role of ["master", "master+slave"] as const) {
+    // nowhere, so the card is the only route back for a control host that was re-imaged.
+    for (const role of ["master"] as const) {
       const block = machineIdentityBlock(server({ role }));
       expect(block.offer).toBe(true);
       expect(block.line).toMatch(/deployment configuration/);
@@ -102,7 +101,7 @@ describe("machineIdentityRefusal — the answers the write gives, given under th
   });
 
   it("refuses a NEW fingerprint on this manager's own machine, and names where it is stated instead", () => {
-    for (const role of ["master", "master+slave"] as const) {
+    for (const role of ["master"] as const) {
       const said = machineIdentityRefusal(PRESENTED, server({ role }), PINNED);
       expect(said).toMatch(/deployment configuration/);
       // And the half that is open there is named, so the refusal is not a dead end.

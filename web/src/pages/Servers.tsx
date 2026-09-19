@@ -9,7 +9,7 @@ import {
   readAuthorizedKeys, restateMachineIdentity,
 } from "../api.ts";
 import { tailnetRunKindOffer } from "../tailnetState.ts";
-import { slavePartBlock } from "../slavePartState.ts";
+import { masterPartsLine } from "../masterParts.ts";
 import { addressLines } from "../serverDialAddress.ts";
 import { OPEN_RUN, relevantRun, runLine } from "../serverRuns.ts";
 import { IconShield } from "../components/icons.tsx";
@@ -292,14 +292,13 @@ export function Servers() {
                 {/* THE MASTER'S OWN ROW. The block below is the SLAVE lifecycle — its stages and every
                     sentence in LIFECYCLE are written about a machine becoming a slave, so a master's
                     card cannot show it. This row is where a machine carrying the master part states
-                    which parts it carries, offers to take the other one, and offers the tailnet run
-                    kinds that put its membership of the private network back. Every one of those acts
-                    admits a master in its own plan, and this is the screen they are reachable from. */}
+                    which parts it carries and offers the tailnet run kinds that put its membership of
+                    the private network back. Every one of those acts admits a master in its own plan,
+                    and this is the screen they are reachable from. */}
                 {isMasterRole(s.role) && (
                   <MasterActions
-                    slavePart={slavePartBlock(s, { runOpen: runIsOpen })}
+                    parts={masterPartsLine(s)}
                     offer={tailnetRunKindOffer(s, { liveCluster: LIFECYCLE[s.status].next === "clusters" })}
-                    onTakeSlavePart={(own) => void planServerRunKind(() => deploySlave(s.id, own))}
                     onRead={() => void planServerRunKind(() => readTailnet(s.id))}
                     onDisconnect={() => void planServerRunKind(() => disconnectTailnet(s.id))}
                     onReconnect={() => void planServerRunKind(() => reconnectTailnet(s.id))}

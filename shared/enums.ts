@@ -22,24 +22,23 @@ export const SERVER_STATUS = ["bare", "ready", "provisioning",
 export type ServerStatus = (typeof SERVER_STATUS)[number];
 
 // What a server's cluster does for the platform, and nothing else: who operates ArgoCD, Vault,
-// identity and the build plane for whom. "master+slave" is one server doing BOTH jobs — a regular
-// role, not a special case — so the list is a union of two independent parts, not three unrelated
-// literals. A role is never a placement rule and never something an app can see.
-export const SERVER_ROLE = ["master", "slave", "master+slave"] as const; // default "slave"
+// identity and the build plane for whom. A master carries the slave part as well — the shared
+// databases, the service-provisioner, everything that deploys a unit — so a unit can be placed on
+// any cluster of the installation (hostyour-cloud#232); "master+slave" as a word of its own is
+// retired. A role is never a placement rule and never something an app can see.
+export const SERVER_ROLE = ["master", "slave"] as const; // default "slave"
 export type ServerRole = (typeof SERVER_ROLE)[number];
 
 /** The members of SERVER_ROLE that carry the MASTER part. Named once, here, because every reader
- *  that asks "does this server operate the management plane?" must key on the same set: a
- *  hand-spelled `role === "master"` answers NO for a master+slave, and every one of those readers
- *  then does the opposite of what it means — the master row lookup (server/boot/seed-master.ts,
- *  domains/inventory/read.ts) finds nothing, the host-key pin stops being required
- *  (server/executor/context.ts, which refuses to SSH the master unpinned), and redeploy plans its
- *  two-host shape — a second target plus a lock on the master's own branch — for a cluster that is in
- *  fact this manager's own.
+ *  that asks "does this server operate the management plane?" keys on the same set: the master row
+ *  lookup (server/boot/seed-master.ts, domains/inventory/read.ts), the host-key pin
+ *  (server/executor/context.ts, which refuses to SSH the master unpinned), and redeploy's two-host
+ *  shape — a second target plus a lock on the master's own branch — for a cluster that is not this
+ *  manager's own.
  *
  *  READONLY, so Drizzle call sites spread it (`inArray(servers.role, [...MASTER_ROLES])`, which
  *  takes a mutable array) — the copy is the price of a shared constant nothing can mutate. */
-export const MASTER_ROLES = ["master", "master+slave"] as const satisfies readonly ServerRole[];
+export const MASTER_ROLES = ["master"] as const satisfies readonly ServerRole[];
 
 /** Does this role carry the MASTER part? The in-memory twin of MASTER_ROLES for rows already read
  *  and for the browser, which has no query to put the set into. */
@@ -47,12 +46,11 @@ export function isMasterRole(role: ServerRole): boolean {
   return (MASTER_ROLES as readonly ServerRole[]).includes(role);
 }
 
-/** The members of SERVER_ROLE that carry the SLAVE part: the per-slave ArgoCD instance, the shared
- *  databases and the service-provisioner — everything that deploys a unit. A pure master carries
- *  none of it, so the target pickers (domains/units/api.ts targetClusters) key on this set: a unit
- *  onboarded to a server outside it passes every gate and then waits on its ServiceClaims forever.
+/** The members of SERVER_ROLE that carry the SLAVE part: every role, since a master carries it as
+ *  well. Kept as the named set the target pickers (domains/units/api.ts targetClusters) key on, so
+ *  the question "does this cluster deploy units?" has one answer in one place.
  *  READONLY like MASTER_ROLES; Drizzle call sites spread it. */
-export const SLAVE_ROLES = ["slave", "master+slave"] as const satisfies readonly ServerRole[];
+export const SLAVE_ROLES = ["slave", "master"] as const satisfies readonly ServerRole[];
 
 export const STAGE = ["dev", "test", "prod"] as const;
 export type Stage = (typeof STAGE)[number];

@@ -53,7 +53,6 @@ describe("dialAddressLine — the address the master's in-cluster components tak
     // MASTER_LAN_HOST seeds the master's row with a lanHost, so the fallback chain would happily
     // produce a sentence. There is no such address: the master is the one dialling.
     expect(dialAddressLine(server({ role: "master", lanHost: "10.1.1.4" }))).toBeNull();
-    expect(dialAddressLine(server({ role: "master+slave", lanHost: "10.1.1.4" }))).toBeNull();
   });
 });
 

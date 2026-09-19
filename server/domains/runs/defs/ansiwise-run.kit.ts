@@ -416,10 +416,7 @@ export async function composeAnswers(
     switch (name) {
       case "fqdn": return resolved().domain;
       case "stage": return resolved().stage;
-      // The row's role, WHOLE. Flattening "master+slave" to "master" here makes the combined role
-      // unreachable downstream: the branch programs stamp the ApplicationSet selection and rewrite
-      // the cluster map from exactly this answer, so a machine carrying both parts is stamped as a
-      // pure master and never renders the slave part's workloads. The catalogue's programs allow the combined word on their role answers.
+      // The row's role, as the catalogue's programs allow it on their role answers.
       case "role": return server.role;
       case "operator_user": return server.sshUser;
       default: return undefined;

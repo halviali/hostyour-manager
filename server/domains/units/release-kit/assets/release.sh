@@ -100,16 +100,21 @@ stamp_manifest_version() {
   say "package.json declares ${VERSION}"
 }
 
-# Does this unit run on a cluster whose role is $1? A role names every PART the cluster carries,
-# `master+slave` included, while the unit's runsOn names the ONE part it belongs to — so the match is
-# against the parts, exactly as the platform-apps ApplicationSet's In selector matches them, and
-# `every-cluster` belongs on all of them.
+# Does this unit run on a cluster whose role is $1? A role names every PART the cluster carries —
+# a master carries the slave part as well — while the unit's runsOn names the ONE part it belongs
+# to, so the match is against the parts, exactly as the platform-apps ApplicationSet's In selector
+# matches them, and `every-cluster` belongs on all of them.
 runs_here() {
+  local parts
+  case "$1" in
+    master) parts='master slave' ;;
+    *) parts="$1" ;;
+  esac
   for where in $RUNS_ON; do
     [ "$where" = "every-cluster" ] && return 0
-    case "+$1+" in
-      *"+${where}+"*) return 0 ;;
-    esac
+    for part in $parts; do
+      [ "$part" = "$where" ] && return 0
+    done
   done
   return 1
 }

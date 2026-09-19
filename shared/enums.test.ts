@@ -33,14 +33,14 @@ describe("enums (single source of truth)", () => {
     expect(RUN_STATUS).toContain("planning");
   });
 
-  it("SERVER_ROLE is exactly master|slave|master+slave", () => {
-    expect([...SERVER_ROLE]).toEqual(["master", "slave", "master+slave"]);
+  it("SERVER_ROLE is exactly master|slave", () => {
+    expect([...SERVER_ROLE]).toEqual(["master", "slave"]);
   });
 
   it("MASTER_ROLES / isMasterRole cover both members carrying the master part", () => {
-    expect([...MASTER_ROLES]).toEqual(["master", "master+slave"]);
+    expect([...MASTER_ROLES]).toEqual(["master"]);
     expect(isMasterRole("master")).toBe(true);
-    expect(isMasterRole("master+slave")).toBe(true);
+    expect(isMasterRole("slave")).toBe(false);
     expect(isMasterRole("slave")).toBe(false);
   });
 

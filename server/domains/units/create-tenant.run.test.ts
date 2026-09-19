@@ -209,11 +209,10 @@ function seedSlave(): void {
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
 }
 
-// The slave plus the master self-cluster. `masterRole` picks which member of the word list carries
-// the master part, so a test can put a tenant on a master+slave (the placement tests target cls_m).
-function seedClusters(masterRole: "master" | "master+slave" = "master"): void {
+// The slave plus the master self-cluster (the placement tests target cls_m).
+function seedClusters(): void {
   seedSlave();
-  db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: masterRole, status: "healthy" }).run();
+  db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active" }).run();
 }
 
@@ -392,8 +391,8 @@ describe("create-tenant streaming planner", () => {
 
   // Placement is anywhere: the role says who OPERATES the management plane, never where a unit may
   // land. What still gates a target is the cluster's STATUS, which resolveCluster keeps checking.
-  it.each(["master", "master+slave"] as const)("plans a tenant onto the cluster carrying the %s role", async (role) => {
-    seedClusters(role);
+  it("plans a tenant onto the cluster carrying the master role", async () => {
+    seedClusters();
     const result = await makeCreateTenantDef(ports()).planStream!({ clusterId: "cls_m", stage: "prod", subdomain: "a", owner: "o", apps: [] }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;

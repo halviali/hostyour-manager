@@ -60,20 +60,17 @@ function lift(script: string, opening: string): string {
 }
 
 /** Every (runsOn, role) pair the platform can put in front of the rule, and the one answer both
- *  spellings owe it. A role names every PART a cluster carries, so `master+slave` runs both parts'
- *  units; `every-cluster` belongs on all of them; and a branch with no role at all is no cluster's
- *  install branch. */
+ *  spellings owe it. A master carries the slave part as well (hostyour-cloud#232), so it runs both
+ *  parts' units; `every-cluster` belongs on all of them; and a branch with no role at all is no
+ *  cluster's install branch. */
 const CASES: readonly { runsOn: string; role: string; pinned: boolean }[] = [
   { runsOn: "master", role: "master", pinned: true },
   { runsOn: "master", role: "slave", pinned: false },
-  { runsOn: "master", role: "master+slave", pinned: true },
   { runsOn: "slave", role: "slave", pinned: true },
-  { runsOn: "slave", role: "master", pinned: false },
-  { runsOn: "slave", role: "master+slave", pinned: true },
+  { runsOn: "slave", role: "master", pinned: true },
   { runsOn: "every-cluster", role: "master", pinned: true },
   { runsOn: "every-cluster", role: "slave", pinned: true },
-  { runsOn: "every-cluster", role: "master+slave", pinned: true },
-  // A part the role only begins with is not a part it carries: "+mastermind+" holds no "+master+".
+  // A word the role only begins with is not the role: "mastermind" carries no part.
   { runsOn: "master", role: "mastermind", pinned: false },
   { runsOn: "master", role: "", pinned: false },
 ];

@@ -22,8 +22,8 @@ describe("serveIdentity — the three facts a serve cannot default", () => {
   it("carries a role of two parts as it stands, because that is what the machine is", () => {
     // A machine can hold both parts; the engine reads the role's parts and a program naming either
     // applies. Splitting or shortening it here would be this module deciding what a machine is.
-    expect(serveIdentity({ role: "master+slave", fqdn: "apps3.digitacloud.app", stage: "test" }))
-      .toBe("--role master+slave --fqdn apps3.digitacloud.app --stage test");
+    expect(serveIdentity({ role: "master", fqdn: "apps3.digitacloud.app", stage: "test" }))
+      .toBe("--role master --fqdn apps3.digitacloud.app --stage test");
   });
 
   it("says the role alone for a host that carries no cluster, because a repair reaches such hosts", () => {

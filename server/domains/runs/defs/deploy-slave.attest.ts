@@ -45,12 +45,9 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
       const { domain, stage } = target.resolve(ctx.db);
       const server = loadServer(ctx.db, sid);
       // The one-master invariant, asserted at step 0 because everything a SLAVE install does on the
-      // master side — the branch cut, the map, the registration — is meaningless without one. It
-      // also decides which shape the row assertions below take: the master taking the SLAVE PART is
-      // the one target whose machine already carries a cluster, and that cluster is the row this run
-      // works on rather than one it allocates.
-      const master = loadMaster(ctx.db);
-      const takingSlavePart = master.id === sid;
+      // master side — the branch cut, the map, the registration — is meaningless without one. The
+      // master itself is never this run's target: the plan refused it (deploy-slave.ts refuseMaster).
+      loadMaster(ctx.db);
 
       // ---- name/domain agreement (the split-brain guard). The run keys the master-side
       // resources it drives over SSH on server.name (project/AppProject <name>, ES paths
@@ -91,17 +88,8 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
       // that already runs the master part, on the master's own domain and stage. The row it is
       // added to is therefore the live one, and a master whose cluster is anything else is a master
       // this run has nothing to add the part to.
-      let mastersCluster: typeof clusters.$inferSelect | undefined;
       let resume: { clusterId: string; slaveId: number } | undefined;
-      if (takingSlavePart) {
-        if (!byDomain) {
-          throw errValidation(`${server.name} holds the master role and this manager records no cluster for ${domain} — the slave part is added to the master's OWN cluster, and there is none to add it to`);
-        }
-        if (byDomain.status !== "active") {
-          throw errValidation(`cluster ${byDomain.id} for ${domain} is '${byDomain.status}' — the master takes the slave part on its own LIVE cluster, which is the one its platform already runs from`);
-        }
-        mastersCluster = byDomain;
-      } else if (byDomain) {
+      if (byDomain) {
         const startable = byDomain.status === "planned" || byDomain.status === "provisioning" || redeployActive;
         if (!startable) {
           throw errValidation(`cluster ${byDomain.id} for ${domain} is '${byDomain.status}' — deploy-slave starts on a planned/provisioning cluster${byDomain.status === "active" ? "; rebuilding the machine layer of a LIVE cluster in place is the redeploy run kind" : ""}`);
@@ -112,14 +100,12 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
         }
         resume = { clusterId: byDomain.id, slaveId: byDomain.slaveId };
       }
-      // WHICH SERVER STATES THIS RUN MAY START ON, per path. The master sits at 'healthy' — its own
-      // platform is running. A live slave being re-reconciled sits there too, and a resuming one at
-      // ready/provisioning. A FRESH install admits 'bare' beside 'ready', because first contact is a
-      // step of this run: a machine this manager has never logged in to is exactly what the list
-      // below establishes, and refusing it here would demand a preparation no run kind performs.
-      const okStatuses = takingSlavePart
-        ? ["healthy"]
-        : redeployActive ? ["healthy", "ready", "provisioning"] : resume ? ["ready", "provisioning"] : ["bare", "ready"];
+      // WHICH SERVER STATES THIS RUN MAY START ON, per path. A live slave being re-reconciled sits
+      // at 'healthy', a resuming one at ready/provisioning. A FRESH install admits 'bare' beside
+      // 'ready', because first contact is a step of this run: a machine this manager has never
+      // logged in to is exactly what the list below establishes, and refusing it here would demand
+      // a preparation no run kind performs.
+      const okStatuses = redeployActive ? ["healthy", "ready", "provisioning"] : resume ? ["ready", "provisioning"] : ["bare", "ready"];
       if (!okStatuses.includes(server.status)) throw errValidation(`server ${server.name} is '${server.status}' — must be ${okStatuses.join("/")}`);
 
       // ---- THE DOOR, and not ctx.ssh(): this is the first command the run sends, and on a machine
@@ -154,12 +140,8 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
       const outcome = await attestMachineId({ db: ctx.db, session, serverId: sid, signal: ctx.signal, log: (l) => ctx.log("meta", l) });
 
       // ---- one localTx: allocate the ordinal, insert/flip the cluster row, flip the server.
-      // clusters_slave_id_uq guarantees the ordinal is never reused across rebuild cycles. The
-      // master's path writes nothing at all — its row is the live one and stays exactly as it is —
-      // so it takes no transaction rather than an empty one.
-      const result = mastersCluster
-        ? { clusterId: mastersCluster.id, slaveId: mastersCluster.slaveId, resumed: true }
-        : localTx(ctx, (tx) => {
+      // clusters_slave_id_uq guarantees the ordinal is never reused across rebuild cycles.
+      const result = localTx(ctx, (tx) => {
           if (redeployActive && resume) {
             // Live re-reconcile: leave cluster 'active' + server 'healthy' untouched (the
             // idempotent steps reconcile the infra; register re-affirms at the end). No status
@@ -182,9 +164,7 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
           return { clusterId, slaveId, resumed: false };
         });
       ctx.checkpoint({ ...result, machineId: outcome.machineId, machineIdAction: outcome.action });
-      ctx.log("meta", mastersCluster
-        ? `${server.name} holds the master role and keeps its own live cluster ${result.clusterId} for ${domain} — the slave part is added to that cluster, so no ordinal is allocated and no row is moved`
-        : redeployActive
+      ctx.log("meta", redeployActive
           ? `re-reconciling LIVE slave ${server.name} in place (cluster ${result.clusterId}, slaveId ${result.slaveId} kept; status stays active) — idempotent re-run to pick up installer changes`
           : result.resumed
             ? `resuming cluster ${result.clusterId} for ${domain} (slaveId ${result.slaveId} kept — never re-allocated)`

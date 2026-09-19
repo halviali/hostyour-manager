@@ -158,8 +158,8 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
     placeAnsiwiseStep(target, ports),
     ansiwiseProgramStep(target, "deploy-host", ports, { extra: hostAnswers(params.serverId, ports) }),
     // READ OFF THE MACHINE'S OWN CLUSTER MAP, never asked of a person, and this is the same reader
-    // the slave arm below and cluster-deploy-slave's master arm hand these two programs
-    // (deploy-slave.ts slaveMachineAnswers, deploy-slave.master.ts). What it answers is the
+    // the slave arm below hands these two programs (deploy-slave.ts slaveMachineAnswers). What it
+    // answers is the
     // INSTALLATION's own: the certificate authority, the mailbox it writes to, the cluster that
     // keeps the books, the cluster the registry stands on, and whatever the machine's mount table
     // says about a data disk. AN INSTALLATION RECORDS EACH OF THOSE ONCE, so asking a person for

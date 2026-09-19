@@ -261,18 +261,9 @@ describe("consumer API", () => {
     expect(rows[0]).toMatchObject({ name: "acme", domain: "s1.example", provenance: "manager" });
   });
 
-  it("targets lists the active clusters whose server carries the slave part — a pure master is not one", async () => {
-    seedCluster(); // cls_1 on srv_1, role "master": no slave tier, nothing to deploy a unit with
+  it("targets lists the active clusters whose server carries the slave part — the master among them", async () => {
+    seedCluster(); // cls_1 on srv_1, role "master": carries the slave part from its own installation
     seedSlaveCluster(); // cls_2 on srv_2, role "slave"
-    const { app, cookie } = await make(true);
-    const rows = (await (await app.request("/api/consumers/targets", authed(cookie))).json()) as Array<{ id: string }>;
-    expect(rows.map((r) => r.id)).toEqual(["cls_2"]);
-  });
-
-  it("targets lists the master's self-cluster once its server is master+slave", async () => {
-    seedCluster();
-    seedSlaveCluster();
-    db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, "srv_1")).run(); // what cluster-deploy-slave on the master does
     const { app, cookie } = await make(true);
     const rows = (await (await app.request("/api/consumers/targets", authed(cookie))).json()) as Array<{ id: string }>;
     expect(rows.map((r) => r.id).sort()).toEqual(["cls_1", "cls_2"]);
@@ -446,10 +437,7 @@ describe("tenant API", () => {
     seedSlaveCluster(); // cls_2 on srv_2 (role "slave")
     const { app, cookie } = await makeTenant(true);
     const rows = (await (await app.request("/api/tenants/targets", authed(cookie))).json()) as Array<{ id: string }>;
-    expect(rows.map((r) => r.id)).toEqual(["cls_2"]);
-    db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, "srv_1")).run();
-    const both = (await (await app.request("/api/tenants/targets", authed(cookie))).json()) as Array<{ id: string }>;
-    expect(both.map((r) => r.id).sort()).toEqual(["cls_1", "cls_2"]);
+    expect(rows.map((r) => r.id).sort()).toEqual(["cls_1", "cls_2"]);
   });
 
   it("targets filters on cluster STATUS beside the role: a rebuilding slave is not offered", async () => {
@@ -458,7 +446,7 @@ describe("tenant API", () => {
     db.db.update(clusters).set({ status: "rebuilding" }).where(eq(clusters.id, "cls_2")).run();
     const { app, cookie } = await makeTenant(true);
     const rows = (await (await app.request("/api/tenants/targets", authed(cookie))).json()) as Array<{ id: string }>;
-    expect(rows).toEqual([]);
+    expect(rows.map((r) => r.id)).toEqual(["cls_1"]);
   });
 
   it("tenant-suspend: 201 + runId for an existing tenant", async () => {

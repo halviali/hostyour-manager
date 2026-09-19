@@ -82,6 +82,13 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     expect(plan.planHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("refuses to plan onto the master by name: it carries the slave part from its own installation", async () => {
+    const { executor } = await makeHarness();
+    const err = await executor.plan("cluster-deploy-slave", { ...PARAMS, serverId: MASTER_ID, domain: "m1.example.com" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).message).toMatch(/stands at role master: a master carries the slave part from its own installation.*cluster-redeploy/);
+  });
+
   it("refuses to plan without a master server (the management plane has nowhere to live)", async () => {
     const { executor } = await makeHarness({ master: false });
     const err = await executor.plan("cluster-deploy-slave", PARAMS).catch((e: unknown) => e);

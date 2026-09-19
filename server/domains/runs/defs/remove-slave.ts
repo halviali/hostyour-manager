@@ -51,11 +51,10 @@ import { restorePasswordLoginCleanup } from "./password-login.kit.ts";
 // fails the run for a machine that is gone, and none of them guesses that a machine is gone from a
 // row: `status` says where a deployment stands and is written by runs that never opened a session.
 //
-// A MASTER+SLAVE IS REFUSED, by name, at step 0. Taking the slave part off a machine that also
-// carries the master part leaves a live master whose branch and machine layer were installed under
-// the combined role, so it needs the branch regenerated and the machine layer re-run — which this
-// run kind does none of. It is a real case (cluster-deploy-slave's master arm produces exactly that
-// machine), which is why the refusal is here and not left to be discovered on the master.
+// THE MASTER IS REFUSED, by name, at step 0. It carries the slave part from its own installation
+// (hostyour-cloud#232), and taking that part off it would leave a live master whose branch and
+// machine layer were installed with it — a regeneration and a machine-layer re-run, which this run
+// kind does none of. The refusal is here and not left to be discovered on the master.
 
 export const RemoveSlaveParams = z.object({
   serverId: z.string().startsWith("srv_"),
@@ -77,9 +76,9 @@ function resolveRemoval(db: Db, serverId: string): {
   // A machine carrying the master part keeps its cluster whatever else it is; see the file header.
   if (isMasterRole(server.role)) {
     throw errValidation(
-      `${server.name} carries the master part (role ${server.role}) — cluster-remove-slave takes a PURE slave out of the ` +
-      "installation, and taking the slave part off a master leaves a live master whose branch and machine layer were " +
-      "installed under the combined role; that is a regeneration and a machine-layer re-run, which this run kind does not do",
+      `${server.name} carries the master part (role ${server.role}) — cluster-remove-slave takes a slave out of the ` +
+      "installation, and a master carries the slave part from its own installation; taking it off would be " +
+      "a regeneration and a machine-layer re-run, which this run kind does not do",
     );
   }
   const cluster = db.select().from(clusters).where(eq(clusters.serverId, serverId)).get();

@@ -17,7 +17,7 @@
 //   fqdn         the cluster's public FQDN == its install branch == clusters.domain.
 //   stage        dev | test | prod. A cluster carries exactly one, and a registration for stage X
 //                may only point at a cluster marked X.
-//   role         master | slave | master+slave — cluster MANAGEMENT only: who operates ArgoCD,
+//   role         master | slave — cluster MANAGEMENT only: who operates ArgoCD,
 //                Vault, identity and the build plane for whom. Never a placement rule.
 //   books-cluster  the domain of the cluster that keeps the books — the cluster's own for a
 //                master, the master's for a slave. The slaves ApplicationSet SELECTS on this key

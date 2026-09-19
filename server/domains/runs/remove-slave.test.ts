@@ -78,16 +78,13 @@ describe("cluster-remove-slave", () => {
     expect(logs.join("\n")).toContain("every act of this run is on m1");
   });
 
-  it("REFUSES a machine that also carries the master part, naming what such a removal would need", async () => {
-    // The master arm of cluster-deploy-slave produces exactly this machine, so the case is real.
-    // Taking the slave part off it leaves a live master whose branch and machine layer were
-    // installed under the combined role — a regeneration and a machine-layer re-run, neither of
-    // which this run kind does.
+  it("REFUSES the master, naming what such a removal would need", async () => {
+    // A master carries the slave part from its own installation; taking it off would be a
+    // regeneration and a machine-layer re-run, neither of which this run kind does.
     const h = await makeHarness();
     seedLiveSlave(h);
-    h.db.db.update(servers).set({ role: "master+slave" }).where(eq(servers.id, MASTER_ID)).run();
     await expect(stepOf(h, "attest-target", MASTER_ID).run(hostedStepCtx(h)))
-      .rejects.toThrow(/carries the master part \(role master\+slave\).*regeneration and a machine-layer re-run/s);
+      .rejects.toThrow(/carries the master part \(role master\).*regeneration and a machine-layer re-run/s);
   });
 
   it("REFUSES a server this manager records no cluster for", async () => {

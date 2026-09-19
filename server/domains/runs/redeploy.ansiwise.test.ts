@@ -537,7 +537,7 @@ describe.skipIf(bin === undefined)("the manager's run kinds over the machine's o
     // installation keep records saying dev: measured on apps6 in September 2026, whose branch-cut
     // record 20260903T220006Z-227727-07d5f8a7 carries "stage": "dev" while its own map says prod.
     for (const c of h.hosts.log.filter((l) => isServe(l.command)).map((l) => l.command)) {
-      expect(c, c).toContain("--role master+slave --fqdn m1.example.com --stage prod");
+      expect(c, c).toContain("--role master --fqdn m1.example.com --stage prod");
     }
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "cat /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);
     expect(h.hosts.log.some((l) => l.host === "m1.example.com" && l.command === "rm -f /tmp/ansiwise-tailnet-join-key-m1")).toBe(true);

@@ -107,10 +107,10 @@ function seedSecondCluster(): void {
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
 }
 
-/** A cluster carrying the MASTER part. `role` picks which member — a pure master, or the union role a
- *  tenant is equally at home on. Either way the purge must reach the cluster-side deletes. */
-function seedMasterCluster(role: "master" | "master+slave" = "master"): void {
-  db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "1.2.3.4", sshUser: "root", role, status: "healthy" }).run();
+/** A cluster carrying the MASTER part, on which a tenant is equally at home; the purge must reach the
+ *  cluster-side deletes there. */
+function seedMasterCluster(): void {
+  db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active" }).run();
 }
 
@@ -231,12 +231,12 @@ describe("tenant-purge plan", () => {
     expect(result.params).toMatchObject({ stage: "dev", target: { stage: "dev", cluster: "s1" } });
   });
 
-  it.each(["master", "master+slave"] as const)("PLANS on a cluster carrying the %s role and still reaches the cluster-side deletes", async (role) => {
+  it("PLANS on a cluster carrying the master role and still reaches the cluster-side deletes", async () => {
     // Placement is not a function of the role: a tenant runs wherever it was created, so a purge must be
     // able to reap it there. The two cluster-side deletes are what makes purge the removal that finishes,
     // and the manager reaches operator.hostyour.cloud on such a cluster through its own ServiceAccount
     // (ClusterRole manager-tenant-reaper) rather than a harvested bearer.
-    seedMasterCluster(role);
+    seedMasterCluster();
     const def = makeTenantPurgeDef(ports(new TenantRegistrations(new FakePlatformRepo())));
     const result = await def.planStream!({ guid: GUID, stage: "prod", clusterId: "cls_m" }, planCtx());
     expect(result.outcome).toBe("planned");

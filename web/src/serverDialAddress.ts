@@ -31,11 +31,10 @@ export function sshAddressLine(server: ServerView): string {
 /** Which address the master's in-cluster components will dial this machine's kube-apiserver on, or
  *  `null` for a machine that is never dialled.
  *
- *  A role carrying the master part has no such address and cannot be given one: install.sh refuses
- *  --api-host for `master` (the master is the one dialling) and for `master+slave` (its own root
- *  ArgoCD is its instance, so nothing dials it from outside), and no cluster map ever carries an
- *  apiHost for either. Printing a dial address there would invent a fact — on the one row every
- *  installation always has.
+ *  The master has no such address and cannot be given one: install.sh refuses --api-host for
+ *  `master` (the master is the one dialling, and its own root ArgoCD is its instance, so nothing
+ *  dials it from outside), and no cluster map ever carries an apiHost for it. Printing a dial
+ *  address there would invent a fact — on the one row every installation always has.
  *
  *  For a slave the line always names WHICH of the three addresses was taken — the fallback chain is
  *  tailnetHost -> lanHost -> host — because an operator who cannot see which arm won cannot tell a

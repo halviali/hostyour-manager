@@ -114,14 +114,14 @@ function Write-StagePin {
   return $touched
 }
 
-# Does this unit run on a cluster whose role is $Role? A role names every PART the cluster carries,
-# master+slave included, while runsOn names the ONE part a workload belongs to — so the match is
-# against the parts, exactly as the platform-apps ApplicationSet's In selector matches them, and
-# every-cluster belongs on all of them. A unit answers for every build it has: any one of them
-# running on that cluster puts the pin on its branch.
+# Does this unit run on a cluster whose role is the one given? A role names every PART the cluster
+# carries — a master carries the slave part as well — while runsOn names the ONE part a workload
+# belongs to, so the match is against the parts, exactly as the platform-apps ApplicationSet's In
+# selector matches them, and every-cluster belongs on all of them. A unit answers for every build
+# it has: any one of them running on that cluster puts the pin on its branch.
 function Test-RunsHere {
   param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Role)
-  $parts = $Role -split '\+'
+  $parts = if ($Role -eq 'master') { @('master', 'slave') } else { @($Role) }
   foreach ($where in $runsOn) {
     if ($where -eq 'every-cluster') { return $true }
     if ($parts -contains $where) { return $true }
