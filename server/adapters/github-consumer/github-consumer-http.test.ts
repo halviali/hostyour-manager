@@ -30,12 +30,31 @@ describe("github-consumer adapter — ensureHook", () => {
     expect(await client.ensureHook(ensureInput)).toEqual({ created: true, id: 99, staleRemoved: 0 });
   });
 
-  it("is idempotent — an existing hook at the target URL is returned as {created:false} (no POST)", async () => {
-    // No POST route: a create attempt would throw "unexpected fetch", proving the adapter did not create.
+  it("re-sets an existing hook at the target URL — PATCHed whole with this installation's secret, never left as found (#198)", async () => {
+    // No POST route: a create attempt would throw "unexpected fetch". The PATCH is the only write, and
+    // its body carries the secret: a hook that outlived a reinstall of the build plane signs with a
+    // secret the new listener refuses, and GitHub never shows which secret a hook holds.
+    const bodies: string[] = [];
+    const fetchImpl = stubFetch({
+      "GET /repos/x/acme/hooks?per_page=100&page=1": { status: 200, body: [{ id: 7, config: { url: TARGET } }] },
+      "PATCH /repos/x/acme/hooks/7": { status: 200, body: { id: 7 } },
+    });
+    const recording = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "PATCH") bodies.push(String(init.body));
+      return fetchImpl(url, init);
+    }) as unknown as typeof fetch;
+    const client = new HttpGitHubConsumer({ fetchImpl: recording });
+    expect(await client.ensureHook(ensureInput)).toEqual({ created: false, id: 7, staleRemoved: 0 });
+    expect(bodies).toHaveLength(1);
+    expect(JSON.parse(bodies[0]!)).toEqual({ name: "web", active: true, events: ["push"], config: { url: TARGET, content_type: "json", secret: "hmac", insecure_ssl: "0" } });
+  });
+
+  it("a PATCH the PAT may not make is the same scope refusal as a create it may not make", async () => {
     const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
       "GET /repos/x/acme/hooks?per_page=100&page=1": { status: 200, body: [{ id: 7, config: { url: TARGET } }] },
+      "PATCH /repos/x/acme/hooks/7": { status: 404, body: { message: "Not Found" } },
     }) });
-    expect(await client.ensureHook(ensureInput)).toEqual({ created: false, id: 7, staleRemoved: 0 });
+    await expect(client.ensureHook(ensureInput)).rejects.toThrow(/cannot update a webhook .* admin:repo_hook/);
   });
 
   it("REPLACES a stale EventListener hook: another host on the /github path is deleted, the consumer's own hook untouched", async () => {

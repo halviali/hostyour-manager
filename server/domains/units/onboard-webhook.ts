@@ -100,7 +100,7 @@ export function setupWebhookStep(ports: OnboardPorts, p: OnboardParams): Step {
         const plane = `; that host is the build plane named in ${p.domain}'s cluster map`;
         ctx.log("meta", created
           ? `build webhook created on ${owner}/${repo} (id ${id}) → ${targetUrl} (push, application/json, SSL verify on)${stale}${plane}`
-          : `build webhook already present on ${owner}/${repo} (id ${id}) → ${targetUrl} — left as-is (idempotent)${stale}${plane}`);
+          : `build webhook already present on ${owner}/${repo} (id ${id}) → ${targetUrl} — re-set to this installation's secret and events (a hook that outlived a reinstall of the build plane signs with a secret the listener refuses)${stale}${plane}`);
       } catch (err) {
         if (err instanceof WebhookScopeError) {
           throw errValidation(`onboard "${p.consumerName}" cannot manage the build webhook on ${owner}/${repo}: the consumer PAT lacks the admin:repo_hook scope (GitHub answered HTTP ${err.status ?? "403/404"} on /hooks). Provide a PAT with admin:repo_hook and re-onboard — no hook, no build.`);

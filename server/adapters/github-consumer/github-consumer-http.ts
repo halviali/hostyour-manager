@@ -115,23 +115,25 @@ export class HttpGitHubConsumer implements GitHubConsumer {
       if (res.ok) { staleRemoved++; continue; }
       if (res.status !== 404) throw new GitHubConsumerError(`GitHub DELETE ${base}/hooks/${h.id} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
     }
-    const match = existing.find((h) => h.config?.url === input.targetUrl);
-    if (match) return { created: false, id: match.id, staleRemoved };
-    const res = await this.send(input.token, `${base}/hooks`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name: "web",
-        active: true,
-        events: input.events,
-        config: { url: input.targetUrl, content_type: input.contentType, secret: input.secret, insecure_ssl: "0" },
-      }),
-      ...(input.signal ? { signal: input.signal } : {}),
+    // The same body creates and re-sets: a hook found at the target is PATCHed whole rather than
+    // trusted, because the one thing GitHub never shows is its secret, and a hook that outlived a
+    // reinstall of the build plane signs every delivery with a secret the new listener refuses
+    // (seen on apps7, #198). The secret is in the body and nowhere else.
+    const body = JSON.stringify({
+      name: "web",
+      active: true,
+      events: input.events,
+      config: { url: input.targetUrl, content_type: input.contentType, secret: input.secret, insecure_ssl: "0" },
     });
+    const match = existing.find((h) => h.config?.url === input.targetUrl);
+    const path = match ? `${base}/hooks/${match.id}` : `${base}/hooks`;
+    const method = match ? "PATCH" : "POST";
+    const res = await this.send(input.token, path, { method, headers: { "content-type": "application/json" }, body, ...(input.signal ? { signal: input.signal } : {}) });
     if (res.status === 403 || res.status === 404) {
-      throw new WebhookScopeError(`the consumer PAT cannot create a webhook on ${input.owner}/${input.repo} (HTTP ${res.status}) — it needs the admin:repo_hook scope`, res.status);
+      throw new WebhookScopeError(`the consumer PAT cannot ${match ? "update" : "create"} a webhook on ${input.owner}/${input.repo} (HTTP ${res.status}) — it needs the admin:repo_hook scope`, res.status);
     }
-    if (!res.ok) throw new GitHubConsumerError(`GitHub POST ${base}/hooks → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+    if (!res.ok) throw new GitHubConsumerError(`GitHub ${method} ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+    if (match) return { created: false, id: match.id, staleRemoved };
     const created = (await res.json()) as { id: number };
     return { created: true, id: created.id, staleRemoved };
   }

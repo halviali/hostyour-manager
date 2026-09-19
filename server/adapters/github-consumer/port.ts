@@ -58,7 +58,10 @@ export interface EnsureHookInput {
 }
 
 export interface EnsureHookResult {
-  /** true ⇒ this call created the hook; false ⇒ the current hook (same targetUrl) already existed. */
+  /** true ⇒ this call created the hook; false ⇒ the current hook (same targetUrl) already existed
+   *  and was RE-SET to this installation's secret, events and delivery settings (#198): GitHub never
+   *  shows a hook's secret, and a hook that outlived a reinstall of the build plane carries the
+   *  secret of a listener that no longer exists — every delivery signed with it is refused. */
   created: boolean;
   /** The GitHub hook id (the created one, or the pre-existing match). */
   id: number;

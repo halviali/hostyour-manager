@@ -101,8 +101,8 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   }
 
   /** The hooks currently present on a repo (test assertion helper). */
-  hooksFor(owner: string, repo: string): ReadonlyArray<{ id: number; targetUrl: string }> {
-    return (this.hooks.get(this.key(owner, repo)) ?? []).map((h) => ({ id: h.id, targetUrl: h.targetUrl }));
+  hooksFor(owner: string, repo: string): ReadonlyArray<{ id: number; targetUrl: string; secret: string; events: string[] }> {
+    return (this.hooks.get(this.key(owner, repo)) ?? []).map((h) => ({ id: h.id, targetUrl: h.targetUrl, secret: h.secret, events: h.events }));
   }
 
   async ensureHook(input: EnsureHookInput): Promise<EnsureHookResult> {
@@ -113,6 +113,11 @@ export class FakeGitHubConsumer implements GitHubConsumer {
     const kept = list.filter((h) => !stale.includes(h));
     const match = kept.find((h) => h.targetUrl === input.targetUrl);
     if (match) {
+      // Re-set whole, as the HTTP client PATCHes it: the secret and the events are this
+      // installation's from here on, whatever the hook carried before (#198).
+      match.secret = input.secret;
+      match.events = input.events;
+      match.contentType = input.contentType;
       this.hooks.set(this.key(input.owner, input.repo), kept);
       return { created: false, id: match.id, staleRemoved: stale.length };
     }

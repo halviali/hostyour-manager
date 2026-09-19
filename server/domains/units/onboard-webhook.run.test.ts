@@ -111,14 +111,15 @@ describe("onboard setup-webhook step", () => {
     expect(logs.some((l) => l.includes("1 stale EventListener hook(s) on old entry points removed"))).toBe(true);
   });
 
-  it("is idempotent — an existing hook at the target URL is left as-is (created:false, no new create)", async () => {
+  it("re-sets an existing hook at the target URL to this installation's secret (created:false, no new create) — #198", async () => {
     const github = new FakeGitHubConsumer();
-    github.seedHook("x", "acme", TARGET); // a hook already there (e.g. a re-onboard)
+    github.seedHook("x", "acme", TARGET); // a hook already there: a re-onboard, or one that outlived a reinstall of the build plane
     const logs: string[] = [];
     await step({ github, webhookSecret: "hmac_test", webhookSubdomain: "build" }).run(ctx(logs));
     expect(github.created).toHaveLength(0); // nothing NEW created
     expect(github.hooksFor("x", "acme")).toHaveLength(1); // still exactly one
-    expect(logs.some((l) => l.includes("already present") && l.includes("idempotent"))).toBe(true);
+    expect(github.hooksFor("x", "acme")[0]!.secret).toBe("hmac_test"); // and it signs with THIS installation's secret now
+    expect(logs.some((l) => l.includes("already present") && l.includes("re-set to this installation's secret"))).toBe(true);
   });
 
   it("FAILS LOUD when the consumer PAT lacks admin:repo_hook (WebhookScopeError → a clear ask)", async () => {
