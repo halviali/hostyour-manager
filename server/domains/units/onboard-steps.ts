@@ -55,6 +55,30 @@ export function markRemovingCleanup(ports: OnboardPorts, p: DeployableOnboardPar
   };
 }
 
+/** The LAST compensation of a rolled-back deployable onboarding: the apps row record-provisional wrote
+ *  as INTENT is settled "offboarded" — the soft, re-onboardable state an offboard leaves, the same
+ *  one the create-tenant abort settles its row to — so no consumer nothing serves stands on the
+ *  Consumers page as "provisioning" after everything behind it is gone (#199). Only a row still
+ *  "provisioning" is touched: the abort's precondition already refused a live one, and a row another
+ *  run has moved since is that run's. */
+export function settleProvisionalRowCleanup(_ports: OnboardPorts, p: DeployableOnboardParams): Cleanup {
+  return {
+    name: "settle-provisional-row",
+    title: "Record the rolled-back consumer as offboarded",
+    run: async (ctx) => {
+      const settled = localTx(ctx, (tx) => {
+        const row = tx.select({ id: apps.id, status: apps.status }).from(apps).where(and(eq(apps.name, p.consumerName), eq(apps.stage, p.stage))).get();
+        if (!row || row.status !== "provisioning") return row?.status ?? null;
+        tx.update(apps).set({ status: "offboarded", lastRunId: ctx.runId }).where(eq(apps.id, row.id)).run();
+        return "offboarded";
+      });
+      ctx.log("meta", settled === "offboarded"
+        ? `consumer ${p.consumerName} (${p.stage}) recorded as offboarded — the provisioning row of this rolled-back onboarding is settled (row kept, re-onboardable)`
+        : `consumer ${p.consumerName} (${p.stage}) row ${settled === null ? "absent" : `stands ${settled}`} — not this rollback's to settle`);
+    },
+  };
+}
+
 /** The compensation between the mark above and the registration removal below: wait for the master
  *  ArgoCD to actually prune the generated Application, while its AppProject still stands. Removing the
  *  file over a standing Application prunes the project it needs for its own deletion, and ArgoCD then
@@ -430,10 +454,14 @@ export function upsertAppRow(tx: Db, values: AppRowValues, opts: { keepStatusOnU
     // keepStatusOnUpdate is the provisional phase's flag. A resumed run re-runs record-provisional
     // against a row record-inventory may ALREADY have settled to "active" — or a later suspend moved
     // to "suspended" — and writing "provisioning" over that would paint a serving consumer as
-    // unfinished. Every DESCRIPTIVE column is still rewritten, clusterId included, because a resume
-    // must converge the row onto the params it is actually running.
+    // unfinished. A row standing "offboarded" is the one settled state a NEW onboarding writes over:
+    // it is the soft, re-onboardable state an offboard or a rolled-back onboarding leaves (#199), and
+    // a re-onboard onto it is a new intent, recorded as such. Every DESCRIPTIVE column is still
+    // rewritten, clusterId included, because a resume must converge the row onto the params it is
+    // actually running.
     const { status: _status, ...withoutStatus } = values;
-    tx.update(apps).set(opts.keepStatusOnUpdate ? withoutStatus : values).where(eq(apps.id, existing.id)).run();
+    const keep = opts.keepStatusOnUpdate && existing.status !== "offboarded";
+    tx.update(apps).set(keep ? withoutStatus : values).where(eq(apps.id, existing.id)).run();
   } else {
     tx.insert(apps).values({ id: appId(), ...values }).run();
   }

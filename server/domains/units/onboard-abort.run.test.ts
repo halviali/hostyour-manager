@@ -290,8 +290,12 @@ describe("aborting an onboard whose consumer never came up", () => {
       { name: "cleanup:delete-repo-credential", status: "ok" },
       { name: "cleanup:remove-dns", status: "ok" },
       { name: "cleanup:remove-consumer-webhook", status: "ok" },
+      { name: "cleanup:settle-provisional-row", status: "ok" },
     ]);
     expect(await h.registrations.readRegistration("prod", "acme")).toBeNull();
+    // The intent the row recorded is settled LAST: the Consumers page shows no "provisioning"
+    // consumer that nothing serves, and the row stays for a re-onboard (#199).
+    expect(appRow()?.status).toBe("offboarded");
     // The Vault entry THIS run created is destroyed, so the next onboard reaches created:true
     // instead of inheriting this run's keys under the cas=0 create-only seed.
     expect(h.seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);

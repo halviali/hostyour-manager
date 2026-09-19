@@ -217,6 +217,23 @@ describe("onboard run definition", () => {
   // The check step's drift belt (builds/secrets/activation moved since approval) is covered in its
   // dedicated sibling, onboard-check.run.test.ts; the fqdn leg in onboard-fqdn.run.test.ts.
 
+  // The row's status on a re-onboard (#199): an "offboarded" row — what an offboard or a rolled-back
+  // onboarding leaves — is a new intent and reads "provisioning" again; "active" is kept, because a
+  // resumed run re-runs record-provisional against a row record-inventory already settled.
+  it("record-provisional writes provisioning over an offboarded row and keeps an active one", async () => {
+    seedClusters();
+    const prt = ports();
+    const p = params();
+    const step = makeOnboardDef(prt).steps(p).find((s) => s.name === "record-provisional")!;
+    const row = () => db.db.select({ status: apps.status }).from(apps).where(eq(apps.name, "acme")).get();
+    for (const [before, after] of [["offboarded", "provisioning"], ["active", "active"]] as const) {
+      db.db.delete(apps).run();
+      db.db.insert(apps).values({ id: `app_${before}`, clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: p.repoURL, chartPath: "deploy/chart", repoCredentialId: "cred_x", provenance: "manager", status: before }).run();
+      await step.run(ctx(p, step.name, []));
+      expect(row()?.status).toBe(after);
+    }
+  });
+
   it("provision-dns fails loud without a wired provider, and on a cluster with no address record of its own", async () => {
     const p = params();
     const noDns = ports();

@@ -25,7 +25,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { AppStatus } from "../../../shared/enums.ts";
 import {
   markRemovingCleanup, removeRegistrationCleanup, watchConsumerPruneCleanup, deleteSmtpOpsGrantCleanup,
-  deleteRepoCredentialCleanup, removeDnsCleanup, removeBuildRegistrationCleanup,
+  deleteRepoCredentialCleanup, removeDnsCleanup, removeBuildRegistrationCleanup, settleProvisionalRowCleanup,
 } from "./onboard-steps.ts";
 import { removeWebhookCleanup } from "./onboard-webhook.ts";
 // Type-only, so there is no runtime import cycle back into onboard.run.ts — the create-tenant-abort.ts shape.
@@ -48,6 +48,8 @@ export function deployableOnboardCleanups(ports: OnboardPorts, p: DeployableOnbo
     deleteRepoCredentialCleanup(ports, p),
     removeDnsCleanup(ports, p),
     removeWebhookCleanup(ports, p),
+    // LAST, after every mutation behind the row is undone: the intent the row recorded is settled.
+    settleProvisionalRowCleanup(ports, p),
   ];
 }
 
