@@ -1,15 +1,17 @@
-// WHICH IDENTITY READS AND WRITES A CONSUMER REPOSITORY — the one rule, measured (#194).
+// WHICH IDENTITY READS AND WRITES A CONSUMER REPOSITORY — the one rule, measured (#194, #201).
 //
-// The platform's GitHub App (adapters/github-app) is installed in ONE organisation on every
-// repository of it. Where the App's installation reaches a repository, the App is that repository's
-// identity: no PAT is asked, the credential row stores no token, and the store mints an installation
-// token at every open (security/store.ts). Where it does not — a consumer whose repository lives in
-// another organisation, the external case — the repository's own PAT is the identity, exactly as
-// before the App existed. NOT decided off an owner string: an installation is a fact GitHub holds
-// (GET /repos/{owner}/{repo}/installation), so it is asked, per repository, at the moment the
-// identity is chosen. Two callers choose one: the onboard POST and its prefill (api.ts,
+// A PAT handed in is the repository's identity: the operator chose it, it carries the scopes the
+// preflight measures (pat-scopes.ts), among them read:packages, which the build's npm install needs
+// and which the platform's GitHub App does not hold. Where NO PAT is handed in, the App
+// (adapters/github-app) is the identity of every repository its installation reaches — installed
+// in ONE organisation on every repository of it: the credential row stores no token, and the store
+// mints an installation token at every open (security/store.ts). Where neither holds — no PAT, and
+// a repository in another organisation — the onboarding is refused naming both halves. Whether the
+// App reaches a repository is NOT decided off an owner string: an installation is a fact GitHub
+// holds (GET /repos/{owner}/{repo}/installation), so it is asked, per repository, at the moment
+// the identity is chosen. Two callers choose one: the onboard POST and its prefill (api.ts,
 // api-onboard-prefill.ts) for a consumer, and the tenant plan for every build unit a tenant lacks
-// (tenant-builds.ts).
+// (tenant-builds.ts), which hands no PAT and so takes the App wherever it reaches.
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import { fingerprintSecret } from "../../security/fingerprint.ts";
@@ -28,13 +30,15 @@ export async function appReachesRepoURL(app: Pick<GitHubApp, "reachesRepository"
   return app.reachesRepository({ owner, repo, ...(signal ? { signal } : {}) });
 }
 
-/** The rule: the App where it reaches the repository, else the PAT, else a refusal that names both
- *  halves — which organisation the App is installed in, and that this repository needs its own PAT. */
+/** The rule: the PAT where one is handed in, else the App where it reaches the repository, else a
+ *  refusal that names both halves — which organisation the App is installed in, and that this
+ *  repository needs its own PAT. A handed-in PAT is never dropped: #194 chose the App over it, and
+ *  the App's token, lacking read:packages, failed a unit's npm install that the PAT had passed. */
 export async function resolveRepoIdentity(input: { repoURL: string; repoPat?: string | undefined; githubApp?: RepoIdentityApp | undefined; signal?: AbortSignal }): Promise<RepoIdentity> {
+  if (input.repoPat) return { kind: "pat", token: input.repoPat };
   if (input.githubApp && (await appReachesRepoURL(input.githubApp, input.repoURL, input.signal))) {
     return { kind: "github-app", token: await input.githubApp.installationToken(input.signal) };
   }
-  if (input.repoPat) return { kind: "pat", token: input.repoPat };
   const { owner, repo } = parseGitHubOwnerRepo(input.repoURL);
   const where = input.githubApp ? `is installed in the organisation ${await input.githubApp.installationOrg(input.signal)} and does not reach ${owner}/${repo}` : "is not configured on this manager";
   throw errValidation(`the platform's GitHub App ${where} — hand in the repository's own PAT (repo + workflow + admin:repo_hook + read:packages) to onboard ${owner}/${repo}`);

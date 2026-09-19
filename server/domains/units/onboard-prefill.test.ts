@@ -49,9 +49,10 @@ describe("readOnboardPrefill", () => {
   });
 });
 
-// THE MEASURED RULE (#194): the App where its installation reaches the repository, else the PAT.
+// THE RULE (#194, #201): the PAT where one is given, else the App where its installation reaches
+// the repository.
 describe("readOnboardPrefill — which identity reads the repository", () => {
-  it("reads a repository the App reaches with the App's token, PAT or no PAT, and names the identity", async () => {
+  it("reads a repository the App reaches with the App's token where no PAT is given, and names the identity", async () => {
     const github = new FakeGitHubConsumer();
     const githubApp = new FakeGitHubApp();
     github.seedTags(githubApp.org, "acme", ["0.2.0-stable-20260909094733"]);
@@ -59,6 +60,15 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
     expect(view.identity).toBe("github-app");
     expect(view.version).toBe("0.2.1");
     expect(github.tokensSeen).toEqual([githubApp.token]);
+  });
+
+  it("reads a repository the App reaches with the PAT where one is given — a given PAT is never dropped (#201)", async () => {
+    const github = new FakeGitHubConsumer();
+    const githubApp = new FakeGitHubApp();
+    github.seedTags(githubApp.org, "acme", ["0.2.0-stable-20260909094733"]);
+    const view = await readOnboardPrefill({ github, githubApp }, request({ repoURL: `https://github.com/${githubApp.org}/acme.git` }), signal());
+    expect(view.identity).toBe("pat");
+    expect(github.tokensSeen).toEqual(["github_pat_test"]);
   });
 
   it("reads a repository outside the installation with the PAT — the external consumer, exactly as before the App", async () => {
@@ -72,6 +82,11 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
     const err = await readOnboardPrefill({ github: new FakeGitHubConsumer(), githubApp: new FakeGitHubApp() }, request({ repoPat: undefined }), signal()).catch((e: unknown) => e);
     expect(String((err as Error).message)).toContain("installed in the organisation example-org and does not reach x/acme");
     expect(String((err as Error).message)).toContain("hand in the repository's own PAT");
+  });
+
+  it("refuses a repository with no PAT on a manager with no App, saying which half is missing", async () => {
+    const err = await readOnboardPrefill({ github: new FakeGitHubConsumer() }, request({ repoPat: undefined }), signal()).catch((e: unknown) => e);
+    expect(String((err as Error).message)).toContain("is not configured on this manager");
   });
 });
 

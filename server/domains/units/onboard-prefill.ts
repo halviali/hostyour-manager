@@ -5,9 +5,9 @@
 //
 // THE TOKEN DOES NOT OUTLIVE THE READ: it rides the tag listing as the Bearer header and nothing
 // else — no clone, no credential row, nothing an abandoned wizard leaves behind. Which token: the
-// App's where its installation reaches the repository, the PAT the wizard was given where it does
-// not (repo-identity.ts) — the same choice the onboard POST makes, so the check under the field
-// answers for the identity the onboarding will run with.
+// PAT the wizard was given, the App's where none was given and its installation reaches the
+// repository (repo-identity.ts) — the same choice the onboard POST makes, so the check under the
+// field answers for the identity the onboarding will run with.
 import { z } from "zod";
 import type { OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import { resolveNextVersion, type ReleaseVersionDeps } from "./release-version.ts";

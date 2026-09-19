@@ -22,7 +22,7 @@ export interface OnboardPrefillView {
   versionSource: string;
   channel: ReleaseChannel;
   channelSource: string;
-  /** The identity the onboarding will run with, measured on the repository: the platform's GitHub
-   *  App where its installation reaches it (no PAT asked), else the PAT the wizard was given. */
+  /** The identity the onboarding will run with: the PAT the wizard was given, else the platform's
+   *  GitHub App where its installation reaches the repository (measured, no PAT asked). */
   identity: "github-app" | "pat";
 }

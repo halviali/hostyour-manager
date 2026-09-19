@@ -203,18 +203,10 @@ describe("consumer API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("400 when the repo PAT is missing and no GitHub App reaches the repository — the external consumer needs its own PAT", async () => {
-    seedCluster();
-    const { app, cookie } = await make(true);
-    const { repoPat: _drop, ...withoutPat } = REQ;
-    const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(withoutPat) });
-    expect(res.status).toBe(400);
-  });
-
-  // The measured rule (#194): a repository the App's installation reaches is onboarded with NO PAT —
+  // The rule (#194, #201): a repository the App's installation reaches is onboarded with NO PAT —
   // the credential row is the App's, storing nothing — and one it does not reach asks its own PAT
   // exactly as before, App or no App.
-  it("onboards a repository the GitHub App reaches with no PAT, under a github-app credential that stores nothing", async () => {
+  it("onboards a repository the GitHub App reaches under the App with no PAT, under the PAT with one", async () => {
     seedCluster();
     const githubApp = new FakeGitHubApp();
     const { app, executor, cookie, store } = await make(true, undefined, githubApp);
@@ -230,6 +222,10 @@ describe("consumer API", () => {
     const outside = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(withoutPat) });
     expect(outside.status).toBe(400);
     expect(await outside.text()).toContain("does not reach x/acme");
+    // WITH a PAT a reached repository is onboarded under that PAT — never dropped for the App's token, which holds no read:packages (#201).
+    const withPat = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, consumerName: "acme2", repoURL: `https://github.com/${githubApp.org}/acme2.git` }) });
+    const second = JSON.parse((db.sqlite.prepare("SELECT params_json FROM runs WHERE id = ?").get(((await withPat.json()) as { runId: string }).runId) as { params_json: string }).params_json) as { repoCredentialId: string };
+    expect([withPat.status, (await store.list({ kind: "pat" })).some((c) => c.id === second.repoCredentialId)]).toEqual([201, true]);
   });
 
   it("seals the raw PAT before the run exists — params_json carries ONLY the sealed reference, never the value", async () => {
