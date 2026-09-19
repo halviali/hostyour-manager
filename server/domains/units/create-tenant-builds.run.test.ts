@@ -8,7 +8,7 @@ import { buildRepoPatSecret } from "../../../shared/approve.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
-import { resolveBuildUnits, buildUnitSecrets, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { resolveBuildUnits, buildUnitSecrets, buildUnitOptionalSecrets, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -146,9 +146,9 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     ...over,
   });
 }
-function ctx(p: Record<string, unknown>, logs: string[], secrets: Record<string, string> = {}): StepCtx {
+function ctx(p: Record<string, unknown>, logs: string[], secrets: Record<string, string> = {}, sealed: { kind: string; label: string }[] = []): StepCtx {
   const creds = {
-    seal: async (i: { kind: string; label: string; fingerprint: string }) => ({ id: "cred_sealed", kind: i.kind, label: i.label, fingerprint: i.fingerprint }),
+    seal: async (i: { kind: string; label: string; fingerprint: string }) => { sealed.push({ kind: i.kind, label: i.label }); return { id: "cred_sealed", kind: i.kind, label: i.label, fingerprint: i.fingerprint }; },
     open: async () => Buffer.from("ghp_test"),
     list: async () => [],
   };
@@ -188,9 +188,10 @@ describe("resolveBuildUnits — the missing images grouped by the repository tha
     expect(buildUnitSecrets(r.units)).toEqual([buildRepoPatSecret("example-jobs")]);
   });
 
-  // The measured rule (#194): an unregistered unit the App reaches is planned `viaApp` and asks no
-  // PAT; one the App does not reach asks its own, exactly as before; a registered unit is never asked.
-  it("asks no PAT for an unregistered unit the App reaches, and still asks one for a unit it does not", async () => {
+  // The rule (#194, #205): an unregistered unit the App reaches is planned `viaApp` and TAKES a PAT
+  // without demanding one; one the App does not reach demands its own, exactly as before; a
+  // registered unit is never asked.
+  it("takes a PAT for an unregistered unit the App reaches, and demands one for a unit it does not", async () => {
     const asked: string[] = [];
     const r = await resolveBuildUnits({
       missing: [{ repo: "example-jobs", tag: "0.2.0" }, { repo: "example-engine", tag: "0.4.0" }],
@@ -202,6 +203,7 @@ describe("resolveBuildUnits — the missing images grouped by the repository tha
     expect(r.units.find((u) => u.unit === "example-jobs")?.viaApp).toBe(true);
     expect(r.units.find((u) => u.unit === "example-platform")?.viaApp).toBeUndefined();
     expect(buildUnitSecrets(r.units)).toEqual([buildRepoPatSecret("example-platform")]);
+    expect(buildUnitOptionalSecrets(r.units)).toEqual([buildRepoPatSecret("example-jobs")]);
   });
 });
 
@@ -223,6 +225,7 @@ describe("create-tenant planStream — the build units and the PATs it asks for"
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits).toEqual([{ unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false }]);
     expect(result.plan.requiredSecrets).toEqual([buildRepoPatSecret("example-jobs")]);
+    expect(result.plan.optionalSecrets).toEqual([]);
     expect(result.plan.warnings[0]).toContain("example-jobs: example-jobs");
     const names = result.plan.steps.map((s) => s.name);
     expect(names.indexOf(buildUnitStepName("example-jobs"))).toBeGreaterThan(names.indexOf("record-provisional"));
@@ -302,6 +305,26 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     expect(await onboard.registrations.readBuildRegistration("example-jobs")).not.toBeNull();
     expect(buildPlane.releaseWatches).toEqual([{ unit: "example-jobs", version: "0.1.0", channel: "stable" }]);
     expect(logs.some((l) => l.includes("build unit example-jobs done"))).toBe(true);
+  });
+  // The rule of #201 on the tenant path (#205): a unit the App reaches is sealed under the PAT where
+  // one was given at approve, and under the App only where none was.
+  it("seals a unit the App reaches under the PAT given at approve, and under the App where none was", async () => {
+    seedClusters();
+    const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false, viaApp: true };
+    const githubApp = { identityFingerprint: () => "SHA256:app" };
+    const make = () => {
+      const buildPlane = new FakeBuildPlane();
+      buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-1", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+      return onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }), buildPlane });
+    };
+    const withPat: { kind: string; label: string }[] = [];
+    await buildUnitStep(() => ({ ports: make(), githubApp }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit)
+      .run(ctx(params(), [], { [buildRepoPatSecret("example-jobs")]: "ghp_approved" }, withPat));
+    expect(withPat).toEqual([{ kind: "pat", label: "build repo PAT (example-jobs)" }]);
+    const withoutPat: { kind: string; label: string }[] = [];
+    await buildUnitStep(() => ({ ports: make(), githubApp }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit)
+      .run(ctx(params(), [], {}, withoutPat));
+    expect(withoutPat).toEqual([{ kind: "github-app", label: "GitHub App (example-jobs)" }]);
   });
   it("refuses at once when the PAT the plan asked for was not given at approve", async () => {
     seedClusters();

@@ -35,6 +35,7 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
     summary: summaryOf(r),
     steps: stepsFor(db, r.id),
     requiredSecrets: (r.planJson as { requiredSecrets?: string[] } | null)?.requiredSecrets ?? [],
+    optionalSecrets: (r.planJson as { optionalSecrets?: string[] } | null)?.optionalSecrets ?? [],
     requiredInputs: (r.planJson as { requiredInputs?: { field: string; label: string }[] } | null)?.requiredInputs ?? [],
     createdAt: r.createdAt.getTime(),
     startedAt: ms(r.startedAt),

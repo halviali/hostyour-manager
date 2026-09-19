@@ -234,9 +234,10 @@ export function RunDetail() {
       {run.deletedAt === null &&
         run.status === "planned" &&
         run.kind !== "cluster-deploy-slave" &&
-        (run.requiredSecrets.length > 0 || run.requiredInputs.length > 0 ? (
+        (run.requiredSecrets.length > 0 || run.optionalSecrets.length > 0 || run.requiredInputs.length > 0 ? (
           <RunApproveForm
             requiredSecrets={run.requiredSecrets}
+            optionalSecrets={run.optionalSecrets}
             requiredInputs={run.requiredInputs}
             onApprove={(payload) => act(() => approveRun(runId, payload))}
             onDelete={() => setConfirmDelete(true)}

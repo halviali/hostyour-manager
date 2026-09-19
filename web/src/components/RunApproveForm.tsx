@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { approveIsComplete, type OperatorInput } from "../../../shared/approve.ts";
-import { secretFieldLabel, secretFieldHint } from "../approveFields.ts";
+import { secretFieldLabel, secretFieldHint, optionalSecretFieldHint } from "../approveFields.ts";
 import { IconLock } from "./icons.tsx";
 
 /** What a person supplies before a run may start: CREDENTIALS the machine does not hold (masked —
@@ -15,14 +15,15 @@ import { IconLock } from "./icons.tsx";
  *  does not happen to the values typed into it. */
 export function RunApproveForm(props: {
   requiredSecrets: string[];
+  optionalSecrets: string[];
   requiredInputs: OperatorInput[];
   onApprove: (payload: Record<string, string>) => void;
   onDelete: () => void;
 }): ReactNode {
   const [secretVals, setSecretVals] = useState<Record<string, string>>({});
   const [inputVals, setInputVals] = useState<Record<string, string>>({});
-  const { requiredSecrets, requiredInputs } = props;
-  const hasSecrets = requiredSecrets.length > 0;
+  const { requiredSecrets, optionalSecrets, requiredInputs } = props;
+  const hasSecrets = requiredSecrets.length > 0 || optionalSecrets.length > 0;
   const hasInputs = requiredInputs.length > 0;
   const allFilled = approveIsComplete({ requiredSecrets, requiredInputs, secrets: secretVals, inputs: inputVals });
 
@@ -60,6 +61,16 @@ export function RunApproveForm(props: {
           <span className="field__label">{secretFieldLabel(key)}</span>
           <input type="password" value={secretVals[key] ?? ""} onChange={(e) => setSecretVals((s) => ({ ...s, [key]: e.target.value }))} autoComplete="off" />
           {secretFieldHint(key) !== null && <span className="field__hint">{secretFieldHint(key)}</span>}
+        </label>
+      ))}
+      {/* Optional: rendered like the required ones, never counted by approveIsComplete. An empty
+          value is dropped by the API before the executor sees it, so leaving one empty is the
+          same as never having been asked. */}
+      {optionalSecrets.map((key) => (
+        <label className="field" key={key}>
+          <span className="field__label">{secretFieldLabel(key)} (optional)</span>
+          <input type="password" value={secretVals[key] ?? ""} onChange={(e) => setSecretVals((s) => ({ ...s, [key]: e.target.value }))} autoComplete="off" />
+          <span className="field__hint">{optionalSecretFieldHint(key)}</span>
         </label>
       ))}
       {requiredInputs.map((inp) => (

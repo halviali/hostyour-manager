@@ -17,6 +17,16 @@
 // renders above these fields.
 import { MACHINE_PASSWORD_SECRET, BUILD_REPO_PAT_PREFIX } from "../../shared/approve.ts";
 
+/** What the person reads under an OPTIONAL box: why they may leave it empty, and why they may not
+ *  want to. Only a build unit's PAT is ever optional — the platform's GitHub App reaches the
+ *  repository and stands in where no PAT is given, but its token holds no read:packages. */
+export function optionalSecretFieldHint(key: string): string {
+  if (key.startsWith(BUILD_REPO_PAT_PREFIX)) {
+    return "Optional: the platform's GitHub App reaches this repository and is its identity where you leave this empty. Give the PAT where the unit installs private npm packages — the App's token cannot read them.";
+  }
+  return "Optional: the run goes on without it.";
+}
+
 /** The prefix a consumer's own declared secret rides under. Stripped, because the name that follows
  *  it is the one the consumer's manifest declares and the one its author knows the value by. */
 const CONSUMER_SECRET_PREFIX = "consumer-secret:";

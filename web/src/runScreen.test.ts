@@ -15,6 +15,7 @@ const run = (id: string, kind: RunView["kind"], status: RunView["status"]): RunV
   summary: `${kind} ${id}`,
   steps: [],
   requiredSecrets: [],
+  optionalSecrets: [],
   requiredInputs: [],
   createdAt: 0,
   startedAt: null,

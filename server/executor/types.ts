@@ -101,6 +101,11 @@ export interface Plan {
   warnings: string[];
   estimateSeconds?: number;
   requiredSecrets: string[];
+  /** Secrets the plan TAKES at approve but does not demand: the approve goes through without them,
+   *  and a value given rides the run like a required one (the API drops an empty string before the
+   *  executor sees it). Optional + defaults to none. Frozen into plan_json; surfaced on
+   *  RunView.optionalSecrets; rendered on the approve form without gating the button. */
+  optionalSecrets?: string[];
   /** Operator-supplied NON-secret inputs the plan asks for at approve (onboard activation
    *  prompts). Optional + defaults to none, so every existing plan/def compiles unchanged. Frozen into
    *  plan_json; surfaced on RunView.requiredInputs; collected in the clear (never sealed). */

@@ -712,7 +712,8 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // makes the bucket and mints the key itself (simetrixch/hostyour-cloud#197). Stated EMPTY
         // rather than left out: the approve ceremony renders one input per entry, and the field is
         // what says this run needs no ceremony at all.
-        requiredSecrets: built.requiredSecrets, // one PAT per build unit the installation has not registered
+        requiredSecrets: built.requiredSecrets, // one PAT per unregistered build unit the App does not reach
+        optionalSecrets: built.optionalSecrets, // one PAT per unregistered build unit the App reaches — given, it wins (#205)
       };
       return { outcome: "planned", params, plan };
     },
