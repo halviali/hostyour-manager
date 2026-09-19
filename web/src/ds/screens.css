@@ -224,6 +224,12 @@
   min-width: 14rem;
 }
 
+/* ---- RunDetail: what the probes measured before the approve ---- */
+
+.findings__attention td {
+  color: var(--warn);
+}
+
 /* ---- RunDetail: credential ceremony ---- */
 
 .ceremony {

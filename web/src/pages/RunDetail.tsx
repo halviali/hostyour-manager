@@ -11,6 +11,7 @@ import { RunApproveForm } from "../components/RunApproveForm.tsx";
 import { DeploySlaveApproveForm } from "../components/DeploySlaveApproveForm.tsx";
 import { FailedRunActions } from "../components/FailedRunActions.tsx";
 import { FailedCreateTenantCallout } from "../components/FailedCreateTenantCallout.tsx";
+import { PlanFindings } from "../components/PlanFindings.tsx";
 import { AnsiText, stripAnsi } from "../components/AnsiText.tsx";
 
 // "ephemeral" is the live-only stream: the server publishes it to this SSE stream and never writes
@@ -222,6 +223,10 @@ export function RunDetail() {
           </span>
         </div>
       )}
+
+      {/* What the probes measured, above whichever approve the kind renders: the operator reads the
+          world's answers before handing anything over (executor/probe.ts). */}
+      {run.deletedAt === null && run.status === "planned" && <PlanFindings findings={run.findings} />}
 
       {run.deletedAt === null && run.status === "planned" && run.kind === "cluster-deploy-slave" && (
         <DeploySlaveApproveForm

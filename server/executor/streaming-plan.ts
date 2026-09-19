@@ -10,7 +10,8 @@ import { RunContext } from "./context.ts";
 import { hashPlan } from "./plan-hash.ts";
 import { runGuards } from "./guards.ts";
 import type { ExecutorDeps } from "./executor.ts";
-import type { AnyRunDefinition, PlanSnapshot } from "./types.ts";
+import type { AnyRunDefinition, Plan, PlanSnapshot } from "./types.ts";
+import { runProbes } from "./probe.ts";
 
 /** Streaming plan entrypoint (onboard), called by Executor.planStreamed. Records the run in
  *  `planning` (plan_json NULL is allowed by the runs check), fires the long-running validation
@@ -144,9 +145,15 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
     if (impls.map((s) => s.name).join(",") !== result.plan.steps.map((s) => s.name).join(",")) {
       throw new AppError("INTERNAL", `planner/steps name mismatch for ${def.kind}`);
     }
-    const snapshot: PlanSnapshot = { ...result.plan, planHash: hashPlan(result.plan, params), plannedAt: Date.now() };
+    // THE PROBES, after the validation and before the plan is frozen: every step measures what it
+    // will meet, each finding is a gate line of this stream, and a hard failure throws here — the
+    // catch below settles the run failed, exactly like a rejected validation (executor/probe.ts).
+    ctx.emitMeta("Measuring what the steps will meet…");
+    const findings = await runProbes(impls, { db: deps.db, creds: deps.creds, params, signal: manager.signal, log: (l: string) => ctx!.emitMeta(l) });
+    const plan: Plan = { ...result.plan, findings };
+    const snapshot: PlanSnapshot = { ...plan, planHash: hashPlan(plan, params), plannedAt: Date.now() };
     deps.db.transaction((tx) => {
-      tx.update(runs).set({ status: "planned", targetKind: result.plan.targetKind, targetId: result.plan.targetId, paramsJson: params, planJson: snapshot }).where(eq(runs.id, runId)).run();
+      tx.update(runs).set({ status: "planned", targetKind: plan.targetKind, targetId: plan.targetId, paramsJson: params, planJson: snapshot }).where(eq(runs.id, runId)).run();
       impls.forEach((s, i) => tx.insert(steps).values({ id: genStepId(), runId, ordinal: i, name: s.name, title: s.title, status: "pending" }).run());
     });
     ctx.emitMeta("✓ Validation passed — the plan is ready for approval");

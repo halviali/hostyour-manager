@@ -6,7 +6,7 @@ import type {
   TargetKind, LockResource, ClusterStatus,
   Stage, TenantStatus, AppStatus, ArgoSync, ArgoHealth, DriftVerdict,
 } from "./enums.ts";
-import type { OperatorInput } from "./approve.ts";
+import type { RunApproveView } from "./approve.ts";
 
 export type ApiErrorCode =
   | "VALIDATION"
@@ -271,7 +271,7 @@ export interface StepView {
 }
 
 
-export interface RunView {
+export interface RunView extends RunApproveView {
   id: string;
   kind: RunKind;
   targetKind: TargetKind;
@@ -279,17 +279,6 @@ export interface RunView {
   status: RunStatus;
   summary: string;
   steps: StepView[];
-  /** The plan's operator-supplied secret keys (executor `requiredSecrets`). The approve
-   *  ceremony renders one input per entry and passes them to /approve; empty for most runs
-   *  (e.g. an onboard whose manifest secrets are all `generate:`). */
-  requiredSecrets: string[];
-  /** The plan's secret keys a person MAY supply (executor `optionalSecrets`): rendered as optional
-   *  fields, never gating the approve; a value given rides the run like a required one. */
-  optionalSecrets: string[];
-  /** The plan's operator-supplied NON-secret inputs (onboard activation prompts). Empty for
-   *  every run whose consumer declares no `activation:` block. Rendered as plaintext fields in the
-   *  approve ceremony and carried in the approve payload under `activation-input:<field>` keys. */
-  requiredInputs: OperatorInput[];
   createdAt: number;
   startedAt: number | null;
   endedAt: number | null;

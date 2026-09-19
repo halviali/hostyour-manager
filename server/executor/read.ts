@@ -1,4 +1,5 @@
 import { eq, gt, and, desc, isNull } from "drizzle-orm";
+import type { PreflightCheck } from "../../shared/preflight.ts";
 import type { Db } from "../db/client.ts";
 import { runs, steps, events } from "../db/schema/runs.ts";
 import type { RunKind, StepStatus } from "../../shared/enums.ts";
@@ -36,6 +37,7 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
     steps: stepsFor(db, r.id),
     requiredSecrets: (r.planJson as { requiredSecrets?: string[] } | null)?.requiredSecrets ?? [],
     optionalSecrets: (r.planJson as { optionalSecrets?: string[] } | null)?.optionalSecrets ?? [],
+    findings: (r.planJson as { findings?: PreflightCheck[] } | null)?.findings ?? [],
     requiredInputs: (r.planJson as { requiredInputs?: { field: string; label: string }[] } | null)?.requiredInputs ?? [],
     createdAt: r.createdAt.getTime(),
     startedAt: ms(r.startedAt),

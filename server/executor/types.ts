@@ -5,6 +5,8 @@ import type { SshSession } from "../adapters/ssh/port.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { SshTransport } from "./transport.ts";
+import type { PreflightCheck } from "../../shared/preflight.ts";
+import type { ProbeCtx } from "./probe.ts";
 
 // The Run/Step executor types. Everything a
 // step may touch is here — deliberately narrow: no Hono context, no direct sqlite handle
@@ -66,6 +68,9 @@ export interface Step {
   /** Idempotent BY CONTRACT: checks its own precondition first; safe to re-run after a
    *  crash mid-step. Throw to fail; return to succeed. */
   run(ctx: StepCtx): Promise<void>;
+  /** The read-only twin of run(), asked by the planner BEFORE the approve (executor/probe.ts):
+   *  measure what this step will meet and answer findings; a hard failure refuses the plan. */
+  probe?(ctx: ProbeCtx): Promise<PreflightCheck[]>;
 }
 
 /** ownsHost=true ⇒ exclusive host ownership: the planner derives a `server:<id>` lock from it, so no
@@ -101,6 +106,9 @@ export interface Plan {
   warnings: string[];
   estimateSeconds?: number;
   requiredSecrets: string[];
+  /** What the steps' probes measured before the approve (executor/probe.ts), in step order. Written
+   *  by the planner, never by a definition; frozen into plan_json and rendered on the approve card. */
+  findings?: PreflightCheck[];
   /** Secrets the plan TAKES at approve but does not demand: the approve goes through without them,
    *  and a value given rides the run like a required one (the API drops an empty string before the
    *  executor sees it). Optional + defaults to none. Frozen into plan_json; surfaced on

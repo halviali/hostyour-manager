@@ -1,3 +1,5 @@
+import type { PreflightCheck } from "./preflight.ts";
+
 /** What a person supplies before a run may start.
  *
  * A plan lists two kinds of thing. CREDENTIALS the manager does not hold, which travel under their
@@ -32,6 +34,26 @@ export interface OperatorInput {
   /** The prompt a person reads. It is the whole of what they have to go on, so it says what the
    *  value is FOR. */
   label: string;
+}
+
+/** What a run's view carries about its approve: what a person supplies, and what was measured before
+ *  they are asked (RunView extends this, shared/api-types.ts). */
+export interface RunApproveView {
+  /** The plan's operator-supplied secret keys (executor `requiredSecrets`). The approve
+   *  ceremony renders one input per entry and passes them to /approve; empty for most runs
+   *  (e.g. an onboard whose manifest secrets are all `generate:`). */
+  requiredSecrets: string[];
+  /** The plan's secret keys a person MAY supply (executor `optionalSecrets`): rendered as optional
+   *  fields, never gating the approve; a value given rides the run like a required one. */
+  optionalSecrets: string[];
+  /** What the steps' probes measured before the approve (executor `findings`, hostyour-manager#207),
+   *  in step order: every finding, passed or not — a plan standing `planned` carries no hard
+   *  failure, since one refuses the plan. Rendered as a table above the approve ceremony. */
+  findings: PreflightCheck[];
+  /** The plan's operator-supplied NON-secret inputs (onboard activation prompts). Empty for
+   *  every run whose consumer declares no `activation:` block. Rendered as plaintext fields in the
+   *  approve ceremony and carried in the approve payload under `activation-input:<field>` keys. */
+  requiredInputs: OperatorInput[];
 }
 
 /** Whether what a person has typed is enough to approve the run.

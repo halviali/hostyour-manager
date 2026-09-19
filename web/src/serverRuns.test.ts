@@ -13,6 +13,7 @@ const run = (over: { id?: string; kind?: RunKind; status?: RunStatus; targetId?:
   steps: [],
   requiredSecrets: [],
   optionalSecrets: [],
+  findings: [],
   requiredInputs: [],
   createdAt: 0,
   startedAt: null,

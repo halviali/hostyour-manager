@@ -10,6 +10,7 @@ import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { RunKind, RunStatus, StepStatus, TargetKind } from "../../shared/enums.ts";
 import { assertRecoverable, stepToResume } from "./recover.ts";
+import { runProbes } from "./probe.ts";
 import { assertRunTransition, isDeletableRun } from "./transitions.ts";
 import { acquireLocks, releaseLocks, deriveServerLocks } from "./locks.ts";
 import { runGuards, isMutatingPrecondition } from "./guards.ts";
@@ -60,11 +61,15 @@ export class Executor {
     if (!def) throw errValidation(`unknown run kind: ${kind}`);
     const params = def.paramsSchema.parse(rawParams);
     await runGuards(kind, params, { db: this.deps.db });
-    const plan = await def.plan(params, { db: this.deps.db });
+    const planned = await def.plan(params, { db: this.deps.db });
     const impls = def.steps(params);
-    if (impls.map((s) => s.name).join(",") !== plan.steps.map((s) => s.name).join(",")) {
+    if (impls.map((s) => s.name).join(",") !== planned.steps.map((s) => s.name).join(",")) {
       throw new AppError("INTERNAL", `planner/steps name mismatch for ${kind}`);
     }
+    // The probes run here, on the synchronous path, with nowhere to stream to: their lines go to
+    // the logger, their findings into the plan, and a hard failure refuses it like a guard would.
+    const findings = await runProbes(impls, { db: this.deps.db, creds: this.deps.creds, params, signal: new AbortController().signal, log: (line) => this.deps.logger.info({ kind }, line) });
+    const plan: Plan = { ...planned, findings };
     const snapshot: PlanSnapshot = { ...plan, planHash: hashPlan(plan, params), plannedAt: Date.now() };
     const id = genRunId();
     const actor = this.deps.actor();
