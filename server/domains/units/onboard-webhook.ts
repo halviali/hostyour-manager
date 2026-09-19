@@ -31,6 +31,7 @@ import type { Step, StepCtx, Cleanup } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import { WebhookScopeError, webhookTargetUrl } from "../../adapters/github-consumer/port.ts";
+import { probeWebhook } from "./onboard-probes.ts";
 import { unitStaysRegistered } from "./lifecycle.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
@@ -64,6 +65,7 @@ export function setupWebhookStep(ports: OnboardPorts, p: OnboardParams): Step {
   return {
     name: "setup-webhook",
     title: "Set up the consumer's build webhook (push → Tekton)",
+    probe: (ctx) => probeWebhook(ports, p, ctx),
     run: async (ctx) => {
       // Fail-loud wiring gap (activation precedent): the step is UNCONDITIONAL (every consumer needs a
       // build trigger), so an unwired GitHub client is a manager misconfiguration, never a silent skip.

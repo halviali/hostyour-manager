@@ -52,6 +52,9 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   tokenScopes: TokenScopes = { classic: true, scopes: ["repo", "workflow", "admin:repo_hook", "read:packages"] };
   /** When true, readTokenScopes throws WebhookScopeError (the PAT is invalid/expired — a 401). */
   tokenInvalid = false;
+  /** "@scope/name" → the tokens that may read it; a package not seeded answers "absent", one seeded
+   *  and asked with another token "unreadable" (readPackage). */
+  readonly packages = new Map<string, string[]>();
 
   // ---- the release trigger (trigger-release) ----
   /** Every dispatch call, in order — a test asserts the trigger fired once with {version, channel,
@@ -73,6 +76,18 @@ export class FakeGitHubConsumer implements GitHubConsumer {
 
   seedTags(owner: string, repo: string, names: readonly string[]): void {
     this.tags.set(this.key(owner, repo), [...names]);
+  }
+
+  async hookStandsAt(input: { owner: string; repo: string; token: string; targetUrl: string }): Promise<boolean> {
+    if (this.scopeError) throw new WebhookScopeError(`fake: the PAT cannot list webhooks on ${input.owner}/${input.repo}`, 403);
+    this.tokensSeen.push(input.token);
+    return (this.hooks.get(this.key(input.owner, input.repo)) ?? []).some((h) => h.targetUrl === input.targetUrl);
+  }
+
+  async readPackage(input: { scope: string; name: string; token: string }): Promise<"readable" | "unreadable" | "absent"> {
+    const readers = this.packages.get(`@${input.scope}/${input.name}`);
+    if (!readers) return "absent";
+    return readers.includes(input.token) ? "readable" : "unreadable";
   }
 
   async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]> {

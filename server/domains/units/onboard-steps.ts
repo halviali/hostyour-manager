@@ -13,6 +13,7 @@ import type { Db } from "../../db/client.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { appId } from "../../kernel/ids.ts";
 import { errValidation } from "../../kernel/errors.ts";
+import { probeTarget, probeDns } from "./onboard-probes.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import type { AppProvenance, AppStatus, Stage } from "../../../shared/enums.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
@@ -236,6 +237,9 @@ export function attestTargetStep(ports: OnboardPorts, p: DeployableOnboardParams
   return {
     name: "attest-target",
     title: "Attest the target cluster (deploy-state fresh)",
+    // The same reading before the approve (onboard-probes.ts); the step re-asks it at run time,
+    // because step 0 of a mutating run is where the world is measured last before anything moves.
+    probe: () => probeTarget(ports, p),
     run: async (ctx) => {
       const { clusterReader } = await ports.resolver.resolve(p.clusterId);
       const state = await clusterReader.readDeployState();
@@ -386,6 +390,7 @@ export function provisionDnsStep(ports: OnboardPorts, p: DeployableOnboardParams
   return {
     name: "provision-dns",
     title: "Provision the unit's public DNS record",
+    probe: (ctx) => probeDns(ports, p, ctx),
     run: async (ctx) => {
       await provisionUnitDns(ctx, {
         dns: ports.dns,

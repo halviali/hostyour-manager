@@ -19,11 +19,13 @@ interface RepoHook {
 
 export class HttpGitHubConsumer implements GitHubConsumer {
   private readonly apiBase: string;
+  private readonly packagesBase: string;
   private readonly fetchImpl: FetchLike;
 
   /** `fetchImpl` is injectable so tests never hit the network. */
-  constructor(opts: { apiBase?: string; fetchImpl?: FetchLike } = {}) {
+  constructor(opts: { apiBase?: string; packagesBase?: string; fetchImpl?: FetchLike } = {}) {
     this.apiBase = (opts.apiBase ?? "https://api.github.com").replace(/\/$/, "");
+    this.packagesBase = (opts.packagesBase ?? "https://npm.pkg.github.com").replace(/\/$/, "");
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
@@ -154,6 +156,25 @@ export class HttpGitHubConsumer implements GitHubConsumer {
       if (res.status !== 404) throw new GitHubConsumerError(`GitHub DELETE ${base}/hooks/${h.id} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
     }
     return { deleted: urls.length, urls };
+  }
+
+  async hookStandsAt(input: { owner: string; repo: string; token: string; targetUrl: string; signal?: AbortSignal }): Promise<boolean> {
+    const hooks = await this.listHooks(input, "scope");
+    return hooks.some((h) => h.config?.url === input.targetUrl);
+  }
+
+  async readPackage(input: { scope: string; name: string; token: string; signal?: AbortSignal }): Promise<"readable" | "unreadable" | "absent"> {
+    const url = `${this.packagesBase}/@${input.scope}/${input.name}`;
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, { headers: { authorization: `Bearer ${input.token}`, accept: "application/json" }, ...(input.signal ? { signal: input.signal } : {}) });
+    } catch (e) {
+      throw new GitHubConsumerError(`GitHub Packages request failed (${url}): ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (res.ok) return "readable";
+    if (res.status === 401 || res.status === 403) return "unreadable";
+    if (res.status === 404) return "absent";
+    throw new GitHubConsumerError(`GitHub Packages GET ${url} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
   }
 
   async getDefaultBranch(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string> {

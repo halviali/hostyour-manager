@@ -134,6 +134,15 @@ export interface GitHubConsumer {
    *  no-op success ({deleted:0}). Throws WebhookScopeError on a 403/404 scope refusal so the
    *  offboard/purge step can log a clear warning (that step never blocks teardown). */
   deleteHook(input: DeleteHookInput): Promise<DeleteHookResult>;
+  /** Whether the repository's hooks can be READ with this identity, and whether one already stands
+   *  at `targetUrl` (the probe of setup-webhook, hostyour-manager#208). Throws WebhookScopeError on
+   *  a 403/404 — the identity holds no admin:repo_hook — exactly as ensureHook would at run time. */
+  hookStandsAt(input: { owner: string; repo: string; token: string; targetUrl: string; signal?: AbortSignal }): Promise<boolean>;
+  /** Whether ONE package of a scope routed to GitHub Packages is readable with this identity: a GET
+   *  of its metadata at `https://npm.pkg.github.com/@<scope>/<name>` — the read a build's npm
+   *  install makes, which the App's installation token cannot make (no read:packages) and a PAT
+   *  without that scope cannot either. "absent" is a 404 with an identity that IS accepted. */
+  readPackage(input: { scope: string; name: string; token: string; signal?: AbortSignal }): Promise<"readable" | "unreadable" | "absent">;
   /** The repo's default branch (GET /repos/{owner}/{repo} → default_branch) — the ref a workflow
    *  dispatch runs on, resolved per repo because main vs master is never assumed. */
   getDefaultBranch(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string>;

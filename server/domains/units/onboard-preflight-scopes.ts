@@ -20,6 +20,7 @@ import { WebhookScopeError } from "../../adapters/github-consumer/port.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
+import { probeIdentity } from "./onboard-probes.ts";
 
 /** The onboard `preflight-scopes` step: verify the consumer PAT carries EVERY right the onboard needs
  *  on the consumer repo — repo + workflow + admin:repo_hook + read:packages — up front, before any mutation, and fail
@@ -29,6 +30,7 @@ export function preflightScopesStep(ports: OnboardPorts, p: OnboardParams): Step
   return {
     name: "preflight-scopes",
     title: "Pre-flight the consumer PAT scopes (repo + workflow + admin:repo_hook + read:packages)",
+    probe: (ctx) => probeIdentity(ports, p, ctx),
     run: async (ctx) => {
       // Fail-loud wiring gap (setup-webhook precedent): the scope check reuses the per-call consumer-PAT
       // GitHub client, which onboard UNCONDITIONALLY needs (setup-webhook fails without it), so an

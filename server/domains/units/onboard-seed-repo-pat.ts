@@ -9,6 +9,7 @@ import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, refreshUnitRepoPat } from "./app-token-refresh.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
 import { sleep } from "./onboard-release-cycle.ts";
+import { probePackages } from "./onboard-probes.ts";
 
 /** The onboard `seed-repo-pat` step: write the ONE per-unit GitHub PAT (the SAME value the
  *  Manager clones with) to secret/build/<name>/repo-pat (property `pat`) on the LOCAL Vault — the
@@ -25,6 +26,8 @@ export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
   return {
     name: "seed-repo-pat",
     title: "Seed the unit's repo PAT into the local build Vault",
+    // What the seeded identity will be asked to read by the build: one private package per scope.
+    probe: (ctx) => probePackages(ports, p, ctx),
     run: async (ctx) => {
       const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:seed-repo-pat", runId: ctx.runId });
       let created: boolean;
