@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "be7c3059-9dc2-4979-9728-f10e88a90215",
+  "id": "c3a12915-8ed6-40a6-9f55-fbebb8413103",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit": {
@@ -201,6 +201,88 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "dns_writes": {
+      "name": "dns_writes",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "act": {
+          "name": "act",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_kind": {
+          "name": "owner_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_name": {
+          "name": "owner_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_stage": {
+          "name": "owner_stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "written_at": {
+          "name": "written_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "dns_writes_name_type_pk": {
+          "columns": [
+            "name",
+            "type"
+          ],
+          "name": "dns_writes_name_type_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -606,10 +688,10 @@
         "servers_one_master_uq": {
           "name": "servers_one_master_uq",
           "columns": [
-            "(role IN ('master', 'master+slave'))"
+            "(role = 'master')"
           ],
           "isUnique": true,
-          "where": "role IN ('master', 'master+slave')"
+          "where": "role = 'master'"
         }
       },
       "foreignKeys": {},
@@ -1572,7 +1654,7 @@
     "indexes": {
       "servers_one_master_uq": {
         "columns": {
-          "(role IN ('master', 'master+slave'))": {
+          "(role = 'master')": {
             "isExpression": true
           }
         }

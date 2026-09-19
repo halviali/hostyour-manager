@@ -3,14 +3,12 @@
 -- triggers and the reserved system operators. Regenerating this file drops both; re-add them at the
 -- end, after the tables they touch exist.
 --
--- ONE GENERATED LINE ALSO HAS TO BE REPAIRED BY HAND, and it fails loudly rather than quietly:
--- `servers_one_master_uq` is an index over an EXPRESSION, and the generator's SQL emitter splits
--- that expression on its comma and backtick-quotes each half as if it were a column name. The
--- snapshot holds the expression correctly, so only the SQL is wrong, and a database built from the
--- unrepaired file dies inside migrate() with `no such column: (role IN ('master'`. After every
--- regeneration put the line back to a single parenthesised expression:
---   CREATE UNIQUE INDEX `servers_one_master_uq` ON `servers` ((role IN ('master', 'master+slave')))
---   WHERE role IN ('master', 'master+slave');
+-- ONE GENERATED LINE IS WORTH A LOOK AFTER EVERY REGENERATION: `servers_one_master_uq` is an
+-- index over an EXPRESSION, and the generator's SQL emitter splits an expression holding a comma
+-- and backtick-quotes each half as if it were a column name. The predicate `(role = 'master')`
+-- holds none, so today the line comes out right; a predicate that gains a comma has to be put back
+-- by hand to a single parenthesised expression, or a database built from the file dies inside
+-- migrate() with `no such column`.
 --
 -- THERE IS EXACTLY ONE MIGRATION AND THIS FILE IS THE SCHEMA. A column change is made here, inside
 -- the CREATE TABLE, and never as a second migration beside it. Nothing has run an older shape of it:
@@ -124,7 +122,7 @@ CREATE TABLE `servers` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `servers_name_uq` ON `servers` (`name`);--> statement-breakpoint
 CREATE UNIQUE INDEX `servers_host_port_uq` ON `servers` (`host`,`ssh_port`);--> statement-breakpoint
-CREATE UNIQUE INDEX `servers_one_master_uq` ON `servers` ((role IN ('master', 'master+slave'))) WHERE role IN ('master', 'master+slave');--> statement-breakpoint
+CREATE UNIQUE INDEX `servers_one_master_uq` ON `servers` ((role = 'master')) WHERE role = 'master';--> statement-breakpoint
 CREATE TABLE `tenant_apps` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
@@ -264,6 +262,19 @@ CREATE TABLE `steps` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `steps_run_ordinal_uq` ON `steps` (`run_id`,`ordinal`);--> statement-breakpoint
 CREATE UNIQUE INDEX `steps_run_name_uq` ON `steps` (`run_id`,`name`);--> statement-breakpoint
+CREATE TABLE `dns_writes` (
+	`name` text NOT NULL,
+	`type` text NOT NULL,
+	`content` text NOT NULL,
+	`act` text NOT NULL,
+	`owner_kind` text NOT NULL,
+	`owner_name` text NOT NULL,
+	`owner_stage` text,
+	`run_id` text NOT NULL,
+	`written_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
+	PRIMARY KEY(`name`, `type`)
+);
+--> statement-breakpoint
 -- Append-only invariants for events + audit. A Run IS the audit record, and an audit record you can
 -- rewrite is not one, so the guard is triggers rather than convention: every UPDATE and DELETE on
 -- either table aborts. A retention pass drops the triggers and recreates them inside one
