@@ -5,23 +5,24 @@
 //
 // THE TOKEN DOES NOT OUTLIVE THE READ: it rides the tag listing as the Bearer header and nothing
 // else — no clone, no credential row, nothing an abandoned wizard leaves behind. Which token: the
-// PAT the wizard was given, the App's where none was given and its installation reaches the
-// repository (repo-identity.ts) — the same choice the onboard POST makes, so the check under the
-// field answers for the identity the onboarding will run with.
+// organisation's identity for this repository (repo-identity.ts, #220) — the App's where its
+// installation reaches the repository, the organisation's repository PAT else — the same choice
+// the onboard POST makes, so the check answers for the identity the onboarding will run with, and
+// refuses by name where the organisation records no packages reader.
 import { z } from "zod";
 import type { OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
+import type { CredentialStore } from "../../security/store.ts";
 import { resolveNextVersion, type ReleaseVersionDeps } from "./release-version.ts";
-import { resolveRepoIdentity, type RepoIdentityApp } from "./repo-identity.ts";
+import { resolveRepoIdentity, type OrganisationIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
 
-/** What the prefill is asked: the repository and, where the App does not reach it, its PAT. */
+/** What the prefill is asked: the repository. */
 export const OnboardPrefillRequest = z.object({
   repoURL: z.string().regex(/^https:\/\/[^ ]+\.git$/),
-  repoPat: z.string().min(1).optional(),
 });
 export type OnboardPrefillRequest = z.infer<typeof OnboardPrefillRequest>;
 
-export async function readOnboardPrefill(deps: ReleaseVersionDeps & { githubApp?: RepoIdentityApp }, input: OnboardPrefillRequest, signal: AbortSignal): Promise<OnboardPrefillView> {
-  const identity = await resolveRepoIdentity({ repoURL: input.repoURL, repoPat: input.repoPat, githubApp: deps.githubApp, signal });
+export async function readOnboardPrefill(deps: ReleaseVersionDeps & { githubApp?: RepoIdentityApp; organisations: OrganisationIdentityReader; store: Pick<CredentialStore, "open"> }, input: OnboardPrefillRequest, signal: AbortSignal): Promise<OnboardPrefillView> {
+  const identity = await resolveRepoIdentity({ repoURL: input.repoURL, githubApp: deps.githubApp, organisations: deps.organisations, store: deps.store, signal });
   const { version, readFrom } = await resolveNextVersion(deps, { repoURL: input.repoURL, token: identity.token, signal });
   return {
     version,

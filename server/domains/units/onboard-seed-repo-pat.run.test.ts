@@ -3,7 +3,9 @@
 // materialized them again — read off the ExternalSecrets' refreshTime — before the release is
 // dispatched. Kept apart from onboard.run.test.ts like the other per-step files; the step is built
 // against the shared fixture's port set with only the build plane's cluster reader varied.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { openDb, type DbHandle } from "../../db/client.ts";
+import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { BUILD_TARGET_SECRETS } from "./app-token-refresh.ts";
@@ -14,6 +16,10 @@ import type { Logger } from "../../kernel/logger.ts";
 
 const SHA = "a".repeat(40);
 const NS = "acme-build";
+
+let db: DbHandle;
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); });
+afterEach(() => { db.sqlite.close(); });
 const DELETES = BUILD_TARGET_SECRETS.map((name) => ({ op: "delete" as const, namespace: NS, name }));
 
 function params(): BuildOnlyOnboardParams {
@@ -29,8 +35,9 @@ function params(): BuildOnlyOnboardParams {
 function ctx(logs: string[], token = "ghs_minted_now"): StepCtx {
   const opened: string[] = [];
   return {
-    runId: "run_onb", stepName: "refresh-repo-pat", db: {} as unknown as StepCtx["db"],
-    creds: { open: async (id: string) => { opened.push(id); return Buffer.from(token, "utf8"); } } as unknown as StepCtx["creds"],
+    runId: "run_onb", stepName: "refresh-repo-pat", db: db.db,
+    // The one credential opens to the token of the moment; the organisation's packages reader to its own.
+    creds: { open: async (id: string) => { opened.push(id); return Buffer.from(id === "cred_pkg_x" ? "ghp_packages_x" : token, "utf8"); } } as unknown as StepCtx["creds"],
     params: params(), secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
@@ -49,11 +56,11 @@ describe("onboard refresh-repo-pat step", () => {
     const { run, seeder } = step({ buildClusterReader: kube });
     const logs: string[] = [];
     await run(ctx(logs));
-    expect(seeder.refreshedRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_minted_now" }]);
+    expect(seeder.refreshedRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_minted_now", packages: "ghp_packages_x" }]);
     expect(kube.secretWrites).toEqual(DELETES);
     // The order is the mechanism: a Secret deleted BEFORE the rewrite would make ESO materialize the
     // dead value, so the rewrite is logged first and the deletion after it.
-    expect(logs.findIndex((l) => l.includes("repo PAT rewritten"))).toBeLessThan(logs.findIndex((l) => l.includes("deleted in acme-build")));
+    expect(logs.findIndex((l) => l.includes("rewritten (properties pat, packages)"))).toBeLessThan(logs.findIndex((l) => l.includes("deleted in acme-build")));
     expect(logs.at(-1)).toContain("build-git-https, bump-git-https, build-npmrc stand again in acme-build");
     // Read before the deletion and again after it — never off the Ready bit.
     expect(kube.listedExternalSecrets.length).toBeGreaterThanOrEqual(2);

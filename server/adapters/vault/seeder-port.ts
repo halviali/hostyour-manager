@@ -45,8 +45,13 @@ export interface VaultSeedInput {
  *  one image per release, never one per stage. The seed and the refresh take the same input. */
 export interface BuildRepoPatSeedInput {
   consumerName: string;
-  /** The raw PAT value (opened from the sealed store by the caller; never logged). */
+  /** The repository token (opened from the sealed store by the caller; never logged): the App's
+   *  installation token or the organisation's repository PAT — property `pat`, what the clone and
+   *  the bump read. */
   pat: string;
+  /** The organisation's packages reader (opened the same way): property `packages`, what the
+   *  build's `.npmrc` reads — an App token reads no private package (#220). */
+  packages: string;
 }
 
 /** The offboard/purge inverse: metadata-delete of secret/build/<consumerName>/repo-pat (all

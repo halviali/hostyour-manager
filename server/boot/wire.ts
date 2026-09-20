@@ -44,6 +44,7 @@ import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefil
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { registerOrganisationRoutes } from "../domains/units/api-organisations.ts";
+import { readOrganisationIdentity } from "../domains/units/organisations.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
 import { migrateRegistrations } from "../domains/units/registrations-migration.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
@@ -245,7 +246,7 @@ export async function wire(): Promise<Wired> {
   // The deletion after each rewrite reaches the build namespaces over the master-local cluster
   // reader: they stand on this cluster whatever cluster a unit targets.
   const refreshAppTokensLater = registrations
-    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp }); }
+    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, organisations: (org) => readOrganisationIdentity(db.db, org) }); }
     : async (): Promise<void> => undefined;
   // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
@@ -331,7 +332,7 @@ export async function wire(): Promise<Wired> {
       // this installation sells is a fact whether or not onboarding is currently configured.
       registerUnitSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
       registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(githubApp ? { githubApp } : {}) });
-      registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(githubApp ? { githubApp } : {}) });
+      registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(githubApp ? { githubApp } : {}) });
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
       // flag (the catalog PAT). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.

@@ -166,6 +166,7 @@ describe("VaultSelfSeeder seed (the consumer's ceremony secrets)", () => {
 const patInput = (over: Partial<BuildRepoPatSeedInput> = {}): BuildRepoPatSeedInput => ({
   consumerName: "acme",
   pat: "github_pat_x",
+  packages: "ghp_packages_reader",
   ...over,
 });
 
@@ -180,7 +181,7 @@ describe("VaultSelfSeeder build repo-pat (stage-free)", () => {
         "POST /v1/auth/token/revoke-self",
       ]);
       expect(recorded[0]!.body).toEqual({ role: "manager", jwt: "sa-jwt" });
-      expect(recorded[1]!.body).toEqual({ data: { pat: "github_pat_x" }, options: { cas: 0 } });
+      expect(recorded[1]!.body).toEqual({ data: { pat: "github_pat_x", packages: "ghp_packages_reader" }, options: { cas: 0 } });
     });
   });
 
@@ -216,7 +217,7 @@ describe("VaultSelfSeeder build repo-pat (stage-free)", () => {
     await withSelf(async (seeder) => {
       await seeder.refreshBuildRepoPat(patInput({ pat: "ghs_minted_now" }));
       expect(recorded.map((r) => `${r.method} ${r.url}`)).toEqual(["POST /v1/auth/kubernetes/login", "POST /v1/secret/data/build/acme/repo-pat", "POST /v1/auth/token/revoke-self"]);
-      expect(recorded[1]!.body).toEqual({ data: { pat: "ghs_minted_now" } });
+      expect(recorded[1]!.body).toEqual({ data: { pat: "ghs_minted_now", packages: "ghp_packages_reader" } });
       dataPut = { status: 400, body: JSON.stringify({ errors: ["check-and-set parameter did not match the current version"] }) };
       await expect(seeder.refreshBuildRepoPat(patInput())).rejects.toThrow(/repo-pat put failed/);
       expect(recorded.at(-1)?.url).toBe("/v1/auth/token/revoke-self");

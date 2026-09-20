@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
+import { organisationIdentities } from "../../db/schema/organisations.ts";
+import { eq } from "drizzle-orm";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
@@ -66,12 +68,18 @@ describe("probeAppsRepository", () => {
 
 describe("probeBuildUnit", () => {
   const base = { unit: "example-jobs", repoURL: "https://github.com/example-org/example-jobs.git", images: ["example-jobs"], registered: false };
-  it("a unit whose PAT comes at approve is not measured; one the App reaches is measured through the App", async () => {
-    expect(await probeBuildUnit(() => undefined, ports({}), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "warn", severity: "soft", detail: "not measured: its PAT is given at approve" }]);
+  // The organisation's identity, judged (#220): the App where it reaches, the organisation's
+  // repository PAT else, a refusal naming the organisation where it records nothing.
+  it("judges an unregistered unit's identity: the App where it reaches, the organisation's repository PAT else, a refusal where the organisation records nothing", async () => {
+    db.db.insert(organisationIdentities).values({ org: "example-org", packagesCredentialId: "cred_pkg", repoCredentialId: null }).run();
     const githubApp = new FakeGitHubApp();
-    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), { ...base, viaApp: true } as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "reached by the platform's GitHub App" }]);
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "reached by the platform's GitHub App; its packages read with the organisation's packages reader" }]);
     githubApp.reachable.set("example-org/example-jobs", false);
-    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), { ...base, viaApp: true } as BuildUnit, ctx())).toMatchObject([{ status: "fail", hint: "hand in the repository's PAT at approve" }]);
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("records no repository PAT") }]);
+    db.db.update(organisationIdentities).set({ repoCredentialId: "cred_pat" }).where(eq(organisationIdentities.org, "example-org")).run();
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "its organisation's repository PAT; its packages read with the organisation's packages reader" }]);
+    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "example-org")).run();
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("organisation example-org records no packages reader") }]);
   });
   it("a registered unit's stored credential reads the hooks; without admin:repo_hook it fails by name", async () => {
     const github = new FakeGitHubConsumer();

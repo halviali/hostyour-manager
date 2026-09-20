@@ -1,3 +1,4 @@
+import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "./unit-size.ts";
 import { eq } from "drizzle-orm";
@@ -85,7 +86,7 @@ let db: DbHandle;
 // starts without it — and write-registration resolves the unit's ceiling against it. Seeding here is
 // what a running Manager has done long before an onboard reaches it; without it the run fails at
 // exactly that step, which is the correct behaviour and not what these tests are about.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(manifest: ConsumerManifest): GateReport {

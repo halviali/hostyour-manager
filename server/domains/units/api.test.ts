@@ -6,6 +6,7 @@ import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
+import { organisationIdentities } from "../../db/schema/organisations.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
@@ -41,7 +42,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "./unit-size.ts";
 import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 
 const SHA = "a".repeat(40);
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
@@ -51,7 +52,7 @@ const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and G24 resolves the unit's quota against it while the gates run.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 /** The manifest the consumer fixtures onboard: one declared build, so gate G18's manifest half holds. */
@@ -166,9 +167,17 @@ function seedSlaveCluster(): void {
 }
 
 const RAW_PAT = "github_pat_raw_secret_value";
-// {channel} — the onboard TRIGGERS the release at the next version after the repo's release tags;
-// the request carries no version, no ref and no tag.
-const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team", repoPat: RAW_PAT };
+// {channel} — the onboard TRIGGERS the release at the next version after the repo's release tags; the request carries
+// no version, no ref, no tag — and no credential: the unit's identity is its organisation's (#220), recorded once.
+const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team" };
+
+/** Records an organisation's identity with REAL sealed rows of the store under test: its packages
+ *  reader always, its repository PAT where `repoPat` is given (the App does not reach it). */
+async function recordOrganisation(store: CredentialStore, org: string, o: { repoPat?: string } = {}): Promise<void> {
+  const packages = await store.seal({ kind: "pat", label: `packages reader (${org})`, plaintext: Buffer.from(`ghp_packages_${org}`), fingerprint: `sha256:pkg-${org}` });
+  const repo = o.repoPat ? await store.seal({ kind: "pat", label: `repository PAT (${org})`, plaintext: Buffer.from(o.repoPat), fingerprint: `sha256:pat-${org}` }) : null;
+  db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, org)).run(); db.db.insert(organisationIdentities).values({ org, packagesCredentialId: packages.id, repoCredentialId: repo?.id ?? null }).run();
+}
 
 describe("consumer API", () => {
   it("501 NOT_CONFIGURED on onboard when onboarding is not wired", async () => {
@@ -179,7 +188,8 @@ describe("consumer API", () => {
 
   it("onboard: 201 + runId, and the run reaches planned", async () => {
     seedCluster();
-    const { app, executor, cookie } = await make(true);
+    const { app, executor, cookie, store } = await make(true);
+    await recordOrganisation(store, "x", { repoPat: RAW_PAT });
     const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
     expect(res.status).toBe(201);
     const { runId } = (await res.json()) as { runId: string };
@@ -203,53 +213,58 @@ describe("consumer API", () => {
     expect(res.status).toBe(400);
   });
 
-  // The rule (#194, #201): a repository the App's installation reaches is onboarded with NO PAT —
-  // the credential row is the App's, storing nothing — and one it does not reach asks its own PAT
-  // exactly as before, App or no App.
-  it("onboards a repository the GitHub App reaches under the App with no PAT, under the PAT with one", async () => {
+  // The rule (#220): the unit's identity is its organisation's — the App where its installation
+  // reaches the repository (a credential row storing nothing), the organisation's repository PAT
+  // where it does not (sealed again under the unit's name), a refusal naming the page else; and the
+  // organisation's packages reader is required whichever reads.
+  it("onboards a repository the GitHub App reaches under the App, one it does not under the organisation's repository PAT, and refuses one whose organisation records nothing", async () => {
     seedCluster();
     const githubApp = new FakeGitHubApp();
     const { app, executor, cookie, store } = await make(true, undefined, githubApp);
-    const { repoPat: _drop, ...withoutPat } = REQ;
-    const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...withoutPat, repoURL: `https://github.com/${githubApp.org}/acme.git` }) });
+    await recordOrganisation(store, githubApp.org);
+    const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, repoURL: `https://github.com/${githubApp.org}/acme.git` }) });
     expect(res.status).toBe(201);
     const { runId } = (await res.json()) as { runId: string };
     await executor.settle(runId);
     const params = JSON.parse((db.sqlite.prepare("SELECT params_json FROM runs WHERE id = ?").get(runId) as { params_json: string }).params_json) as { repoCredentialId: string };
     const sealed = (await store.list({ kind: "github-app" })).find((c) => c.id === params.repoCredentialId);
     expect([sealed?.label, sealed?.fingerprint]).toEqual(["GitHub App (acme)", githubApp.identityFingerprint()]);
-    // A repository outside the installation still asks its PAT, App or no App.
-    const outside = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(withoutPat) });
+    // A repository outside the installation whose organisation records no repository PAT is refused naming both halves.
+    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    await recordOrganisation(store, "x");
+    const outside = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
     expect(outside.status).toBe(400);
-    expect(await outside.text()).toContain("does not reach x/acme");
-    // WITH a PAT a reached repository is onboarded under that PAT — never dropped for the App's token, which holds no read:packages (#201).
-    const withPat = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, consumerName: "acme2", repoURL: `https://github.com/${githubApp.org}/acme2.git` }) });
+    expect(await outside.text()).toContain("does not reach x/acme, and organisation x records no repository PAT");
+    // With the organisation's repository PAT recorded it is onboarded under a copy of that PAT, sealed under the unit's name.
+    await recordOrganisation(store, "x", { repoPat: RAW_PAT });
+    const withPat = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
+    expect(withPat.status).toBe(201);
     const second = JSON.parse((db.sqlite.prepare("SELECT params_json FROM runs WHERE id = ?").get(((await withPat.json()) as { runId: string }).runId) as { params_json: string }).params_json) as { repoCredentialId: string };
-    expect([withPat.status, (await store.list({ kind: "pat" })).some((c) => c.id === second.repoCredentialId)]).toEqual([201, true]);
+    const row = (await store.list({ kind: "pat" })).find((c) => c.id === second.repoCredentialId);
+    expect(row?.label).toBe("repository PAT (acme)");
+    expect((await store.open(second.repoCredentialId, { purpose: "test:assert-sealed" })).toString("utf8")).toBe(RAW_PAT);
+    // An organisation recording no packages reader is refused before anything is sealed.
+    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    const none = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, consumerName: "acme3" }) });
+    expect(none.status).toBe(400);
+    expect(await none.text()).toContain("organisation x records no packages reader");
   });
 
-  it("seals the raw PAT before the run exists — params_json carries ONLY the sealed reference, never the value", async () => {
+  it("a PAT in the request body is ignored — params_json carries ONLY the sealed reference of the organisation's identity, never a value", async () => {
     seedCluster();
     const { app, executor, cookie, store } = await make(true);
-    const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
+    await recordOrganisation(store, "x", { repoPat: RAW_PAT });
+    const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, repoPat: "github_pat_stray" }) });
     expect(res.status).toBe(201);
     const { runId } = (await res.json()) as { runId: string };
     await executor.settle(runId);
-
-    // The run's persisted params reference the sealed credential and are free of the raw PAT.
-    // Read the row raw (sqlite) — the runs schema module is executor-only by the boundary law.
     const runRow = db.sqlite.prepare("SELECT params_json FROM runs WHERE id = ?").get(runId) as { params_json: string };
     const params = JSON.parse(runRow.params_json) as { repoCredentialId?: string; repoPat?: string };
     expect(params.repoCredentialId).toMatch(/^cred_/);
     expect(params.repoPat).toBeUndefined();
     expect(runRow.params_json).not.toContain(RAW_PAT);
-
-    // The sealed credential exists (kind "pat") — the store is the value's only home.
-    const sealed = (await store.list({ kind: "pat" })).find((c) => c.id === params.repoCredentialId);
-    expect(sealed?.label).toBe("consumer repo PAT (acme)");
-    const opened = await store.open(params.repoCredentialId!, { purpose: "test:assert-sealed" });
-    expect(opened.toString("utf8")).toBe(RAW_PAT);
-    opened.fill(0);
+    expect(runRow.params_json).not.toContain("github_pat_stray");
+    expect((await store.list({ kind: "pat" })).map((c) => c.label).sort()).toEqual(["packages reader (x)", "repository PAT (acme)", "repository PAT (x)"]);
   });
 
   it("lists onboarded consumers with their cluster", async () => {

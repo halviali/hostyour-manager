@@ -304,17 +304,13 @@ export interface OnboardInput {
   clusterId?: string;
   owner: string;
   chartPath?: string;
-  /** The consumer's own GitHub PAT, for a repository the platform's GitHub App does not reach (an
-   *  external consumer). Sent once over TLS; the Manager seals it server-side and it never appears
-   *  in any run/params/log. Left out for a repository the App reaches: the Manager measures that and
-   *  refuses by name where neither identity serves. */
-  repoPat?: string;
+  // No credential rides the request: the unit's identity is its organisation's, recorded on the
+  // Organisations page and derived from the owner of the repository URL (#220).
 }
-/** What the wizard's "Check the repository" sends (POST /api/consumers/prefill): the repository and
- *  the PAT that reads its release tags — used for that one read and not kept. */
+/** What the wizard's "Check the repository" sends (POST /api/consumers/prefill): the repository,
+ *  whose release tags are read once with the organisation's identity and not kept. */
 export interface OnboardPrefillInput {
   repoURL: string;
-  repoPat?: string;
 }
 export const listConsumers = (): Promise<ConsumerView[]> => req<ConsumerView[]>("/api/consumers");
 export const getConsumerLive = (appId: string): Promise<ConsumerLiveView> => req<ConsumerLiveView>(`/api/consumers/${appId}/live`);

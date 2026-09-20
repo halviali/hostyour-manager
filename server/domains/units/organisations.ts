@@ -109,7 +109,7 @@ export async function recordRepositoryPat(deps: OrganisationDeps, org: string, t
   const reading = await deps.github.readOrgToken({ org, token, ...(signal ? { signal } : {}) });
   if (reading.packages === "invalid") throw errValidation(`the token is invalid or expired — GitHub answered 401 for ${org}`);
   if (!reading.classic) throw errValidation(`the token is fine-grained, which reports no scopes — the repository PAT of an organisation is a CLASSIC PAT with ${REPOSITORY_PAT_SCOPES.join(" + ")}`);
-  const missing = missingConsumerPatScopes(reading.scopes).filter((s) => s !== "read:packages");
+  const missing = missingConsumerPatScopes(reading.scopes);
   if (missing.length > 0) throw errValidation(`the token lacks ${missing.join(", ")} (granted: ${reading.scopes.join(", ") || "none"}) — the repository PAT of an organisation carries ${REPOSITORY_PAT_SCOPES.join(" + ")}`);
   return record(deps, org, "repoCredentialId", token, `repository PAT (${org})`);
 }

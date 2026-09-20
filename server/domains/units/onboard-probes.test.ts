@@ -1,3 +1,6 @@
+import { organisationIdentities } from "../../db/schema/organisations.ts";
+import { eq } from "drizzle-orm";
+import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
@@ -15,7 +18,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 
 const REPO = "https://github.com/x/acme.git";
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function params(over: Partial<OnboardParams> = {}): DeployableOnboardParams {
@@ -28,12 +31,12 @@ function params(over: Partial<OnboardParams> = {}): DeployableOnboardParams {
   }) as DeployableOnboardParams;
 }
 
-/** A probe context whose credential store opens one PAT (or an App row where `viaApp`). */
-function ctx(o: { token?: string; viaApp?: boolean } = {}): ProbeCtx {
+/** A probe context whose credential store opens one PAT (or an App row where `viaApp`), or what `open` answers per id. */
+function ctx(o: { token?: string; viaApp?: boolean; open?: (id: string) => string } = {}): ProbeCtx {
   return {
     db: db.db,
     creds: {
-      open: async () => Buffer.from(o.token ?? "ghp_test"),
+      open: async (id: string) => Buffer.from(o.open ? o.open(id) : (o.token ?? "ghp_test")),
       list: async (q?: { kind?: string }) => (o.viaApp && q?.kind === "github-app" ? [{ id: "cred_pat" }] : []),
     } as unknown as ProbeCtx["creds"],
     params: {}, signal: new AbortController().signal, log: () => undefined,
@@ -55,7 +58,7 @@ describe("probeIdentity — a PAT's scopes, or the App", () => {
     const github = new FakeGitHubConsumer();
     expect(await probeIdentity(ports({ github }), params(), ctx())).toMatchObject([{ id: "identity", status: "pass" }]);
     github.tokenScopes = { classic: true, scopes: ["repo"] };
-    expect(await probeIdentity(ports({ github }), params(), ctx())).toMatchObject([{ status: "fail", severity: "hard", detail: "the PAT lacks workflow, admin:repo_hook, read:packages" }]);
+    expect(await probeIdentity(ports({ github }), params(), ctx())).toMatchObject([{ status: "fail", severity: "hard", detail: "the PAT lacks workflow, admin:repo_hook" }]);
     github.tokenScopes = { classic: false, scopes: [] };
     expect((await probeIdentity(ports({ github }), params(), ctx()))[0]?.detail).toContain("fine-grained");
   });
@@ -71,12 +74,20 @@ describe("probePackages — one private package per scope the repository routes 
   const LOCK = "packages:\n  '@acme/components@0.1.0':\n    resolution: {integrity: sha512-x}\n";
   const repo = () => new FakeRepoReader({ resolvedSha: SHA, files: { ".npmrc": NPMRC, "pnpm-lock.yaml": LOCK } });
 
-  it("passes where the identity reads the package, fails by name where it cannot — the App's token holds no read:packages", async () => {
+  // The token that reads is the organisation's packages reader (#220), opened by the id the
+  // organisation record names for the owner of the repository — never the unit's own credential.
+  it("passes where the organisation's packages reader reads the package, fails by name where it cannot, and refuses an organisation without one", async () => {
     const github = new FakeGitHubConsumer();
-    github.packages.set("@acme/components", ["ghp_test"]);
-    expect(await probePackages(ports({ github, repo: repo() }), params(), ctx())).toMatchObject([{ id: "packages.acme", status: "pass", detail: "@acme/components is readable with the PAT" }]);
-    expect(await probePackages(ports({ github, repo: repo() }), params(), ctx({ token: "ghs_app", viaApp: true })))
-      .toMatchObject([{ status: "fail", severity: "hard", detail: "@acme/components is not readable with the App's token, which holds no read:packages", hint: "hand in a classic PAT with read:packages" }]);
+    github.packages.set("@acme/components", ["ghp_packages_x"]);
+    const opened: string[] = [];
+    const c = ctx({ open: (id) => { opened.push(id); return id === "cred_pkg_x" ? "ghp_packages_x" : "ghp_test"; } });
+    expect(await probePackages(ports({ github, repo: repo() }), params(), c)).toMatchObject([{ id: "packages.acme", status: "pass", detail: "@acme/components is readable with the packages reader of x" }]);
+    expect(opened).toEqual(["cred_pkg_x"]);
+    github.packages.set("@acme/components", ["ghp_other"]);
+    expect(await probePackages(ports({ github, repo: repo() }), params(), c))
+      .toMatchObject([{ status: "fail", severity: "hard", detail: "@acme/components is not readable with the packages reader of x", hint: "record a packages reader of x that also reads @acme on the Organisations page" }]);
+    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    expect(await probePackages(ports({ github, repo: repo() }), params(), c)).toMatchObject([{ id: "packages", status: "fail", detail: "organisation x records no packages reader" }]);
   });
   it("warns where the package is not published, and passes softly where no scope is routed there", async () => {
     const github = new FakeGitHubConsumer();

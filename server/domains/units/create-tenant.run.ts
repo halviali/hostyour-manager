@@ -10,7 +10,7 @@ import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
-import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit, assertBuildUnitPats } from "./tenant-builds.ts";
+import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
 import { assertDeployState } from "./lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
@@ -42,6 +42,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { readTenantSpec } from "./tenant-apps-repo.run.ts";
+import { readOrganisationIdentity } from "./organisations.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 
 // The "tenant-create" Run — the onboarding of a tenant's platform, the tenant analogue of
@@ -600,7 +601,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // under the unit's name (`<bundle>-<subdomain>`, tenant-apps-tree.ts).
       let appsUnit: CreateTenantParams["appsUnit"];
       if (withApps) {
-        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: req.apps.map((a) => a.name), spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
+        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: req.apps.map((a) => a.name), spec: await readTenantSpec(ports, ctx), organisations: (org) => readOrganisationIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
         if (resolved.outcome === "refused") return refuse(resolved.why, { subdomain: req.subdomain, apps: req.apps.map((a) => a.name) });
         appsUnit = resolved.unit;
       }
@@ -659,7 +660,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // The tenant's own bundle is left out: the apps-repo steps build it, with the App's token.
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage, probe: ports.registryProbe,
-        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
+        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, organisations: (org) => readOrganisationIdentity(ctx.db, org), stage: req.stage, subdomain: req.subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       const built = planned.builds;
@@ -715,8 +716,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         // makes the bucket and mints the key itself (simetrixch/hostyour-cloud#197). Stated EMPTY
         // rather than left out: the approve ceremony renders one input per entry, and the field is
         // what says this run needs no ceremony at all.
-        requiredSecrets: built.requiredSecrets, // one PAT per unregistered build unit the App does not reach
-        optionalSecrets: built.optionalSecrets, // one PAT per unregistered build unit the App reaches — given, it wins (#205)
+        requiredSecrets: [], // a build unit's identity is its organisation's, never asked at approve (#220)
       };
       return { outcome: "planned", params, plan };
     },
@@ -724,8 +724,6 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
     // teardown under its abort flavour), and WHETHER they may run — a full un-deploy must never fire for
     // a run whose tenant has meanwhile gone live, which only the tenants row + the GitOps pointer can say.
     steps: (params) => createTenantSteps(ports, params),
-    // Every build unit PAT handed in at approve, measured before the run starts (#212).
-    assertApprovable: (params, deps) => assertBuildUnitPats(() => ports.onboard?.(), params.buildUnits ?? [], deps.secrets),
     cleanups: (params) => createTenantCleanups(ports, params),
     assertAbortable: (params, deps) => assertCreateTenantAbortable(ports, params, deps.db),
   };

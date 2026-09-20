@@ -17,6 +17,8 @@ import type { PreflightCheck } from "../../../shared/preflight.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { readOrganisationIdentity } from "./organisations.ts";
+import { ORGANISATIONS_PAGE } from "./repo-identity.ts";
 import { consumerUnitHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
@@ -34,8 +36,12 @@ const unmeasured = (id: string, title: string, why: string): PreflightCheck => c
 async function withIdentity<T>(ctx: ProbeCtx, p: OnboardParams, purpose: string, f: (token: string, viaApp: boolean) => Promise<T>): Promise<T> {
   const viaApp = (await ctx.creds.list({ kind: "github-app" })).some((row) => row.id === p.repoCredentialId);
   const token = await ctx.creds.open(p.repoCredentialId, { purpose, runId: "plan" });
+  return withToken(token, (t) => f(t, viaApp));
+}
+
+async function withToken<T>(token: Buffer, f: (token: string) => Promise<T>): Promise<T> {
   try {
-    return await f(token.toString("utf8"), viaApp);
+    return await f(token.toString("utf8"));
   } finally {
     token.fill(0);
   }
@@ -77,7 +83,8 @@ export async function probeIdentity(ports: OnboardPorts, p: OnboardParams, ctx: 
 }
 
 /** seed-repo-pat's probe: one private package per scope the repository routes to GitHub Packages,
- *  read with the identity the build will install with. */
+ *  read with the organisation's packages reader — the token the build's `.npmrc` will carry (#220).
+ *  Refused by name where the organisation records none. */
 export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   if (!ports.github) return [];
   const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
@@ -86,7 +93,11 @@ export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: 
     const scopes = [...(npmrc ?? "").matchAll(/^@([^:\s]+):registry=https:\/\/npm\.pkg\.github\.com\/?\s*$/gm)].map((m) => m[1]!);
     if (scopes.length === 0) return [check("packages", "Private npm packages", "soft", "pass", "the repository routes no scope to GitHub Packages")];
     const lock = (await ports.repo.readFile(clone.workdir, "pnpm-lock.yaml")) ?? (await ports.repo.readFile(clone.workdir, "package-lock.json")) ?? "";
-    return withIdentity(ctx, p, "consumer-onboard:probe-packages", async (token, viaApp) => {
+    const { owner } = parseGitHubOwnerRepo(p.repoURL);
+    const readerId = readOrganisationIdentity(ctx.db, owner)?.packagesCredentialId;
+    if (!readerId) return [check("packages", "Private npm packages", "hard", "fail", `organisation ${owner} records no packages reader`, `record it on ${ORGANISATIONS_PAGE}`)];
+    const reader = await ctx.creds.open(readerId, { purpose: "consumer-onboard:probe-packages", runId: "plan" });
+    return withToken(reader, async (token) => {
       const out: PreflightCheck[] = [];
       for (const scope of scopes) {
         const name = lock.match(new RegExp(`@${scope.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/([A-Za-z0-9._-]+)[@/'"]`))?.[1];
@@ -94,10 +105,10 @@ export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: 
         if (!name) { out.push(check(`packages.${scope}`, title, "soft", "pass", "the lockfile names none")); continue; }
         const answer = await ports.github!.readPackage({ scope, name, token, signal: ctx.signal });
         out.push(answer === "readable"
-          ? check(`packages.${scope}`, title, "hard", "pass", `@${scope}/${name} is readable with the ${viaApp ? "App's token" : "PAT"}`)
+          ? check(`packages.${scope}`, title, "hard", "pass", `@${scope}/${name} is readable with the packages reader of ${owner}`)
           : answer === "absent"
             ? check(`packages.${scope}`, title, "hard", "warn", `@${scope}/${name} is not published there`)
-            : check(`packages.${scope}`, title, "hard", "fail", `@${scope}/${name} is not readable with the ${viaApp ? "App's token, which holds no read:packages" : "PAT"}`, "hand in a classic PAT with read:packages"));
+            : check(`packages.${scope}`, title, "hard", "fail", `@${scope}/${name} is not readable with the packages reader of ${owner}`, `record a packages reader of ${scope === owner ? owner : `${owner} that also reads @${scope}`} on ${ORGANISATIONS_PAGE}`));
       }
       return out;
     });

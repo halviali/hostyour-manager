@@ -23,6 +23,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { ClusterReader } from "../../adapters/kube/port.ts";
 import type { Registrations } from "./registrations.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
+import { packagesReaderFor, type OrganisationIdentityReader } from "./repo-identity.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import { appReachesRepoURL } from "./repo-identity.ts";
 
@@ -40,6 +41,9 @@ export const CATALOG_BUMP_UNIT = "catalog";
 
 export interface AppTokenRefreshDeps {
   store: Pick<CredentialStore, "list" | "open">;
+  /** The organisation identities (organisations.ts): the packages reader of a unit's organisation is
+   *  written beside the App token on every rewrite — the entry is replaced whole. */
+  organisations: OrganisationIdentityReader;
   registrations: Pick<Registrations, "listBuildRegistrations">;
   seeder: Pick<VaultSeeder, "refreshBuildRepoPat">;
   /** The catalog as configured (config.catalog): where it carries no token and the App reaches it,
@@ -58,12 +62,14 @@ export interface AppTokenRefreshDeps {
  *  App for a `github-app` credential. The value is zeroed after the write and never logged. Throws
  *  where the open or the write fails. Writes Vault only: the deletion that lets the value reach the
  *  pipeline is `deleteBuildSecrets`, called by both callers after this succeeded. */
-export async function refreshUnitRepoPat(deps: { store: Pick<CredentialStore, "open">; seeder: Pick<VaultSeeder, "refreshBuildRepoPat"> }, unit: string, credentialId: string, use: UseContext): Promise<void> {
+export async function refreshUnitRepoPat(deps: { store: Pick<CredentialStore, "open">; seeder: Pick<VaultSeeder, "refreshBuildRepoPat"> }, unit: string, credentialId: string, packagesCredentialId: string, use: UseContext): Promise<void> {
   const token = await deps.store.open(credentialId, use);
+  const packages = await deps.store.open(packagesCredentialId, use).catch((e: unknown) => { token.fill(0); throw e; });
   try {
-    await deps.seeder.refreshBuildRepoPat({ consumerName: unit, pat: token.toString("utf8") });
+    await deps.seeder.refreshBuildRepoPat({ consumerName: unit, pat: token.toString("utf8"), packages: packages.toString("utf8") });
   } finally {
     token.fill(0);
+    packages.fill(0);
   }
 }
 
@@ -95,22 +101,22 @@ export async function readBuildSecretRefreshTimes(kube: Pick<ClusterReader, "lis
 export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ refreshed: string[]; failed: string[] }> {
   const refreshed: string[] = [];
   const failed: string[] = [];
-  const units: { unit: string; credentialId: string }[] = [];
+  const units: { unit: string; credentialId: string; repoURL: string }[] = [];
   const buildUnits: string[] = [];
   try {
     const appCredentials = new Set((await deps.store.list({ kind: "github-app" })).map((c) => c.id));
     for (const { unit, entry } of await deps.registrations.listBuildRegistrations()) {
       buildUnits.push(unit);
-      if (entry.repoCredentialId && appCredentials.has(entry.repoCredentialId)) units.push({ unit, credentialId: entry.repoCredentialId });
+      if (entry.repoCredentialId && appCredentials.has(entry.repoCredentialId)) units.push({ unit, credentialId: entry.repoCredentialId, repoURL: entry.repoURL });
     }
   } catch (err) {
     deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the App-token refresh could not read which units carry a GitHub App credential — no repo-pat was rewritten this time");
     return { refreshed, failed };
   }
   const undeleted: string[] = [];
-  for (const { unit, credentialId } of units) {
+  for (const { unit, credentialId, repoURL } of units) {
     try {
-      await refreshUnitRepoPat(deps, unit, credentialId, { purpose: "app-token-refresh" });
+      await refreshUnitRepoPat(deps, unit, credentialId, packagesReaderFor(deps.organisations, repoURL), { purpose: "app-token-refresh" });
     } catch (err) {
       failed.push(unit);
       deps.logger.error({ unit, credentialId, err: err instanceof Error ? err.message : String(err) }, "the App token of this unit could not be rewritten into its build repo-pat — its next release clones with the value that stands, which dies an hour after it was minted");
@@ -151,7 +157,8 @@ async function refreshCatalogBumpToken(deps: AppTokenRefreshDeps, buildUnits: re
     }
     const token = Buffer.from(await githubApp.installationToken(), "utf8");
     try {
-      await deps.seeder.refreshBuildRepoPat({ consumerName: CATALOG_BUMP_UNIT, pat: token.toString("utf8") });
+      // The bump entry is read by the release pipeline's push alone — no build installs packages with it.
+      await deps.seeder.refreshBuildRepoPat({ consumerName: CATALOG_BUMP_UNIT, pat: token.toString("utf8"), packages: "" });
     } finally {
       token.fill(0);
     }

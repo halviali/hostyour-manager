@@ -447,10 +447,6 @@ const OnboardRequestFields = z.object({
   // their own ceiling is not a ceiling. Defaulted to the frugal preset, so an onboard that names none
   // lands there and is raised deliberately afterwards rather than sold generously by omission.
   size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
-  // The raw GitHub PAT — sealed by the API handler, never persisted/logged. OPTIONAL: a repository
-  // the platform's GitHub App reaches needs none (repo-identity.ts), and the handler refuses by
-  // name where the App does not reach it and no PAT came.
-  repoPat: z.string().min(1).optional(),
   // The unit's own stage, for both forms. Held against the channel ceiling at plan time.
   stage: z.enum(STAGE),
   // The target cluster of a DEPLOYABLE unit, any active one. Absent ⇒ the build-only form.
@@ -460,11 +456,11 @@ const OnboardRequestFields = z.object({
 export const OnboardRequest = OnboardRequestFields;
 export type OnboardRequest = z.infer<typeof OnboardRequest>;
 
-/** What actually enters the executor (planStream's raw params): the operator request with the raw
- *  PAT REPLACED by the sealed credential reference. Split from OnboardRequest so the raw value is
- *  structurally unable to reach params_json. */
-export const OnboardPlanRequest = OnboardRequestFields.omit({ repoPat: true }).extend({
-  repoCredentialId: z.string().min(1), // the sealed repo PAT (the run's read credential)
+/** What actually enters the executor (planStream's raw params): the operator request plus the
+ *  sealed credential reference the identity rule chose for the repository (repo-identity.ts) —
+ *  no raw value ever reaches params_json, because the request carries none. */
+export const OnboardPlanRequest = OnboardRequestFields.extend({
+  repoCredentialId: z.string().min(1), // the sealed repository identity (the run's read credential)
   // The version this onboarding releases — the next after the repository's release tags, read by the
   // API handler; the kit mints <version>-<channel>-<ts14> from it.
   version: z.string().regex(RELEASE_VERSION_RE),

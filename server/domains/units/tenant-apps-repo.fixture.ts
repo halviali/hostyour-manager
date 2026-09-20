@@ -4,6 +4,8 @@
 // what every create-tenant test of a tenant WITH apps folds into its ports (withAppsTemplate).
 import { PLATFORM_VALUES_COMMON } from "../../../shared/cluster-values.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import type { Db } from "../../db/client.ts";
+import { organisationIdentities } from "../../db/schema/organisations.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
@@ -98,4 +100,17 @@ export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string
     githubApp,
     resolveClusterValueFiles: async (domain, stage) => [{ path: PLATFORM_VALUES_COMMON, content: `global:\n  placeholderTag: "${PLACEHOLDER_TAG}"\n` }, ...(await chain(domain, stage))],
   };
+}
+
+/** The organisation identities a tenant test stands on (#220): the App's organisation ORG records
+ *  its packages reader (the App reaches every repository of it), and `acme` — the owner of the
+ *  test catalog's build repositories, which the App does not reach — records a packages reader and
+ *  a repository PAT. The credential ids name no row; a test that opens them fakes the store. */
+export function recordTestOrganisations(db: Db): void {
+  db.insert(organisationIdentities).values([
+    { org: ORG, packagesCredentialId: "cred_pkg_org", repoCredentialId: null },
+    { org: "acme", packagesCredentialId: "cred_pkg_acme", repoCredentialId: "cred_pat_acme" },
+    // `x`, the owner of the consumer tests' repository (onboard.fixture.ts).
+    { org: "x", packagesCredentialId: "cred_pkg_x", repoCredentialId: "cred_pat_x" },
+  ]).run();
 }

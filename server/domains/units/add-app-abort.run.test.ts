@@ -25,7 +25,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, TEMPLATE_MANIFEST, TENANT_URL, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, TEMPLATE_MANIFEST, TENANT_URL, withAppsTemplate, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { ports as onboardPorts, FakeBuildPlaneClusterReader } from "./onboard.fixture.ts";
 import { FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
@@ -83,7 +83,7 @@ const CLEAN_DOCS = [doc("Namespace", { namespace: "", raw: { kind: "Namespace" }
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and write-pointer resolves the tenant's ceiling against it.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function seededPlatformRepo(): FakePlatformRepo {

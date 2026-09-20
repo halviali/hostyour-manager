@@ -17,6 +17,8 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { judgeRepoIdentity } from "./repo-identity.ts";
+import { readOrganisationIdentity } from "./organisations.ts";
 import { tenantWildcardHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
@@ -73,11 +75,11 @@ export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, po
   const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
   const title = `The build unit ${unit.unit} (${owner}/${repo})`;
   if (unit.repoCredentialId === undefined) {
-    if (!unit.viaApp) return [unmeasured(`unit.${unit.unit}`, title, "its PAT is given at approve")];
-    const reaches = ports.githubApp ? await ports.githubApp.reachesRepository({ owner, repo, signal: ctx.signal }) : false;
-    return [reaches
-      ? check(`unit.${unit.unit}`, title, "hard", "pass", "reached by the platform's GitHub App")
-      : check(`unit.${unit.unit}`, title, "hard", "fail", "planned as reached by the platform's GitHub App, which does not reach it now", "hand in the repository's PAT at approve")];
+    // The organisation's identity, judged again now (repo-identity.ts): what the step will seal.
+    const judged = await judgeRepoIdentity({ repoURL: unit.repoURL, githubApp: ports.githubApp, organisations: (org) => readOrganisationIdentity(ctx.db, org), signal: ctx.signal });
+    return ["refused" in judged
+      ? check(`unit.${unit.unit}`, title, "hard", "fail", judged.refused)
+      : check(`unit.${unit.unit}`, title, "hard", "pass", judged.kind === "github-app" ? "reached by the platform's GitHub App; its packages read with the organisation's packages reader" : "its organisation's repository PAT; its packages read with the organisation's packages reader")];
   }
   const d = deps();
   const github = d?.ports.github;

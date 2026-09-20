@@ -36,7 +36,7 @@ import { unitBuildNamespace } from "./build-rbac.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { APP_OVERLAYS, STANDING_MEMBER_NAMES as TEST_MEMBERS, TEST_BUNDLE, testMembers } from "./tenant-members.fixture.ts";
-import { ORG, PLACEHOLDER_TAG as PLACEHOLDER, SHA, TEMPLATE_MANIFEST, TEMPLATE_SPEC, TEMPLATE_URL, TENANT_URL, UNIT, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
+import { ORG, PLACEHOLDER_TAG as PLACEHOLDER, SHA, TEMPLATE_MANIFEST, TEMPLATE_SPEC, TEMPLATE_URL, TENANT_URL, UNIT, withAppsTemplate, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const GUID = "zsjs023ctne0";
@@ -85,7 +85,7 @@ const withBundle = (tag: string): RenderedDoc[] => [
 const CHAIN = [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${HOST}\n` }];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -291,7 +291,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     // webhook and the dispatch each opened it to the token the App mints — nothing stored.
     expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, plaintext: "" }]);
     expect((await onboard.registrations.readBuildRegistration(UNIT))?.entry).toMatchObject({ repoCredentialId: "cred_1", repoURL: TENANT_URL });
-    expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass" }]);
+    expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass", packages: "ghp_test" }]); // the organisation's packages reader opens to the store's fallback
     expect((onboard.github as FakeGitHubConsumer).created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect((onboard.github as FakeGitHubConsumer).dispatches.map((d) => ({ repo: d.repo, token: d.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect(buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);

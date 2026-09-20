@@ -15,16 +15,10 @@
 // deployed slave stands in, the password-login and tailnet kinds only raise their own commands — so
 // the sentence common to all of them is here, and the rest is in each plan's summary, which the card
 // renders above these fields.
-import { MACHINE_PASSWORD_SECRET, BUILD_REPO_PAT_PREFIX } from "../../shared/approve.ts";
+import { MACHINE_PASSWORD_SECRET } from "../../shared/approve.ts";
 
-/** What the person reads under an OPTIONAL box: why they may leave it empty, and why they may not
- *  want to. Only a build unit's PAT is ever optional — the platform's GitHub App reaches the
- *  repository and stands in where no PAT is given (its token reads the organisation's private npm
- *  packages too, hostyour-cloud#235); a PAT is for packages of another organisation. */
-export function optionalSecretFieldHint(key: string): string {
-  if (key.startsWith(BUILD_REPO_PAT_PREFIX)) {
-    return "Optional: the platform's GitHub App reaches this repository and is its identity where you leave this empty — leave it empty. Give a PAT only where the unit installs private npm packages of ANOTHER organisation, which the App's token cannot read.";
-  }
+/** What the person reads under an OPTIONAL box: why they may leave it empty. */
+export function optionalSecretFieldHint(_key: string): string {
   return "Optional: the run goes on without it.";
 }
 
@@ -36,9 +30,6 @@ const CONSUMER_SECRET_PREFIX = "consumer-secret:";
  *  it is, which is a name the plan chose rather than a word invented here. */
 export function secretFieldLabel(key: string): string {
   if (key === MACHINE_PASSWORD_SECRET) return "The password of the machine account this manager logs in as";
-  if (key.startsWith(BUILD_REPO_PAT_PREFIX)) {
-    return `A classic GitHub PAT for the repository of build unit "${key.slice(BUILD_REPO_PAT_PREFIX.length)}" (repo + workflow + admin:repo_hook + read:packages)`;
-  }
   return key.startsWith(CONSUMER_SECRET_PREFIX) ? key.slice(CONSUMER_SECRET_PREFIX.length) : key;
 }
 
@@ -47,6 +38,5 @@ export function secretFieldLabel(key: string): string {
  *  sentence once, under the fields, for every credential on the card at once. */
 export function secretFieldHint(key: string): string | null {
   if (key === MACHINE_PASSWORD_SECRET) return "Every command this run sends to root is raised with it, and the run stops rather than going on without it.";
-  if (key.startsWith(BUILD_REPO_PAT_PREFIX)) return "Asked once: this run registers the unit and seeds the PAT into the build plane, and the next tenant asks for nothing.";
   return null;
 }

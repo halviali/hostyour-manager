@@ -10,12 +10,16 @@ import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, 
 import { unitBuildNamespace } from "./build-rbac.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 import { probePackages } from "./onboard-probes.ts";
+import { packagesReaderFor } from "./repo-identity.ts";
+import { readOrganisationIdentity } from "./organisations.ts";
 
-/** The onboard `seed-repo-pat` step: write the ONE per-unit GitHub PAT (the SAME value the
- *  Manager clones with) to secret/build/<name>/repo-pat (property `pat`) on the LOCAL Vault — the
- *  entry the unit's consumer-build ExternalSecrets (clone credential, npmrc, the bump credential)
- *  read. The manager runs on the build-plane cluster, so its own Vault IS the build plane's and
- *  there is no target-cluster resolution. Stage-free: one build plane, one PAT per unit.
+/** The onboard `seed-repo-pat` step: write the unit's build entry secret/build/<name>/repo-pat on
+ *  the LOCAL Vault with its TWO values (#220): property `pat`, the repository token the Manager
+ *  clones with (the App's, or the organisation's repository PAT), read by the clone credential and
+ *  the bump; property `packages`, the organisation's packages reader by the owner of the
+ *  repository URL, read by the build's `.npmrc` — an App token reads no private package. The
+ *  manager runs on the build-plane cluster, so its own Vault IS the build plane's and there is no
+ *  target-cluster resolution. Stage-free: one build plane, one entry per unit.
  *
  *  ATTEST-OR-CREATE (cas=0): the seven platform units were hand-seeded before the run kind existed, so a
  *  path that already stands is attested (`created: false`) and never overwritten — the write-only
@@ -25,24 +29,27 @@ import { probePackages } from "./onboard-probes.ts";
 export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
   return {
     name: "seed-repo-pat",
-    title: "Seed the unit's repo PAT into the local build Vault",
-    // What the seeded identity will be asked to read by the build: one private package per scope.
+    title: "Seed the unit's repository token and its organisation's packages reader into the local build Vault",
+    // What the seeded packages reader will be asked to read by the build: one private package per scope.
     probe: (ctx) => probePackages(ports, p, ctx),
     run: async (ctx) => {
+      const packagesCredentialId = packagesReaderFor((org) => readOrganisationIdentity(ctx.db, org), p.repoURL);
       const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:seed-repo-pat", runId: ctx.runId });
+      const packages = await ctx.creds.open(packagesCredentialId, { purpose: "consumer-onboard:seed-repo-pat", runId: ctx.runId }).catch((e: unknown) => { pat.fill(0); throw e; });
       let created: boolean;
       try {
-        ({ created } = await ports.seeder.seedBuildRepoPat({ consumerName: p.consumerName, pat: pat.toString("utf8") }));
+        ({ created } = await ports.seeder.seedBuildRepoPat({ consumerName: p.consumerName, pat: pat.toString("utf8"), packages: packages.toString("utf8") }));
       } finally {
         pat.fill(0);
+        packages.fill(0);
       }
       const path = `${KV_MOUNT}/build/${p.consumerName}/repo-pat`;
       ctx.checkpoint({ path, created });
       ctx.log(
         "meta",
         created
-          ? `repo PAT seeded to ${path} (property pat) — the unit's build namespace can now clone, read packages and push its bump`
-          : `repo PAT already present at ${path} — attested and left untouched (create-only). To rotate it, delete the entry deliberately and re-onboard.`,
+          ? `repository token and packages reader seeded to ${path} (properties pat, packages) — the unit's build namespace can now clone, install private packages and push its bump`
+          : `${path} already present — attested and left untouched (create-only). To replace it, delete the entry deliberately and re-onboard.`,
       );
     },
   };
@@ -73,9 +80,10 @@ export function refreshRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step 
       }
       const namespace = unitBuildNamespace(p.consumerName);
       const before = await readBuildSecretRefreshTimes(kube, p.consumerName);
-      await refreshUnitRepoPat({ store: ctx.creds, seeder: ports.seeder }, p.consumerName, p.repoCredentialId, { purpose: "consumer-onboard:refresh-repo-pat", runId: ctx.runId });
+      const packagesCredentialId = packagesReaderFor((org) => readOrganisationIdentity(ctx.db, org), p.repoURL);
+      await refreshUnitRepoPat({ store: ctx.creds, seeder: ports.seeder }, p.consumerName, p.repoCredentialId, packagesCredentialId, { purpose: "consumer-onboard:refresh-repo-pat", runId: ctx.runId });
       const path = `${KV_MOUNT}/build/${p.consumerName}/repo-pat`;
-      ctx.log("meta", `repo PAT rewritten at ${path} (property pat) with the credential's current value`);
+      ctx.log("meta", `${path} rewritten (properties pat, packages) with the credentials' current values`);
       await deleteBuildSecrets(kube, p.consumerName);
       ctx.log("meta", `${BUILD_TARGET_SECRETS.join(", ")} deleted in ${namespace} — waiting for ESO to materialize them again from the rewritten entry`);
       const budgetMs = ports.buildSecretsMaterializeMs ?? 2 * 60_000;

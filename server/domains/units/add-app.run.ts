@@ -21,7 +21,8 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { placeholderTagFromChain } from "./tenant-values.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { readTenantSpec, recordAppsRepoStep } from "./tenant-apps-repo.run.ts";
-import { BuildUnitSchema, assertBuildUnitPats, buildUnitStep, planBuildUnits, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { readOrganisationIdentity } from "./organisations.ts";
+import { BuildUnitSchema, buildUnitStep, planBuildUnits, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
@@ -372,7 +373,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
-      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), organisations: (org) => readOrganisationIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
       const appsImage = tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
@@ -424,7 +425,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       // app added after the platform pulls images no earlier run had to build.
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage, probe: ports.registryProbe,
-        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, stage: tc.stage, subdomain: current.entry.subdomain, signal: ctx.signal, log: ctx.log,
+        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, organisations: (org) => readOrganisationIdentity(ctx.db, org), stage: tc.stage, subdomain: current.entry.subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       const built = planned.builds;
@@ -468,14 +469,11 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         targets: [],
         locks: tenantLocks(ports.registrations),
         warnings: built.warnings,
-        requiredSecrets: built.requiredSecrets, // one PAT per unregistered build unit the App does not reach
-        optionalSecrets: built.optionalSecrets, // one PAT per unregistered build unit the App reaches — given, it wins (#205)
+        requiredSecrets: [], // a build unit's identity is its organisation's, never asked at approve (#220)
       };
       return { outcome: "planned", params, plan };
     },
     steps: (params) => addAppSteps(ports, params),
-    // Every build unit PAT handed in at approve, measured before the run starts (#212).
-    assertApprovable: (params, deps) => assertBuildUnitPats(() => ports.onboard?.(), params.buildUnits ?? [], deps.secrets),
     cleanups: (params) => [revertAppendCleanup(ports, params)],
     // The rollback's precondition: the drop above is destructive by cascade (the member's databases go
     // with its ServiceClaim), so it must never fire for a run whose NEW member has meanwhile gone live.

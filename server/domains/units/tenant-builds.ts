@@ -33,15 +33,11 @@ import { z } from "zod";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, type ReleaseChannel } from "../../../shared/release.ts";
-import { buildRepoPatSecret } from "../../../shared/approve.ts";
-import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
-import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
-import { WebhookScopeError } from "../../adapters/github-consumer/port.ts";
 import { unitNameFromRepoURL, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { fingerprintSecret } from "../../security/fingerprint.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import { appReachesRepoURL } from "./repo-identity.ts";
+import { judgeRepoIdentity, resolveRepoIdentity, sealRepoIdentity, type OrganisationIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
+import { readOrganisationIdentity } from "./organisations.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import { buildOnlySteps, type BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
@@ -64,9 +60,9 @@ import type { TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
 
 /** One build unit the tenant run onboards or re-releases before it fans out. Frozen into the run
  *  params at plan time; the credential id is present only for a unit already registered. Every
- *  other unit's identity follows the rule of repo-identity.ts (#201, #205): the PAT where one is
- *  given at approve — demanded where the App does not reach the repository, taken where it does
- *  (`viaApp`, measured at plan) — else the App, sealed by the step itself. */
+ *  other unit's identity is its organisation's (repo-identity.ts, #220): judged at plan — refused
+ *  there, naming the organisation, where none stands — and sealed by the step itself. Nothing is
+ *  asked at approve. */
 export const BuildUnitSchema = z.object({
   unit: z.string().min(1), // basename(repoURL), the identity every registration holds
   repoURL: z.string().min(1),
@@ -74,7 +70,6 @@ export const BuildUnitSchema = z.object({
   registered: z.boolean(),
   form: z.enum(["build-only", "deployable"]).optional(), // known for a registered unit only
   repoCredentialId: z.string().min(1).optional(),
-  viaApp: z.boolean().optional(),
 });
 export type BuildUnit = z.infer<typeof BuildUnitSchema>;
 
@@ -95,9 +90,6 @@ export async function resolveBuildUnits(input: {
   missing: readonly RequiredImage[];
   buildRepos: TenantSpec["buildRepos"];
   registration: (unit: string) => Promise<RegisteredUnit | null>;
-  /** Whether the App reaches a repository — asked for every unit not registered yet; absent ⇒ no
-   *  App on this manager, every such unit asks its PAT. */
-  reaches?: (repoURL: string) => Promise<boolean>;
 }): Promise<BuildUnitResolution> {
   const repoOf = new Map<string, string>();
   for (const entry of input.buildRepos) for (const image of entry.builds) repoOf.set(image, entry.repo);
@@ -117,7 +109,6 @@ export async function resolveBuildUnits(input: {
   for (const [repoURL, images] of byRepo) {
     const unit = unitNameFromRepoURL(repoURL);
     const found = await input.registration(unit);
-    const viaApp = found === null && input.reaches !== undefined && (await input.reaches(repoURL));
     units.push({
       unit,
       repoURL,
@@ -125,61 +116,14 @@ export async function resolveBuildUnits(input: {
       registered: found !== null,
       ...(found ? { form: found.form } : {}),
       ...(found?.repoCredentialId ? { repoCredentialId: found.repoCredentialId } : {}),
-      ...(viaApp ? { viaApp: true } : {}),
     });
   }
   units.sort((a, b) => a.unit.localeCompare(b.unit));
   return { units, unmapped };
 }
 
-/** The approve-time secrets the plan demands: one PAT per unit that carries no stored credential and
- *  that the App does not reach. */
-export function buildUnitSecrets(units: readonly BuildUnit[]): string[] {
-  return units.filter((u) => u.repoCredentialId === undefined && !u.viaApp).map((u) => buildRepoPatSecret(u.unit));
-}
-
-/** The approve's measurement of every unit PAT handed in (#212): a classic token with every scope
- *  the consumer onboarding demands, else the approve is refused naming every missing scope of
- *  every unit at once — the same rule preflight-scopes applies inside the run, asked here BEFORE
- *  the run exists so the person corrects the token instead of aborting a run. A unit without a
- *  handed-in PAT is not measured here (the App is its identity, or the required one is missing and
- *  the executor already refused). Measured with the consumer client where it is wired; where it is
- *  not, the run's own step measures. */
-export async function assertBuildUnitPats(deps: () => TenantBuildDeps | undefined, units: readonly BuildUnit[], secrets: Readonly<Record<string, Buffer>>): Promise<void> {
-  const github = deps()?.ports.github;
-  if (!github) return;
-  const refusals: string[] = [];
-  for (const unit of units) {
-    const raw = secrets[buildRepoPatSecret(unit.unit)];
-    if (!raw || raw.length === 0 || unit.repoCredentialId !== undefined) continue;
-    const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
-    let scopes;
-    try {
-      scopes = await github.readTokenScopes({ owner, repo, token: raw.toString("utf8") });
-    } catch (err) {
-      if (err instanceof WebhookScopeError) { refusals.push(`${unit.unit}: the PAT is invalid or expired`); continue; }
-      throw err;
-    }
-    if (!scopes.classic) { refusals.push(`${unit.unit}: the token is fine-grained, which reports no scopes — a CLASSIC PAT is needed`); continue; }
-    const missing = missingConsumerPatScopes(scopes.scopes);
-    if (missing.length > 0) refusals.push(`${unit.unit}: the PAT lacks ${missing.join(", ")} (granted: ${scopes.scopes.join(", ")})`);
-  }
-  if (refusals.length > 0) {
-    throw errValidation(`the approve is refused — a build unit's PAT does not carry what its onboarding needs (${requiredConsumerPatScopesSummary()}): ${refusals.join("; ")}. A classic PAT's scopes cannot be edited after creation — mint a new token with every scope and approve again`);
-  }
-}
-
-/** The approve-time secrets the plan TAKES: one PAT per unit the App reaches and nothing has
- *  registered yet. Given, it is the unit's identity — a unit with private npm packages needs it,
- *  because the App's token holds no read:packages (#205); left empty, the App is. */
-export function buildUnitOptionalSecrets(units: readonly BuildUnit[]): string[] {
-  return units.filter((u) => u.repoCredentialId === undefined && u.viaApp === true).map((u) => buildRepoPatSecret(u.unit));
-}
-
 export interface PlannedBuilds {
   units: BuildUnit[];
-  requiredSecrets: string[];
-  optionalSecrets: string[];
   warnings: string[];
 }
 
@@ -198,8 +142,10 @@ export async function planBuildUnits(input: {
   appsBundle?: TenantSpec["appsBundle"];
   appsImage?: string | undefined;
   registration: (unit: string) => Promise<RegisteredUnit | null>;
-  /** The platform's GitHub App, to measure which unregistered unit it reaches (repo-identity.ts). */
-  githubApp?: Pick<GitHubApp, "reachesRepository"> | undefined;
+  /** The platform's GitHub App and the organisation identities: every unregistered unit's identity
+   *  is judged here (repo-identity.ts), and a unit whose organisation records none refuses the plan. */
+  githubApp?: Pick<GitHubApp, "reachesRepository" | "installationOrg"> | undefined;
+  organisations: OrganisationIdentityReader;
   probe: RegistryProbe;
   stage: Stage;
   subdomain: string;
@@ -218,11 +164,7 @@ export async function planBuildUnits(input: {
     if (img.repo === input.appsImage) continue;
     if (!(await input.probe.imageExists({ registryHost: input.registryHost, repo: img.repo, tag: img.tag }, { signal: input.signal }))) missing.push(img);
   }
-  const app = input.githubApp;
-  const { units, unmapped } = await resolveBuildUnits({
-    missing, buildRepos: input.buildRepos, registration: input.registration,
-    ...(app ? { reaches: (repoURL: string) => appReachesRepoURL(app, repoURL, input.signal) } : {}),
-  });
+  const { units, unmapped } = await resolveBuildUnits({ missing, buildRepos: input.buildRepos, registration: input.registration });
   if (unmapped.length > 0) {
     return {
       outcome: "rejected",
@@ -237,13 +179,18 @@ export async function planBuildUnits(input: {
     };
   }
   for (const u of units) {
-    input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — ${u.registered ? "registered, its release is re-run" : "not registered, onboarded build-only by this run"}${u.repoCredentialId ? "" : u.viaApp ? "; reached by the platform's GitHub App — its PAT may be given at approve (a unit with private npm packages needs it), else the App is its identity" : "; its PAT is asked at approve"}`);
+    if (u.repoCredentialId !== undefined) {
+      input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — registered, its release is re-run`);
+      continue;
+    }
+    const judged = await judgeRepoIdentity({ repoURL: u.repoURL, githubApp: input.githubApp, organisations: input.organisations, signal: input.signal });
+    if ("refused" in judged) return { outcome: "rejected", summary: `Tenant "${input.subdomain}" was rejected — build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} and has no identity: ${judged.refused}` };
+    input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — not registered, onboarded build-only by this run as ${judged.kind === "github-app" ? "the platform's GitHub App" : "its organisation's repository PAT"}, its packages read with the organisation's packages reader`);
   }
-  const askingPat = units.filter((u) => u.repoCredentialId === undefined && !u.viaApp);
   const warnings = units.length > 0
-    ? [`${units.length} build unit(s) are onboarded by this run before the tenant is deployed (${units.map((u) => `${u.unit}: ${u.images.join(", ")}`).join("; ")}) — each releases its next version onto ${input.stage} and pins it on the books branch${askingPat.length > 0 ? `; ${askingPat.map((u) => u.unit).join(", ")} ${askingPat.length === 1 ? "is" : "are"} not reached by the platform's GitHub App and ask${askingPat.length === 1 ? "s" : ""} for the repository's PAT at approve` : ""}.`]
+    ? [`${units.length} build unit(s) are onboarded by this run before the tenant is deployed (${units.map((u) => `${u.unit}: ${u.images.join(", ")}`).join("; ")}) — each releases its next version onto ${input.stage} and pins it on the books branch`]
     : [];
-  return { outcome: "planned", builds: { units, requiredSecrets: buildUnitSecrets(units), optionalSecrets: buildUnitOptionalSecrets(units), warnings } };
+  return { outcome: "planned", builds: { units, warnings } };
 }
 
 /** The consumer onboarding's ports and the two release-version inputs beside them, handed to the
@@ -253,8 +200,8 @@ export interface TenantBuildDeps {
   ports: OnboardPorts;
   platformGitHub?: { owner: string; repo: string };
   platformRepo?: PlatformRepo;
-  /** The platform's GitHub App — what a unit the App reaches is sealed under (repo-identity.ts). */
-  githubApp?: Pick<GitHubApp, "identityFingerprint">;
+  /** The platform's GitHub App — the identity of a unit it reaches, sealed by the step (repo-identity.ts). */
+  githubApp?: RepoIdentityApp;
 }
 
 /** What the build steps hand the steps after them, in-run memory (the run's own closure): the image
@@ -279,27 +226,12 @@ export function buildUnitStepName(unit: string): string {
   return `build-unit:${unit}`;
 }
 
-/** The identity of a unit not registered yet, sealed by this step: the PAT given at approve where
- *  one was (demanded where the App does not reach the repository, taken where it does — a given PAT
- *  is never dropped, #201/#205), else a `github-app` row storing no token where the plan measured
- *  the App reaches the repository (the store mints the App's token at every open). */
+/** The identity of a unit not registered yet, sealed by this step: the organisation's, resolved the
+ *  way the plan judged it (repo-identity.ts) — a `github-app` row storing no token where the App
+ *  reaches the repository, else the organisation's repository PAT sealed under the unit's name. */
 async function sealUnitIdentity(ctx: StepCtx, d: TenantBuildDeps, unit: BuildUnit): Promise<string> {
-  const given = ctx.secrets.get(buildRepoPatSecret(unit.unit));
-  if (!unit.viaApp || (given && given.length > 0)) return sealApprovedPat(ctx, unit);
-  if (!d.githubApp) throw errValidation(`build unit "${unit.unit}" (${unit.repoURL}) was planned as reached by the platform's GitHub App, and this manager holds no App to seal it under`);
-  return (await ctx.creds.seal({ kind: "github-app", label: `GitHub App (${unit.unit})`, plaintext: Buffer.alloc(0), fingerprint: d.githubApp.identityFingerprint() })).id;
-}
-
-async function sealApprovedPat(ctx: StepCtx, unit: BuildUnit): Promise<string> {
-  const key = buildRepoPatSecret(unit.unit);
-  const raw = ctx.secrets.get(key);
-  if (!raw || raw.length === 0) {
-    throw errValidation(`the PAT for build unit "${unit.unit}" (${unit.repoURL}) was not given at approve — the plan asked for it as ${key}`);
-  }
-  const plaintext = Buffer.from(raw);
-  const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
-  const ref = await ctx.creds.seal({ kind: "pat", label: `build repo PAT (${unit.unit})`, plaintext, fingerprint });
-  return ref.id;
+  const identity = await resolveRepoIdentity({ repoURL: unit.repoURL, githubApp: d.githubApp, organisations: (org) => readOrganisationIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
+  return sealRepoIdentity(ctx.creds, identity, unit.unit, d.githubApp);
 }
 
 async function nextVersion(ctx: StepCtx, deps: TenantBuildDeps, unit: BuildUnit, repoCredentialId: string): Promise<string> {

@@ -1,8 +1,10 @@
+import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "./unit-size.ts";
 import { eq } from "drizzle-orm";
 import { pino } from "pino";
 import { openDb, type DbHandle } from "../../db/client.ts";
+import { organisationIdentities } from "../../db/schema/organisations.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { Executor } from "../../executor/executor.ts";
 import { RunEventBus } from "../../executor/bus.ts";
@@ -51,7 +53,7 @@ let db: DbHandle;
 // starts without it — and write-registration resolves the unit's ceiling against it. Seeding here is
 // what a running Manager has done long before an onboard reaches it; without it the run fails at
 // exactly that step, which is the correct behaviour and not what these tests are about.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 /** The manifest every fixture onboards: one declared build, so gate G18's manifest half holds. */
@@ -154,7 +156,10 @@ function seedCluster(): void {
 const REQUEST = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart" };
 
 async function sealPat(store: CredentialStore): Promise<string> {
-  const ref = await store.seal({ kind: "pat", label: "consumer repo PAT (acme)", plaintext: Buffer.from("github_pat_journey", "utf8"), fingerprint: "sha256:test" });
+  const ref = await store.seal({ kind: "pat", label: "repository PAT (acme)", plaintext: Buffer.from("github_pat_journey", "utf8"), fingerprint: "sha256:test" });
+  // The organisation's packages reader, a real row the seed step opens beside the unit's token (#220).
+  const packages = await store.seal({ kind: "pat", label: "packages reader (x)", plaintext: Buffer.from("ghp_packages_x", "utf8"), fingerprint: "sha256:pkg" });
+  db.db.update(organisationIdentities).set({ packagesCredentialId: packages.id }).where(eq(organisationIdentities.org, "x")).run();
   return ref.id;
 }
 

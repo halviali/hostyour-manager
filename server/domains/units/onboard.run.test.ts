@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "./unit-size.ts";
+import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { createPublicKey } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -23,8 +24,7 @@ let db: DbHandle;
 // starts without it — and write-registration resolves the unit's ceiling against it. Seeding here is
 // what a running Manager has done long before an onboard reaches it; without it the run fails at
 // exactly that step, which is the correct behaviour and not what these tests are about.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
-afterEach(() => { db.sqlite.close(); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); }); afterEach(() => { db.sqlite.close(); });
 
 const BASE = {
   consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
@@ -91,7 +91,6 @@ function seedClusters(): void {
 async function runAll(p: OnboardParams, prt: OnboardPorts, logs: string[]): Promise<void> {
   for (const step of makeOnboardDef(prt).steps(p)) await step.run(ctx(p, step.name, logs));
 }
-
 describe("onboard run definition", () => {
   it("builds the deployable chain from steps({}), attest-target first and refuses the synchronous plan() path", () => {
     const def = makeOnboardDef(ports());
@@ -175,7 +174,7 @@ describe("onboard run definition", () => {
     expect(cred?.stringData.username).toBe("hostyour-cloud");
 
     // seed-repo-pat wrote the stage-free build credential (local Vault)
-    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test" }]);
+    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test", packages: "github_pat_test" }]);
 
     // record-inventory wrote the apps row — provenance "manager", the SAME word create-tenant writes
     // for a tenant (create-tenant.run.test.ts asserts it on the other side), so one query answers about
@@ -202,7 +201,7 @@ describe("onboard run definition", () => {
     expect(await prt.registrations.listAttestedBuildNames("someone-else")).toEqual([{ unit: "acme", build: "acme-api" }]);
 
     // the repo-pat seed ATTESTED the existing path instead of writing again
-    expect(seeder.buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test" }]);
+    expect(seeder.buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test", packages: "github_pat_test" }]);
     expect(logs.some((l) => l.includes("attested and left untouched"))).toBe(true);
 
     // NOTHING is written by hand. The two build-namespace grants stand inside the Application
@@ -293,7 +292,7 @@ describe("onboard run definition", () => {
     const step = makeOnboardDef(prt).steps(p).find((s) => s.name === "seed-repo-pat")!;
     const logs: string[] = [];
     await step.run(ctx(p, "seed-repo-pat", logs, fakeCreds(opened)));
-    expect(opened).toEqual(["cred_pat"]);
+    expect(opened).toEqual(["cred_pat", "cred_pkg_x"]); // the repository token, then the organisation's packages reader
     expect(logs.some((l) => l.includes("secret/build/acme/repo-pat"))).toBe(true);
     expect(logs.every((l) => !l.includes("github_pat_test"))).toBe(true);
     seeder.seedBuildRepoPat = async () => { throw new Error("vault build repo-pat put failed for secret/build/acme/repo-pat (403)"); };

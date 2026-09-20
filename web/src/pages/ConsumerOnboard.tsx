@@ -1,5 +1,5 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, Link } from "react-router";
 import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, type OnboardTargetView } from "../api.ts";
@@ -40,7 +40,6 @@ export function ConsumerOnboard() {
   // alone says where the one triggered release run puts the release). The server checks the choice
   // against the manifest's own shape.
   const [buildOnly, setBuildOnly] = useState(false);
-  const [repoPat, setRepoPat] = useState("");
   const [targets, setTargets] = useState<OnboardTargetView[] | null>(null);
   // The channel table, read from the config route — platform/values-common.yaml global.channelStages
   // verbatim. Which channels exist and which stages each admits comes from HERE, never a local copy.
@@ -75,13 +74,14 @@ export function ConsumerOnboard() {
     setForm((f) => ({ ...f, consumerName: e.target.value }));
   };
 
-  // The check under the PAT field: the PAT lists the repository's release tags once and is not kept;
-  // what comes back is the version the onboarding will release and the place it was read from.
+  // The check under the repository field: the organisation's identity lists the repository's release
+  // tags once and is not kept; what comes back is the version the onboarding will release, the place
+  // it was read from, and which identity it is (#220).
   async function readRepository(): Promise<void> {
     setReading(true);
     setError(null);
     try {
-      const view = await prefillOnboard({ repoURL: form.repoURL.trim(), ...(repoPat.trim() ? { repoPat: repoPat.trim() } : {}) });
+      const view = await prefillOnboard({ repoURL: form.repoURL.trim() });
       setPrefill(view);
       setForm((f) => ({ ...f, channel: view.channel, stage: "" }));
     } catch (err) {
@@ -110,7 +110,6 @@ export function ConsumerOnboard() {
         ...(buildOnly ? {} : { clusterId: form.clusterId }),
         owner: form.owner.trim(),
         ...(form.chartPath.trim() ? { chartPath: form.chartPath.trim() } : {}),
-        ...(repoPat.trim() ? { repoPat: repoPat.trim() } : {}),
       });
       nav(`/runs/${runId}`); // the Run screen streams the live gate report + the approve card
     } catch (err) {
@@ -161,17 +160,6 @@ export function ConsumerOnboard() {
               equal it (G1).
             </span>
           </label>
-          <label className="field">
-            <span className="field__label">Repository PAT</span>
-            <input type="password" value={repoPat} onChange={(e) => setRepoPat(e.target.value)} placeholder="github_pat_… (empty where the platform's GitHub App reaches the repository)" autoComplete="off" />
-            <span className="field__hint">
-              One classic PAT (repo + workflow + admin:repo_hook + read:packages). Given, it is the identity: the Manager seals
-              it, clones and pushes with it, and seeds it for the unit&apos;s build — it never appears in logs or the sandbox.
-              A unit with private npm packages needs it, because the platform&apos;s GitHub App holds no package read. Left empty,
-              the App is the identity of a repository its installation reaches; a repository outside it is refused without a
-              PAT. The check below says which one applies.
-            </span>
-          </label>
           <div className="field">
             <span className="field__label">Check the repository</span>
             <button type="button" className="btn" disabled={!canRead} onClick={() => void readRepository()}>
@@ -179,10 +167,13 @@ export function ConsumerOnboard() {
             </button>
             <span className="field__hint">
               A check, not a step of the onboarding: lists the repository&apos;s release tags with the identity the
-              onboarding will run with — the PAT above where given, else the platform&apos;s GitHub App where it reaches the repository —
-              so that identity is proven to read the repository, and shows the version the onboarding will release under
-              Version. Nothing is cloned and nothing is kept.
-              {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App (no PAT needed)" : "the PAT above"}.` : ""}
+              onboarding will run with — the organisation&apos;s, by the owner of the URL: the platform&apos;s GitHub App where
+              it reaches the repository, else the organisation&apos;s repository PAT recorded on the{" "}
+              <Link to="/organisations">Organisations</Link> page — so that identity is proven to read the repository, and
+              shows the version the onboarding will release under Version. The organisation&apos;s packages reader must be
+              recorded there too: it is what the unit&apos;s build installs private npm packages with. Nothing is asked here,
+              nothing is cloned and nothing is kept.
+              {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App" : "the organisation's repository PAT"}.` : ""}
             </span>
           </div>
           <label className="field">

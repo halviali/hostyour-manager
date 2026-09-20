@@ -11,7 +11,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeTenantAppsRepoDef, type TenantAppsRepoParams } from "./tenant-apps-repo.run.ts";
 import { mergeAppsManifest } from "./tenant-apps-tree.ts";
-import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, catalogManifest } from "./tenant-apps-repo.fixture.ts";
+import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, catalogManifest, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -32,7 +32,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 
 let db: DbHandle;
 beforeEach(() => {
-  db = openDb(":memory:");
+  db = openDb(":memory:"); recordTestOrganisations(db.db);
   db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active" }).run();
 });
@@ -112,6 +112,7 @@ function fakeCreds(app: FakeGitHubApp): { store: CredentialStore; seals: { id: s
     },
     open: async (id: string) => {
       opened.push(id);
+      if (id === "cred_pkg_org") return Buffer.from("ghp_packages_org", "utf8"); // the organisation's packages reader (recordTestOrganisations)
       const s = seals.find((x) => x.id === id);
       if (!s) throw new Error(`unknown credential ${id}`);
       return Buffer.from(s.kind === "github-app" ? await app.installationToken() : s.plaintext, "utf8");
@@ -312,7 +313,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     const onboard = h.ports.onboard!()!.ports;
     const registration = await onboard.registrations.readBuildRegistration(UNIT);
     expect(registration?.entry).toMatchObject({ name: UNIT, repoURL: TENANT_URL, repoCredentialId: "cred_1", owner: SUBDOMAIN, builds: [UNIT] });
-    expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_hour_two" }]);
+    expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_hour_two", packages: "ghp_packages_org" }]);
     expect(h.seeder.refreshedRepoPats).toEqual([]);
     expect(h.buildCluster.secretWrites).toEqual([]);
     expect(h.github.created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_hour_two" }]);
@@ -321,7 +322,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     // ONE credential for the whole pass, of the kind that stores nothing; every open went to it, and
     // the PAT scope preflight read no scopes off it — the step itself stood aside for the App's row.
     expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, fingerprint: h.githubApp.identityFingerprint(), plaintext: "" }]);
-    expect(new Set(creds.opened)).toEqual(new Set(["cred_1"]));
+    expect(new Set(creds.opened)).toEqual(new Set(["cred_1", "cred_pkg_org"])); // the App row and the organisation's packages reader
     expect(logs.some((l) => l.includes("installation permissions stand in for PAT scopes"))).toBe(true);
     expect(logs.some((l) => l.includes("PAT scopes OK"))).toBe(false);
     expect(logs.at(-1)).toContain(`${UNIT} built as ${UNIT}:${IMAGE_TAG} for prod`);
@@ -347,7 +348,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     expect(await h.ports.onboard!()!.ports.registrations.readBuildRegistration(UNIT)).toBeNull();
     // Not the create-only seed: the entry stands from the onboarding and holds a dead token.
     expect(h.seeder.buildRepoPats).toEqual([]);
-    expect(h.seeder.refreshedRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_rerun" }]);
+    expect(h.seeder.refreshedRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_rerun", packages: "ghp_packages_org" }]);
     // The three target Secrets of the unit's ExternalSecrets, deleted in ITS build namespace behind
     // the rewrite, and the dispatch only after they stood again — a clone that started between the
     // deletion and the materialization would read no credential.

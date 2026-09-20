@@ -21,8 +21,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { TEMPLATE_SPEC, withAppsTemplate, ORG } from "./tenant-apps-repo.fixture.ts";
-import { buildRepoPatSecret } from "../../../shared/approve.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, ORG, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
 
 const SHA = "a".repeat(40);
@@ -69,7 +68,7 @@ const CLEAN_DOCS = [NS_DOC, doc("Deployment")];
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and write-pointer resolves the tenant's ceiling against it.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -347,9 +346,9 @@ describe("add-app streaming planner", () => {
   });
 
   // An app added after the platform pulls images no earlier run had to build (#214): the plan
-  // resolves a build unit per missing image's repository exactly as create-tenant does, asks its PAT,
-  // and places the build ahead of the image gate.
-  it("a missing image the tenant spec's buildRepos names becomes a build unit ahead of ensure-images, with its PAT asked at approve", async () => {
+  // resolves a build unit per missing image's repository exactly as create-tenant does, with its
+  // organisation's identity (#220), and places the build ahead of the image gate.
+  it("a missing image the tenant spec's buildRepos names becomes a build unit ahead of ensure-images, nothing asked at approve", async () => {
     seedClusters();
     const PLATFORM_REPO = "https://github.com/acme/example-platform.git";
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML.replace("  members:", `  buildRepos:
@@ -362,12 +361,12 @@ describe("add-app streaming planner", () => {
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits).toEqual([{ unit: "example-platform", repoURL: PLATFORM_REPO, images: ["example-engine"], registered: false }]);
-    expect(result.plan.requiredSecrets).toEqual([buildRepoPatSecret("example-platform")]);
-    expect(result.plan.optionalSecrets).toEqual([]);
+    expect(result.plan.requiredSecrets).toEqual([]);
+    expect(result.plan.optionalSecrets).toBeUndefined();
     const names = result.plan.steps.map((s) => s.name);
     expect(names.indexOf(buildUnitStepName("example-platform"))).toBe(1); // right after attest-target
     expect(names.indexOf(buildUnitStepName("example-platform"))).toBeLessThan(names.indexOf("ensure-images"));
-    expect(def.assertApprovable).toBeDefined();
+    expect(def.assertApprovable).toBeUndefined();
     // A missing image no buildRepos entry names is refused by name, never probed for again at run time.
     const nobody = makeAddAppDef(ports({ helm, registryProbe: new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] }) }));
     const refused = await nobody.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());

@@ -33,6 +33,7 @@ import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } f
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
+import { packagesReaderMissing, type OrganisationIdentityReader } from "./repo-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
 
 const repoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
@@ -125,7 +126,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
  *  it (null where the catalog declares none) and has checked the App is wired. */
 export async function resolveTenantAppsUnit(
   ports: TenantOnboardPorts,
-  input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; signal: AbortSignal; log: (line: string) => void },
+  input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; organisations: OrganisationIdentityReader; signal: AbortSignal; log: (line: string) => void },
 ): Promise<{ outcome: "resolved"; unit: TenantAppsUnit } | { outcome: "refused"; why: string }> {
   const refuse = (why: string) => ({ outcome: "refused" as const, why });
   if (!input.spec) return refuse(`the catalog ${ports.catalogRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
@@ -135,6 +136,8 @@ export async function resolveTenantAppsUnit(
   if (!template) return refuse(`the catalog declares no tenant.appsBundle and tenant.appsRepo in ${TENANT_MANIFEST_PATH} — the template a tenant's repository is created from`);
   const unit = tenantAppsUnit(template.name, input.subdomain);
   if (!consumerName.safeParse(unit).success) return refuse(`"${unit}" is not a unit name (lower-case letters, digits and hyphens, at most 40 characters) — choose a shorter subdomain`);
+  // The bundle's build installs the organisation's private packages with its packages reader (#220).
+  if (!input.organisations(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit));
   input.log(`template ${template.repo} (${template.name}), organisation ${org}, repository ${tenantAppsRepoURL(org, template.name, input.subdomain)}`);
   const read = await readTemplate(ports, template.repo, input.signal);
   let offered: string[];
