@@ -530,13 +530,16 @@ export class GitConsumerRepo implements ConsumerRepo {
         const m = HEAD_SYMREF_RE.exec(out);
         if (!m?.[1]) {
           // An EMPTY repository — created a moment ago, no commit yet — advertises no HEAD to
-          // ls-remote and carries no branch to fetch. A clone still learns the NAME of its unborn
-          // default branch from the remote and checks that branch out, unborn, so the first
-          // commitPush creates it on the remote under the name the remote chose (tenant-apps-repo
-          // writes a tenant's tree into the repository it just created).
-          if ((await run(["ls-remote", "--heads", repoURL], env)).trim() !== "") throw errValidation(`could not resolve the default branch of ${repoURL} (git ls-remote --symref HEAD returned no "ref: refs/heads/<branch>")`);
+          // ls-remote and carries no branch to fetch. Its unborn branch is whatever the remote's
+          // organisation default says (github.com: `main`), and that name is not ours: the first
+          // branch of a repository this platform creates is PRODUCT_BRANCH, checked out unborn so
+          // the first commitPush creates it on the remote — an empty repository's first pushed
+          // branch becomes its default (tenant-apps-repo writes a tenant's tree into the
+          // repository it just created; hostyour-manager#216).
+          if ((await run(["ls-remote", "--heads", repoURL], env)).trim() !== "") throw errValidation(`could not resolve the default branch of ${repoURL} (git ls-remote --symref HEAD returned no "ref: refs/heads/<branch>\	HEAD" line)`);
           await run(["clone", "-q", repoURL, "."], env);
-          return assertRefName((await run(["symbolic-ref", "--short", "HEAD"], env)).trim(), "branch");
+          await run(["symbolic-ref", "HEAD", `refs/heads/${PRODUCT_BRANCH}`], env);
+          return PRODUCT_BRANCH;
         }
         const resolved = m[1];
         assertRefName(resolved, "branch");

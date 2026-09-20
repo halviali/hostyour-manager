@@ -1,6 +1,6 @@
 // The tenant's OWN apps repository, as ONE implementation two run kinds share: `tenant-create` runs
 // these steps after the platform build units and before its own writes, `tenant-apps-repo` runs
-// them for a standing tenant. The repository `<org>/<subdomain>-apps` is created through the
+// them for a standing tenant. The repository `<org>/<bundle>-<subdomain>` is created through the
 // platform's GitHub App, its tree written from the catalog's apps template with the apps the tenant
 // chose, and the unit onboarded Build-only with a `github-app` credential — one that stores no
 // token and mints a fresh installation token from the App at every open — building the first
@@ -43,7 +43,7 @@ export const NO_GITHUB_APP = "this Manager holds no GitHub App identity: set GIT
 /** The four facts a plan resolves about the tenant's apps unit and both run kinds freeze. */
 export const TenantAppsUnitSchema = z.object({
   // The organisation the App is installed in — the catalog's `tenant.appsOrg` where it names one,
-  // held equal to the installation's at the plan. The repository is `<org>/<subdomain>-apps`.
+  // held equal to the installation's at the plan. The repository is `<org>/<bundle>-<subdomain>`.
   org: z.string().min(1),
   // The template: the catalog's `tenant.appsRepo` and `tenant.appsBundle` — the repository the tree
   // is copied from, and the entry of its manifest whose containerfile the tenant's own build takes.
@@ -128,14 +128,14 @@ export async function resolveTenantAppsUnit(
   input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; signal: AbortSignal; log: (line: string) => void },
 ): Promise<{ outcome: "resolved"; unit: TenantAppsUnit } | { outcome: "refused"; why: string }> {
   const refuse = (why: string) => ({ outcome: "refused" as const, why });
-  const unit = tenantAppsUnit(input.subdomain);
-  if (!consumerName.safeParse(unit).success) return refuse(`"${unit}" is not a unit name (lower-case letters, digits and hyphens, at most 40 characters) — choose a shorter subdomain`);
   if (!input.spec) return refuse(`the catalog ${ports.catalogRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
   const org = await requireGitHubApp(ports).installationOrg(input.signal);
   if (input.spec.appsOrg !== undefined && input.spec.appsOrg !== org) return refuse(`the catalog's tenant.appsOrg is "${input.spec.appsOrg}" and the GitHub App is installed in "${org}" — the repository would be created where the App has no rights; install the App in ${input.spec.appsOrg} or correct the catalog`);
   const template = tenantAppsTemplate(input.spec);
   if (!template) return refuse(`the catalog declares no tenant.appsBundle and tenant.appsRepo in ${TENANT_MANIFEST_PATH} — the template a tenant's repository is created from`);
-  input.log(`template ${template.repo} (${template.name}), organisation ${org}, repository ${tenantAppsRepoURL(org, input.subdomain)}`);
+  const unit = tenantAppsUnit(template.name, input.subdomain);
+  if (!consumerName.safeParse(unit).success) return refuse(`"${unit}" is not a unit name (lower-case letters, digits and hyphens, at most 40 characters) — choose a shorter subdomain`);
+  input.log(`template ${template.repo} (${template.name}), organisation ${org}, repository ${tenantAppsRepoURL(org, template.name, input.subdomain)}`);
   const read = await readTemplate(ports, template.repo, input.signal);
   let offered: string[];
   const unfolded: string[] = [];
@@ -158,14 +158,14 @@ export async function resolveTenantAppsUnit(
  *  the master, resolved at run time the way buildUnitStep resolves it for a platform build unit. */
 export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStepParams, runtime: TenantAppsRepoRuntime): Step[] {
   // Read defensively: the armed check evaluates def.steps({}) with no params at all.
-  const unit = tenantAppsUnit(p.subdomain ?? "");
-  const url = tenantAppsRepoURL(p.org ?? "", p.subdomain ?? "");
+  const unit = tenantAppsUnit(p.templateBuild ?? "", p.subdomain ?? "");
+  const url = tenantAppsRepoURL(p.org ?? "", p.templateBuild ?? "", p.subdomain ?? "");
   const chosen = p.apps ?? [];
   return [
     {
       name: "create-repository",
       title: `Create the private repository ${unit}`,
-      probe: (ctx) => probeAppsRepository(ports, { org: p.org ?? "", templateRepoURL: p.templateRepoURL ?? "", subdomain: p.subdomain ?? "" }, ctx),
+      probe: (ctx) => probeAppsRepository(ports, { org: p.org ?? "", templateRepoURL: p.templateRepoURL ?? "", bundle: p.templateBuild ?? "", subdomain: p.subdomain ?? "" }, ctx),
       run: async (ctx) => {
         const app = requireGitHubApp(ports);
         const { created } = await app.createRepository({ org: p.org, name: unit, description: `The apps of tenant ${p.subdomain} (${p.guid}), created from the catalog's ${p.templateBuild}`, private: true, signal: ctx.signal });

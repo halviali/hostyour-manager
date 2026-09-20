@@ -84,7 +84,7 @@ export const AddAppParams = z.object({
   buildUnits: z.array(BuildUnitSchema).default([]),
   catalogRepoUrl: z.string().min(1),
   // THE TENANT'S BUNDLE (hostyour-manager#213, #215): every app lives in the tenant's own
-  // `<subdomain>-apps` repository, so adding one carries the bundle along — created from the
+  // `<bundle>-<subdomain>` repository, so adding one carries the bundle along — created from the
   // catalog's template where none stood, extended with this app's folder and entry where one does
   // (write-tree appends what the repository lacks and removes nothing) — built, and recorded on the
   // registration BEFORE the member is fanned out, the fan-out rendered again at the built tag
@@ -208,7 +208,7 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
     ...(p.appsUnit
       ? [
         ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [p.app] }, runtime),
-        recordAppsRepoStep(ports, { subdomain: p.subdomain, guid: p.guid, stage: p.stage, org: p.appsUnit.org }, runtime),
+        recordAppsRepoStep(ports, { subdomain: p.subdomain, guid: p.guid, stage: p.stage, org: p.appsUnit.org, bundle: p.appsUnit.templateBuild }, runtime),
       ]
       : []),
     // The image gate, the SAME steps create-tenant runs: the fan-out is rendered again at the tag the
@@ -374,7 +374,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
-      const appsImage = hasBundle ? standingImage! : tenantAppsUnit(current.entry.subdomain);
+      const appsImage = hasBundle ? standingImage! : tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
       const appsImageTag = hasBundle ? standingTag! : placeholderTagFromChain(clusterValueFiles);
       ctx.log(hasBundle
         ? `tenant ${tc.guid}'s bundle ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL}, is built and recorded before the member is fanned out`

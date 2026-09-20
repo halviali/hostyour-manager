@@ -41,13 +41,14 @@ import { probeTenantTarget, probeTenantDns, probeBuildUnit } from "./tenant-prob
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantTeardownSteps, REPLACE_TEARDOWN } from "./tenant-teardown.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
+import { readTenantSpec } from "./tenant-apps-repo.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 
 // The "tenant-create" Run — the onboarding of a tenant's platform, the tenant analogue of
 // onboard.run.ts. Instead of pinning one consumer chart it fans a single registration out to one
 // SELF-CONTAINED member per trio service and per app: each with its own namespace
 // <guid>-<member>-<stage>, its own AppProject and its own Application. A tenant with an app mounts
-// its OWN apps bundle `<subdomain>-apps`: this run creates that repository from the catalog's
+// its OWN apps bundle `<bundle>-<subdomain>`: this run creates that repository from the catalog's
 // template, writes the chosen apps into it and builds its first image (tenant-apps-steps.ts) after
 // the platform build units and before its own writes, and the registration carries the three
 // facts. The STAGE is the tenant's own, an input of the request, and it is the target cluster's
@@ -210,7 +211,7 @@ export const CreateTenantParams = z.object({
   // execute/resume. Empty (the normal case) ⇒ no offboard steps, a plain onboard.
   replaces: z.array(ReplaceTargetSchema).default([]),
   // The tenant's own apps bundle, DERIVED at the plan for a tenant with an app: the repository
-  // `<org>/<subdomain>-apps` and the image `<subdomain>-apps` (shared/tenant.ts appsBundleFields).
+  // `<org>/<bundle>-<subdomain>` and the image `<bundle>-<subdomain>` (shared/tenant.ts appsBundleFields).
   // Never its tag: the run reads that off the release the apps-repo steps trigger, and
   // write-registration carries it. Both absent for a zero-app tenant.
   appsRepo: appsBundleFields.appsRepo,
@@ -586,7 +587,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // tenant's, and every member chart renders with exactly the files its Application layers.
       const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, req.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
-      // The tenant's own bundle: a tenant with an app mounts `<subdomain>-apps`, which this run
+      // The tenant's own bundle: a tenant with an app mounts `<bundle>-<subdomain>`, which this run
       // creates and builds. The engines are rendered at the platform's placeholder (global
       // .placeholderTag, the tag a pin carries before its first release) because the bundle is built
       // by this run and its tag is not known until then; refresh-images renders again at the built
@@ -594,7 +595,16 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       const withApps = req.apps.length > 0;
       const refuse = (why: string, planJson: unknown) => ({ outcome: "rejected" as const, summary: `Tenant "${req.subdomain}" was rejected — ${why}`, planJson });
       if (withApps && !ports.githubApp) return refuse(NO_GITHUB_APP, { subdomain: req.subdomain, apps: req.apps.map((a) => a.name) });
-      const appsImage = withApps ? tenantAppsUnit(req.subdomain) : undefined;
+      // The tenant's apps unit, from the catalog's template: the refusals, then the four facts the
+      // apps-repo steps run on, frozen once. Resolved BEFORE the render, which mounts the bundle
+      // under the unit's name (`<bundle>-<subdomain>`, tenant-apps-tree.ts).
+      let appsUnit: CreateTenantParams["appsUnit"];
+      if (withApps) {
+        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: req.apps.map((a) => a.name), spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
+        if (resolved.outcome === "refused") return refuse(resolved.why, { subdomain: req.subdomain, apps: req.apps.map((a) => a.name) });
+        appsUnit = resolved.unit;
+      }
+      const appsImage = appsUnit ? tenantAppsUnit(appsUnit.templateBuild, req.subdomain) : undefined;
       const appsImageTag = withApps ? placeholderTagFromChain(clusterValueFiles) : undefined;
       const guid = await mintFreeGuid(ports, req.stage);
       // The books branch first: LOG AND CONTINUE on failure, as boot does — a trunk that cannot be
@@ -643,14 +653,6 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // images, filtered to the target cluster's registry host. The validated revision is frozen
       // into chartsRef as well, so the set cannot move between plan + execute.
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
-      // The tenant's apps unit, from the catalog's template: the refusals, then the four facts the
-      // apps-repo steps run on, frozen once.
-      let appsUnit: CreateTenantParams["appsUnit"];
-      if (withApps) {
-        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: req.apps.map((a) => a.name), spec: outcome.spec, signal: ctx.signal, log: ctx.log });
-        if (resolved.outcome === "refused") return refuse(resolved.why, outcome.report);
-        appsUnit = resolved.unit;
-      }
       // THE IMAGES THE FAN-OUT LACKS ARE BUILT BY THIS RUN, the way a consumer onboarding builds its
       // own (hostyour-manager#165, tenant-builds.ts): each missing image's repository becomes a build
       // unit the run onboards before the tenant's own writes; a PAT per unregistered unit at approve.
@@ -692,7 +694,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         ...(req.adminEmail ? { adminEmail: req.adminEmail } : {}),
         // The bundle and its unit, derived — never a tag: the placeholder the render used is not a fact
         // about the tenant, and the built tag is read by the run.
-        ...(appsUnit && appsImage !== undefined ? { appsRepo: tenantAppsRepoURL(appsUnit.org, req.subdomain), appsImage, appsUnit } : {}),
+        ...(appsUnit && appsImage !== undefined ? { appsRepo: tenantAppsRepoURL(appsUnit.org, appsUnit.templateBuild, req.subdomain), appsImage, appsUnit } : {}),
       };
       const stepDefs = createTenantSteps(ports, params);
       const plan: Plan = {

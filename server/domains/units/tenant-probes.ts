@@ -52,8 +52,8 @@ export async function probeCatalog(ports: TenantOnboardPorts, p: CreateTenantPar
 
 /** create-repository's probe: the App is installed in the organisation the apps repository is created
  *  in, and it reaches the template the tree is copied from. */
-export async function probeAppsRepository(ports: TenantOnboardPorts, unit: { org: string; templateRepoURL: string; subdomain: string }, ctx: ProbeCtx): Promise<PreflightCheck[]> {
-  const repoURL = tenantAppsRepoURL(unit.org, unit.subdomain);
+export async function probeAppsRepository(ports: TenantOnboardPorts, unit: { org: string; templateRepoURL: string; bundle: string; subdomain: string }, ctx: ProbeCtx): Promise<PreflightCheck[]> {
+  const repoURL = tenantAppsRepoURL(unit.org, unit.bundle, unit.subdomain);
   const title = `The apps repository ${repoURL}`;
   if (!ports.githubApp) return [check("apps.org", title, "hard", "fail", "no GitHub App is configured on this manager", "answer GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY")];
   const org = await ports.githubApp.installationOrg(ctx.signal);

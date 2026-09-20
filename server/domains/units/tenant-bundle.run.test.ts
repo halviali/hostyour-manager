@@ -1,5 +1,5 @@
 // The tenant's own apps bundle through the tenant-create run: the plan DERIVES it for a tenant with
-// an app — the repository `<org>/<subdomain>-apps` and the image `<subdomain>-apps` — and refuses
+// an app — the repository `<org>/<bundle>-<subdomain>` and the image `<bundle>-<subdomain>` — and refuses
 // without the GitHub App or the catalog's template; the apps-repo steps stand between the platform
 // build units and seed-tenant-crypto; the bundle is never a build unit and asks no PAT; the render is
 // handed the bundle at the placeholder and, after the build, at the tag the release stated; and the
@@ -309,7 +309,7 @@ describe("validateTenant — the bundle is delivered under tenant: as the Applic
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
     await validateTenant({ ...base, appsImage: TEST_BUNDLE.appsImage, appsImageTag: TEST_BUNDLE.appsImageTag }, deps(helm));
     const engine = helm.requests.find((r) => r.namespace === memberNamespace(GUID, "erp", "prod"));
-    expect(engine?.valuesObject).toMatchObject({ tenant: { appsImage: "acme-apps", appsImageTag: TEST_BUNDLE.appsImageTag } });
+    expect(engine?.valuesObject).toMatchObject({ tenant: { appsImage: TEST_BUNDLE.appsImage, appsImageTag: TEST_BUNDLE.appsImageTag } });
     helm.requests.length = 0;
     await validateTenant({ ...base, apps: [] }, deps(helm));
     expect(helm.requests[0]?.valuesObject).toMatchObject({ tenant: { appsImage: "", appsImageTag: "" } });

@@ -365,7 +365,7 @@ export const ConsumerManifestSchema = z.object({
   activation: ConsumerActivationSchema.optional(),
   // A TENANT'S OWN APPS BUNDLE: this build is the bundle a tenant's engines mount, and its pin is
   // `appsImageTag` on every tenant registration whose `appsImage` names it — never a chart's
-  // builds[] and never a pins file. Written by the Manager into `<subdomain>-apps` (tenant-apps-tree.ts
+  // builds[] and never a pins file. Written by the Manager into `<bundle>-<subdomain>` (tenant-apps-tree.ts
   // tenantAppsManifest) and read by the release pipeline's bump, which pins the image on those
   // registrations (class d) and accepts a release no registration names yet, because the run
   // creating the tenant reads the tag off that release's PipelineRun (hostyour-cloud#225). The same

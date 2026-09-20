@@ -65,9 +65,9 @@ export async function readTenantSpec(ports: TenantOnboardPorts, ctx: PlanStreamC
 /** The record of the bundle on the tenant's registration, after its first build: appsRepo, appsImage
  *  and the tag read off the release. Composed by this run and by tenant-add-app where the tenant
  *  had no bundle yet (hostyour-manager#213). */
-export function recordAppsRepoStep(ports: TenantOnboardPorts, p: { subdomain: string; guid: string; stage: Stage; org: string }, runtime: TenantAppsRepoRuntime): Step {
-  const unit = tenantAppsUnit(p.subdomain);
-  const url = tenantAppsRepoURL(p.org, p.subdomain);
+export function recordAppsRepoStep(ports: TenantOnboardPorts, p: { subdomain: string; guid: string; stage: Stage; org: string; bundle: string }, runtime: TenantAppsRepoRuntime): Step {
+  const unit = tenantAppsUnit(p.bundle, p.subdomain);
+  const url = tenantAppsRepoURL(p.org, p.bundle, p.subdomain);
   return {
     name: "record-apps-repo",
     title: "Record the apps repository, image and tag on the tenant's registration",
@@ -95,7 +95,7 @@ export function recordAppsRepoStep(ports: TenantOnboardPorts, p: { subdomain: st
 
 function standaloneSteps(ports: TenantOnboardPorts, p: TenantAppsRepoParams): Step[] {
   // Read defensively: the armed check evaluates def.steps({}) with no params at all.
-  const unit = tenantAppsUnit(p.subdomain ?? "");
+  const unit = tenantAppsUnit(p.templateBuild ?? "", p.subdomain ?? "");
   const runtime: TenantAppsRepoRuntime = {};
   return [
     {
@@ -108,7 +108,7 @@ function standaloneSteps(ports: TenantOnboardPorts, p: TenantAppsRepoParams): St
       },
     },
     ...tenantAppsRepoSteps(ports, p, runtime),
-    recordAppsRepoStep(ports, { subdomain: p.subdomain ?? "", guid: p.guid ?? "", stage: p.stage ?? "prod", org: p.org ?? "" }, runtime),
+    recordAppsRepoStep(ports, { subdomain: p.subdomain ?? "", guid: p.guid ?? "", stage: p.stage ?? "prod", org: p.org ?? "", bundle: p.templateBuild ?? "" }, runtime),
   ];
 }
 
@@ -124,13 +124,13 @@ export function makeTenantAppsRepoDef(ports: TenantOnboardPorts): RunDefinition<
     // once for what it offers, then the plan.
     planStream: async (rawParams, ctx) => {
       const req = TenantAppsRepoRequest.parse(rawParams);
-      const unit = tenantAppsUnit(req.subdomain);
       const chosen = req.apps.map((a) => a.name);
-      const refuse = (why: string) => ({ outcome: "rejected" as const, summary: `Apps repository "${unit}" for tenant ${req.guid} was refused — ${why}`, planJson: { subdomain: req.subdomain, apps: chosen } });
+      const refuse = (why: string) => ({ outcome: "rejected" as const, summary: `The apps repository of tenant ${req.guid} ("${req.subdomain}") was refused — ${why}`, planJson: { subdomain: req.subdomain, apps: chosen } });
       if (!ports.githubApp) return refuse(NO_GITHUB_APP);
       const master = resolveMasterCluster(ctx.db);
       const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen, spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") return refuse(resolved.why);
+      const unit = tenantAppsUnit(resolved.unit.templateBuild, req.subdomain);
       const params: TenantAppsRepoParams = {
         subdomain: req.subdomain, guid: req.guid, stage: req.stage, apps: chosen, owner: req.owner ?? req.subdomain,
         ...resolved.unit,

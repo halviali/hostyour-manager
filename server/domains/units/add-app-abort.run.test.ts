@@ -53,7 +53,7 @@ const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const fakeCreds = {
   open: async () => Buffer.from("x", "utf8"),
   seal: async (i: { kind: string; label: string; fingerprint: string }) => ({ id: "cred_app", kind: i.kind, label: i.label, fingerprint: i.fingerprint }),
-  list: async ({ kind }: { kind: string }) => (kind === "github-app" ? [{ id: "cred_app", kind, label: "GitHub App (acme-apps)", fingerprint: "fp" }] : []),
+  list: async ({ kind }: { kind: string }) => (kind === "github-app" ? [{ id: "cred_app", kind, label: `GitHub App (${TEST_BUNDLE.appsImage})`, fingerprint: "fp" }] : []),
 } as unknown as CredentialStore;
 
 const MANIFEST_YAML = `

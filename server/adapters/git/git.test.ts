@@ -315,10 +315,11 @@ describe("GitConsumerRepo", () => {
   );
 
   it(
-    "opens an EMPTY origin on the branch the remote names for its unborn HEAD, and the first push creates that branch",
+    "opens an EMPTY origin on master whatever branch the remote names for its unborn HEAD, and the first push creates master",
     async () => {
-      // A repository the GitHub App just created: no commit, no branch, only the name of the branch a
-      // first push should land on. Named `trunk` so a local init.defaultBranch cannot pass for it.
+      // A repository the GitHub App just created: no commit, no branch, only the name of the branch
+      // the remote's organisation default would put a first push on. Named `trunk` so neither a local
+      // init.defaultBranch nor the remote's own name can pass for the platform's (#216).
       const root = newRoot();
       git(root, "init", "-q", "--bare", "-b", "trunk", "origin.git");
       const originDir = join(root, "origin.git");
@@ -326,20 +327,23 @@ describe("GitConsumerRepo", () => {
       const repo = makeConsumer();
       const s = await repo.open({ repoURL: originURL, credentialId: "cred_x" });
       try {
-        expect(s.branch).toBe("trunk");
+        expect(s.branch).toBe("master");
         expect(await repo.readFile(s.workdir, "apps.yaml")).toBeNull();
-        const first = await repo.commitPush({ workdir: s.workdir, branch: s.branch, credentialId: "cred_x", message: "Create acme-apps from the catalog [run_1]", write: [{ path: "apps.yaml", content: "apps: []\n" }] });
+        const first = await repo.commitPush({ workdir: s.workdir, branch: s.branch, credentialId: "cred_x", message: "Create example-apps-acme from the catalog [run_1]", write: [{ path: "apps.yaml", content: "apps: []\n" }] });
         expect(first.changed).toBe(true);
-        expect(git(originDir, "rev-parse", "trunk").trim()).toBe(first.commit);
-        expect(git(originDir, "symbolic-ref", "HEAD").trim()).toBe("refs/heads/trunk");
+        expect(git(originDir, "rev-parse", "master").trim()).toBe(first.commit);
+        expect(git(originDir, "for-each-ref", "--format=%(refname)", "refs/heads/").trim()).toBe("refs/heads/master"); // trunk was never born
       } finally {
         await repo.dispose(s.workdir);
       }
-      // Standing now: the ordinary path resolves the same branch off the symref.
+      // github.com makes an empty repository's first pushed branch its default; a bare origin keeps
+      // its HEAD, so the test moves it the way GitHub does. Standing now: the ordinary path resolves
+      // master off the symref.
+      git(originDir, "symbolic-ref", "HEAD", "refs/heads/master");
       const again = makeConsumer();
       const s2 = await again.open({ repoURL: originURL, credentialId: "cred_x" });
       try {
-        expect(s2.branch).toBe("trunk");
+        expect(s2.branch).toBe("master");
         expect(await again.readFile(s2.workdir, "apps.yaml")).toBe("apps: []\n");
       } finally {
         await again.dispose(s2.workdir);

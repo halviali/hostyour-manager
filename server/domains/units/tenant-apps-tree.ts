@@ -3,7 +3,7 @@
 // onboarding injects, and the app folders the tenant did not choose; a manifest of the tenant's own,
 // naming its unit and its one build; and an apps.yaml carrying the chosen entries as the template
 // spells them. The three composers of the unit's names stand here too, so the run, the registration
-// and the tests spell `<subdomain>-apps` from one place.
+// and the tests spell `<bundle>-<subdomain>` from one place.
 //
 // Boundary: a domain module over the two git PORTS (a reader for the template, a writer's file read
 // for the standing repository). Nothing here clones, commits or opens a credential; the run does.
@@ -15,18 +15,17 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { RELEASE_KIT_DIR, RELEASE_KIT_WORKFLOW } from "./release-kit/release-kit.ts";
 
-/** The suffix a tenant's apps unit carries after its subdomain. The unit IS the repository name and
- *  the image name (the identity law: manifest name == repo name == unit, and a build name is a flat
- *  image name), so one composer answers all three. */
-export const TENANT_APPS_UNIT_SUFFIX = "-apps";
-
-export function tenantAppsUnit(subdomain: string): string {
-  return `${subdomain}${TENANT_APPS_UNIT_SUFFIX}`;
+/** A tenant's apps unit: `<bundle>-<subdomain>` — the catalog's template name (tenant.appsBundle,
+ *  the product the bundle is an instance of) carrying the tenant's subdomain (hostyour-manager#216).
+ *  The unit IS the repository name and the image name (the identity law: manifest name == repo name
+ *  == unit, and a build name is a flat image name), so one composer answers all three. */
+export function tenantAppsUnit(bundle: string, subdomain: string): string {
+  return `${bundle}-${subdomain}`;
 }
 
-/** The repository the App creates in the organisation the catalog names: `<org>/<subdomain>-apps`. */
-export function tenantAppsRepoURL(org: string, subdomain: string): string {
-  return `https://github.com/${org}/${tenantAppsUnit(subdomain)}.git`;
+/** The repository the App creates in the organisation the catalog names: `<org>/<bundle>-<subdomain>`. */
+export function tenantAppsRepoURL(org: string, bundle: string, subdomain: string): string {
+  return `https://github.com/${org}/${tenantAppsUnit(bundle, subdomain)}.git`;
 }
 
 export interface TreeFile {

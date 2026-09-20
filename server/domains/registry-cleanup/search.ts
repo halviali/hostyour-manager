@@ -26,7 +26,7 @@
 //       be OLDER than master, so reading master alone would leave the tags of running clusters
 //       unprotected.
 //   (d) the tenants' own apps bundles: catalog, registrations/<guid>/<stage>.yaml on EVERY branch
-//       (an installation's books). A tenant's `<subdomain>-apps` image is declared by no chart's
+//       (an installation's books). A tenant's `<bundle>-<subdomain>` image is declared by no chart's
 //       builds[] and stands in no pins file: its pin is `appsImage` + `appsImageTag` on the tenant
 //       registration (shared/tenant.ts appsBundleFields, hostyour-manager#178), the one tag every
 //       engine of that tenant runs. The empty pair is a tenant without a bundle and pins nothing.

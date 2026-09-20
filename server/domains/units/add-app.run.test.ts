@@ -329,12 +329,12 @@ describe("add-app streaming planner", () => {
     const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: "web" }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
-    expect(result.params).toMatchObject({ app: "web", appsImage: "acme-apps", appsUnit: { org: ORG }, subdomain: "acme" });
-    expect(helm.requests.find((r) => r.namespace === `${GUID}-web-prod`)?.valuesObject).toMatchObject({ tenant: { appsImage: "acme-apps" } });
+    expect(result.params).toMatchObject({ app: "web", appsImage: "example-apps-acme", appsUnit: { org: ORG }, subdomain: "acme" });
+    expect(helm.requests.find((r) => r.namespace === `${GUID}-web-prod`)?.valuesObject).toMatchObject({ tenant: { appsImage: "example-apps-acme" } });
     const names = result.plan.steps.map((s) => s.name);
     expect(names.slice(0, 7)).toEqual(["attest-target", "create-repository", "write-tree", "onboard-build-only", "record-apps-repo", "refresh-images", "ensure-images"]);
     expect(names.indexOf("apply-appproject")).toBeGreaterThan(names.indexOf("ensure-images"));
-    expect(result.plan.summary).toContain(`${ORG}/acme-apps is created from`);
+    expect(result.plan.summary).toContain(`${ORG}/example-apps-acme is created from`);
     // Without the App nothing can create the repository, and the plan says so.
     const { githubApp: _none, ...noApp } = prt;
     await expect(makeAddAppDef(noApp).planStream!({ tenantId: "tnt_1", app: "web" }, planCtx())).rejects.toThrow(/no GitHub App identity/);

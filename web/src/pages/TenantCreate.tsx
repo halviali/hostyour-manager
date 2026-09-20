@@ -13,7 +13,7 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
  *  size and the first administrator's mailbox. THE PLATFORM ALONE (hostyour-manager#211): the
  *  standing members auth, jobs and report, always those three and no app. Apps are added
  *  afterwards from the tenant's page, where the first one creates the tenant's own repository
- *  `<org>/<subdomain>-apps` from the catalog's template, copies the app in, builds and deploys it
+ *  `<org>/<bundle>-<subdomain>` from the catalog's template, copies the app in, builds and deploys it
  *  (tenant-apps-repo, tenant-add-app). There is NO secret field (v1 seeds no secrets; charts pull
  *  from Vault via ExternalSecret) and no user seed: the first administrator comes by invitation.
  *  Submit hands off to the Run screen, where the T1..T4 fan-out gates stream gate-by-gate and the

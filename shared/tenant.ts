@@ -115,7 +115,7 @@ export const subdomain = z
   .regex(HOST_LABEL_RE, "a subdomain is one DNS label: lower-case letters, digits and hyphens, at most 63 characters, no dot")
   .refine((s) => !RESERVED_HOST_LABELS.includes(s), { message: "a stage word cannot be a subdomain — the stage words are the zones, so the tenant would take a whole stage's zone" });
 
-/** THE TENANT'S OWN APPS BUNDLE — the three facts of its `<subdomain>-apps` repository, a Build-only
+/** THE TENANT'S OWN APPS BUNDLE — the three facts of its `<bundle>-<subdomain>` repository, a Build-only
  *  unit of this installation: the repository the bundle is rebuilt from, the flat build name its
  *  manifest declares (the registry repository the engines mount, `tenant.appsImage` in the engine
  *  chart) and the immutable image tag its last release built, read off that release's PipelineRun.

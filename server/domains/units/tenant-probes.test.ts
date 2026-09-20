@@ -50,7 +50,7 @@ describe("probeCatalog", () => {
 });
 
 describe("probeAppsRepository", () => {
-  const unit = { org: "example-org", templateRepoURL: "https://github.com/example-org/example-apps.git", subdomain: "acme" };
+  const unit = { org: "example-org", templateRepoURL: "https://github.com/example-org/example-apps.git", bundle: "example-apps", subdomain: "acme" };
   it("passes where the App is installed in the apps organisation and reaches the template; fails by name otherwise", async () => {
     const githubApp = new FakeGitHubApp();
     expect(await probeAppsRepository(ports({ githubApp }), unit, ctx())).toMatchObject([

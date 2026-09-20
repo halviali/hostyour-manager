@@ -359,8 +359,11 @@ describe("create-tenant streaming planner", () => {
       .planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
-    // The catalog at the books branch and nowhere else; the apps template is the other repository cloned.
-    expect(reader.clones.filter((c) => c.repoURL === DEPLOY_URL).map((c) => c.ref)).toEqual([FAKE_BOOKS_BRANCH]);
+    // The catalog at the books branch and nowhere else (read once for the apps unit's template, once
+    // by the gates); the apps template is the other repository cloned.
+    const refs = reader.clones.filter((c) => c.repoURL === DEPLOY_URL).map((c) => c.ref);
+    expect(refs.length).toBeGreaterThan(0);
+    expect(new Set(refs)).toEqual(new Set([FAKE_BOOKS_BRANCH]));
     expect(FAKE_BOOKS_BRANCH).not.toBe(PRODUCT_BRANCH);
     expect(result.plan.locks).toContainEqual({ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` });
   });
