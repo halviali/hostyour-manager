@@ -24,6 +24,8 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, ORG } from "./tenant-apps-repo.fixture.ts";
+import { buildRepoPatSecret } from "../../../shared/approve.ts";
+import { buildUnitStepName } from "./tenant-builds.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
@@ -342,6 +344,35 @@ describe("add-app streaming planner", () => {
     // Without the App nothing can create the repository, and the plan says so.
     const { githubApp: _none, ...noApp } = prt;
     await expect(makeAddAppDef(noApp).planStream!({ tenantId: "tnt_1", app: "web" }, planCtx())).rejects.toThrow(/no GitHub App identity/);
+  });
+
+  // An app added after the platform pulls images no earlier run had to build (#214): the plan
+  // resolves a build unit per missing image's repository exactly as create-tenant does, asks its PAT,
+  // and places the build ahead of the image gate.
+  it("a missing image the tenant spec's buildRepos names becomes a build unit ahead of ensure-images, with its PAT asked at approve", async () => {
+    seedClusters();
+    const PLATFORM_REPO = "https://github.com/acme/example-platform.git";
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML.replace("  members:", `  buildRepos:
+    - repo: ${PLATFORM_REPO}
+      builds: [example-engine]
+  members:`), ...APP_OVERLAYS } });
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC, doc("Deployment", { raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "engine", image: `${REGISTRY_HOST}/example-engine:0.4.0` }] } } } } })] } });
+    const def = makeAddAppDef(ports({ repo, helm, registryProbe: new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] }) }));
+    const result = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    expect(result.outcome).toBe("planned");
+    if (result.outcome !== "planned") return;
+    expect(result.params.buildUnits).toEqual([{ unit: "example-platform", repoURL: PLATFORM_REPO, images: ["example-engine"], registered: false }]);
+    expect(result.plan.requiredSecrets).toEqual([buildRepoPatSecret("example-platform")]);
+    expect(result.plan.optionalSecrets).toEqual([]);
+    const names = result.plan.steps.map((s) => s.name);
+    expect(names.indexOf(buildUnitStepName("example-platform"))).toBe(1); // right after attest-target
+    expect(names.indexOf(buildUnitStepName("example-platform"))).toBeLessThan(names.indexOf("ensure-images"));
+    expect(def.assertApprovable).toBeDefined();
+    // A missing image no buildRepos entry names is refused by name, never probed for again at run time.
+    const nobody = makeAddAppDef(ports({ helm, registryProbe: new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] }) }));
+    const refused = await nobody.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    expect(refused.outcome).toBe("rejected");
+    if (refused.outcome === "rejected") expect(refused.summary).toMatch(/buildRepos names no repository.*example-engine:0\.4\.0/);
   });
 
   it("freezes both requested seed tiers into params (default false when the request omits them)", async () => {

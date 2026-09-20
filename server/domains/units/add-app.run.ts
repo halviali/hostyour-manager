@@ -22,7 +22,9 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { placeholderTagFromChain } from "./tenant-values.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { readTenantSpec, recordAppsRepoStep } from "./tenant-apps-repo.run.ts";
-import { tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { BuildUnitSchema, assertBuildUnitPats, buildUnitStep, planBuildUnits, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { probeBuildUnit } from "./tenant-probes.ts";
+import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
 
@@ -77,6 +79,10 @@ export const AddAppParams = z.object({
   // The build units the re-rendered argo-sync grant arms — resolved at plan time from the images
   // above, exactly as create-tenant resolves its own (tenantSyncUnits).
   syncUnits: z.array(z.string()).default([]),
+  // The build units this run onboards or re-releases BEFORE the image gate (hostyour-manager#214):
+  // the new app's images that are absent from the registry and that the tenant spec's buildRepos
+  // build — resolved at plan time exactly as create-tenant resolves its own (planBuildUnits).
+  buildUnits: z.array(BuildUnitSchema).default([]),
   catalogRepoUrl: z.string().min(1),
   // THE TENANT'S BUNDLE WHERE NONE STOOD (hostyour-manager#213): a tenant onboarded as its platform
   // alone has no `<subdomain>-apps` repository, and this app is its first. The run then creates the
@@ -190,6 +196,12 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
         ctx.log("meta", `target ${p.domain} attested for ${p.guid} at ${p.stage} — deploy-state generation ${state.generation}`);
       },
     },
+    // The build units whose images the new app pulls and the registry lacks, built before anything
+    // of the tenant is written — the same step create-tenant runs per unit.
+    ...(p.buildUnits ?? []).map((unit) => ({
+      ...buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit),
+      probe: (ctx: ProbeCtx) => probeBuildUnit(() => ports.onboard?.(), ports, p, unit, ctx),
+    })),
     // The tenant's first bundle, where none stood: created from the template with this app, built,
     // recorded on the registration (tenant-apps-repo's own steps, composed here).
     ...(p.appsUnit
@@ -200,8 +212,8 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
       : []),
     // The image gate, the SAME steps create-tenant runs: where a bundle was just built the fan-out is
     // rendered again at its tag, then the new app's pinned images must EXIST in the tenant cluster's
-    // registrations before the pointer append fans it out. A probe — a missing image fails the run
-    // naming every absent tag, and nothing further is built here.
+    // registrations before the pointer append fans it out. A probe — an image no build unit above
+    // produced fails the run naming every absent tag.
     ...tenantImageSteps(ports, { guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: [app], seedUsers: p.seedUsers, registryHost: p.registryHost, requiredImages: p.requiredImages, ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}) }, runtime),
     {
       name: "apply-appproject",
@@ -418,6 +430,14 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       // Freeze the ensure-images set for the SUBSET render (the trio + the new app), filtered to
       // the tenant cluster's registry host — the already-live members' images are provably present.
       const requiredImages = requiredImagesFrom(outcome.images, registryHost);
+      // The units that build what the registry lacks, exactly as create-tenant plans them (#214): an
+      // app added after the platform pulls images no earlier run had to build.
+      const planned = await planBuildUnits({
+        requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage, probe: ports.registryProbe,
+        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, stage: tc.stage, subdomain: current.entry.subdomain, signal: ctx.signal, log: ctx.log,
+      });
+      if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
+      const built = planned.builds;
       // The argo-sync grant's subjects, derived like create-tenant's: the units that attest a build
       // this render pulls. The subset render carries the trio too, so the units of the members that
       // are already serving come along and the re-rendered grant keeps arming them.
@@ -440,6 +460,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         expectedApps,
         requiredImages,
         syncUnits,
+        buildUnits: built.units,
         catalogRepoUrl: ports.catalogRepoUrl,
         ...(appsUnit ? { appsUnit, appsImage } : {}),
         subdomain: current.entry.subdomain,
@@ -455,12 +476,15 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
-        warnings: [],
-        requiredSecrets: [],
+        warnings: built.warnings,
+        requiredSecrets: built.requiredSecrets, // one PAT per unregistered build unit the App does not reach
+        optionalSecrets: built.optionalSecrets, // one PAT per unregistered build unit the App reaches — given, it wins (#205)
       };
       return { outcome: "planned", params, plan };
     },
     steps: (params) => addAppSteps(ports, params),
+    // Every build unit PAT handed in at approve, measured before the run starts (#212).
+    assertApprovable: (params, deps) => assertBuildUnitPats(() => ports.onboard?.(), params.buildUnits ?? [], deps.secrets),
     cleanups: (params) => [revertAppendCleanup(ports, params)],
     // The rollback's precondition: the drop above is destructive by cascade (the member's databases go
     // with its ServiceClaim), so it must never fire for a run whose NEW member has meanwhile gone live.

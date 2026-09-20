@@ -69,7 +69,7 @@ export async function probeAppsRepository(ports: TenantOnboardPorts, unit: { org
 }
 
 /** build-unit:<unit>'s probe: the unit's identity, as far as one stands before the approve. */
-export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, ports: TenantOnboardPorts, p: CreateTenantParams, unit: BuildUnit, ctx: ProbeCtx): Promise<PreflightCheck[]> {
+export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, ports: TenantOnboardPorts, p: Pick<CreateTenantParams, "domain">, unit: BuildUnit, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
   const title = `The build unit ${unit.unit} (${owner}/${repo})`;
   if (unit.repoCredentialId === undefined) {
