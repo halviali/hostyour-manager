@@ -290,6 +290,8 @@ export interface ConsumerView {
   /** What the scheduled check last measured (#210), or null where none has reached this unit. */
   check: UnitCheck | null;
   createdAt: number;
+  /** When a writer last moved the row: a lifecycle run, a relocation, the scheduled check (#224). */
+  updatedAt: number;
 }
 export interface OnboardInput {
   consumerName: string;

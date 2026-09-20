@@ -79,7 +79,7 @@ export function checkUnitsStep(ports: CheckUnitsPorts): Step {
           const p = { consumerName: c.name, repoURL: c.repoUrl, repoCredentialId: c.repoCredentialId, host: c.host, stage: c.stage, unitApex, domain: c.domain, clusterId: c.clusterId } as DeployableOnboardParams;
           findings = await consumerFindings(onboard.ports, p, probeCtx(ctx, c.name));
         }
-        ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings } }).where(eq(apps.id, c.id)).run();
+        ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings }, updatedAt: now }).where(eq(apps.id, c.id)).run();
         tally.consumers += 1;
         tally.attention += findings.filter((f) => f.status !== "pass").length;
       }

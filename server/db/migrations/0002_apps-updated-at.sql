@@ -1,0 +1,1 @@
+ALTER TABLE `apps` ADD `updated_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL;

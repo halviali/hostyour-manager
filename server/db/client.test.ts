@@ -46,14 +46,14 @@ describe("openDb — migration phase + append-only invariants", () => {
   // A database built by the BASELINE ALONE — what every installation before hostyour-manager#222
   // stands on — is carried forward by the migrations that follow it, and the baseline is never run
   // again against it (#222: a re-stamped baseline died on `table audit already exists`).
-  it("carries a database built by the baseline alone forward: 0001 adds organisation_identities, the baseline stays applied once", () => {
+  it("carries a database built by the baseline alone forward: every later migration applies, the baseline stays applied once", () => {
     const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
     dirs.push(dir);
     // The baseline alone, as a migrations folder of its own: the same 0000 file, a journal naming only it.
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -65,7 +65,8 @@ describe("openDb — migration phase + append-only invariants", () => {
     const h = openDb(file);
     handles.push(h);
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([{ name: "organisation_identities" }]);
-    expect(h.sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get()).toEqual({ n: 2 });
+    expect(h.sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get()).toEqual({ n: journal.entries.length });
+    expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('apps') WHERE name = 'updated_at'").all()).toEqual([{ name: "updated_at" }]); // 0002
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });
 

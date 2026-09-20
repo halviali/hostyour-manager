@@ -284,7 +284,7 @@ export function Consumers() {
                 {/* No recorded revision: the unit's pin lives on its delivery branch and is the
                     release cycle's to write — the live Drift row below shows what actually runs. */}
                 <div className="servercard__target">
-                  {c.domain} · {c.stage}
+                  {c.domain} · {c.stage} · updated {new Date(c.updatedAt).toLocaleString()}
                 </div>
                 {/* Row facts only. The unit's public address is NOT one of them — it is
                     <label>.<stage apex>, and the apex comes off the target cluster's values chain — so

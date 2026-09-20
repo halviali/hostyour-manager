@@ -145,6 +145,7 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
           lastRunId: apps.lastRunId,
           check: apps.checkJson,
           createdAt: apps.createdAt,
+          updatedAt: apps.updatedAt,
         })
         .from(apps)
         .innerJoin(clusters, eq(apps.clusterId, clusters.id))

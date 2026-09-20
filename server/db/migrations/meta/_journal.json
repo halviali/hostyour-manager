@@ -15,6 +15,13 @@
       "when": 1789928125699,
       "tag": "0001_organisation-identities",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789929638694,
+      "tag": "0002_apps-updated-at",
+      "breakpoints": true
     }
   ]
 }

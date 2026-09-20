@@ -171,6 +171,9 @@ export const apps = sqliteTable("apps", {
   // of its onboarding, run again. Null until the first check lands — never "fine" by default.
   checkJson: text("check_json", { mode: "json" }).$type<UnitCheck>(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
+  // When a writer last moved this row (status, cluster, last run, the measured check) — the
+  // column tenants carries, written by EVERY update of an apps row (hostyour-manager#224).
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),
 }, (t) => [uniqueIndex("apps_name_stage_uq").on(t.name, t.stage)]);
 
 // A tenant (multi-app package) deployed on a cluster. Unlike a consumer `apps` row, a tenant fans
