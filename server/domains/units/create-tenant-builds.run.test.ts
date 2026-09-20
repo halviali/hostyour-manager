@@ -221,7 +221,7 @@ describe("create-tenant planStream — the build units and their organisation's 
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
-    expect(result.summary).toMatch(/build unit example-jobs .* has no identity: organisation acme records no packages reader .* Organisations page/);
+    expect(result.summary).toMatch(/build unit example-jobs .* has no identity: .*organisation acme records no repository PAT .* Organisations page/);
   });
   it("a registered build-only unit is re-released with its stored credential and asks for nothing", async () => {
     seedClusters();
@@ -320,7 +320,7 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     expect(viaPat).toEqual([{ kind: "pat", label: "repository PAT (example-jobs)" }]);
     const nobody = { unit: "x", repoURL: "https://github.com/nobody/x.git", images: ["x"], registered: false };
     await expect(buildUnitStep(() => ({ ports: make(), githubApp: elsewhere }), { guid: GUID, owner: "team-acme", stage: "prod" }, nobody).run(ctx(params(), [])))
-      .rejects.toThrow(/organisation nobody records no packages reader/);
+      .rejects.toThrow(/organisation nobody records no repository PAT/);
   });
   it("refuses when the consumer onboarding is not wired, naming it", async () => {
     seedClusters();

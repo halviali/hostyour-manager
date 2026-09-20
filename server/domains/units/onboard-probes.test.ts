@@ -87,12 +87,15 @@ describe("probePackages — one private package per scope the repository routes 
     expect(await probePackages(ports({ github, repo: repo() }), params(), c))
       .toMatchObject([{ status: "fail", severity: "hard", detail: "@acme/components is not readable with the packages reader of x", hint: "record a packages reader of x that also reads @acme on the Organisations page" }]);
     db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
-    expect(await probePackages(ports({ github, repo: repo() }), params(), c)).toMatchObject([{ id: "packages", status: "fail", detail: "organisation x records no packages reader" }]);
+    expect(await probePackages(ports({ github, repo: repo() }), params(), c)).toMatchObject([{ id: "packages", status: "fail", detail: expect.stringContaining("organisation x records no packages reader, and x/acme installs private npm packages of @acme") }]);
   });
   it("warns where the package is not published, and passes softly where no scope is routed there", async () => {
     const github = new FakeGitHubConsumer();
     expect(await probePackages(ports({ github, repo: repo() }), params(), ctx())).toMatchObject([{ status: "warn", detail: "@acme/components is not published there" }]);
-    expect(await probePackages(ports({ github }), params(), ctx())).toMatchObject([{ id: "packages", status: "pass", severity: "soft", detail: "the repository routes no scope to GitHub Packages" }]);
+    expect(await probePackages(ports({ github }), params(), ctx())).toMatchObject([{ id: "packages", status: "pass", severity: "soft", detail: "the repository routes no scope to GitHub Packages — no packages reader needed" }]);
+    // ... and no reader is asked for either (#221).
+    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    expect(await probePackages(ports({ github }), params(), ctx())).toMatchObject([{ id: "packages", status: "pass", severity: "soft" }]);
   });
 });
 

@@ -18,7 +18,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { readOrganisationIdentity } from "./organisations.ts";
-import { ORGANISATIONS_PAGE } from "./repo-identity.ts";
+import { ORGANISATIONS_PAGE, npmrcPackageScopes, packagesReaderMissing } from "./repo-identity.ts";
 import { consumerUnitHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
@@ -90,12 +90,12 @@ export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: 
   const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
   try {
     const npmrc = await ports.repo.readFile(clone.workdir, ".npmrc");
-    const scopes = [...(npmrc ?? "").matchAll(/^@([^:\s]+):registry=https:\/\/npm\.pkg\.github\.com\/?\s*$/gm)].map((m) => m[1]!);
-    if (scopes.length === 0) return [check("packages", "Private npm packages", "soft", "pass", "the repository routes no scope to GitHub Packages")];
+    const scopes = npmrcPackageScopes(npmrc);
+    if (scopes.length === 0) return [check("packages", "Private npm packages", "soft", "pass", "the repository routes no scope to GitHub Packages — no packages reader needed")];
     const lock = (await ports.repo.readFile(clone.workdir, "pnpm-lock.yaml")) ?? (await ports.repo.readFile(clone.workdir, "package-lock.json")) ?? "";
-    const { owner } = parseGitHubOwnerRepo(p.repoURL);
+    const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
     const readerId = readOrganisationIdentity(ctx.db, owner)?.packagesCredentialId;
-    if (!readerId) return [check("packages", "Private npm packages", "hard", "fail", `organisation ${owner} records no packages reader`, `record it on ${ORGANISATIONS_PAGE}`)];
+    if (!readerId) return [check("packages", "Private npm packages", "hard", "fail", packagesReaderMissing(owner, repo, scopes), `record it on ${ORGANISATIONS_PAGE}`)];
     const reader = await ctx.creds.open(readerId, { purpose: "consumer-onboard:probe-packages", runId: "plan" });
     return withToken(reader, async (token) => {
       const out: PreflightCheck[] = [];

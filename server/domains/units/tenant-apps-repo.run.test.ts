@@ -1,6 +1,8 @@
 // tenant-apps-repo (hostyour-manager#177): the plan's refusals, the tree written from a fake template
 // into a fake writer, its idempotency, the build-only chain driven with a github-app credential that
 // mints the App's token at every open (#184), and the registration carrying repo and image afterwards.
+import { organisationIdentities } from "../../db/schema/organisations.ts";
+import { eq } from "drizzle-orm";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { seedQuota } from "../../../shared/unit-size.ts";
@@ -177,6 +179,18 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     expect(r.outcome).toBe("rejected");
     if (r.outcome !== "rejected") return;
     expect(r.summary).toMatch(/crm is not in the template's apps\.yaml \(it offers erp, web\)/);
+  });
+  // The bundle's build installs what the TEMPLATE's .npmrc routes to GitHub Packages (#221): a
+  // template routing a scope needs the organisation's packages reader at plan; one routing none needs nothing.
+  it("refuses a template routing a scope to GitHub Packages where the organisation records no packages reader, and plans one routing none without it", async () => {
+    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, ORG)).run();
+    expect((await plan(harness(), REQUEST)).outcome).toBe("planned"); // TEMPLATE_FILES carry no .npmrc
+    const h = harness();
+    h.catalogReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, ".npmrc": `@${ORG}:registry=https://npm.pkg.github.com\n` } });
+    const r = await plan(h, REQUEST);
+    expect(r.outcome).toBe("rejected");
+    if (r.outcome !== "rejected") return;
+    expect(r.summary).toMatch(new RegExp(`organisation ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* Organisations page`));
   });
   it("refuses a catalog whose appsOrg is not the organisation the App is installed in", async () => {
     const h = harness();

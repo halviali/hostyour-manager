@@ -33,7 +33,7 @@ import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } f
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
-import { packagesReaderMissing, type OrganisationIdentityReader } from "./repo-identity.ts";
+import { npmrcPackageScopes, packagesReaderMissing, type OrganisationIdentityReader } from "./repo-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
 
 const repoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
@@ -97,7 +97,7 @@ async function sealAppCredential(ctx: StepCtx, app: GitHubApp, unit: string, run
  *  (how its bundle is built). Cloned the way the catalog reads it (app-catalog.ts readAppsManifest):
  *  at its default branch head, with the catalog's own credential — the template is no unit and has
  *  no credential of its own. */
-async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<{ path: string; content: string }[]>; dispose: () => Promise<void> }> {
+async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; folders: (app: string) => Promise<boolean>; tree: (chosen: readonly string[]) => Promise<{ path: string; content: string }[]>; dispose: () => Promise<void> }> {
   const repo = ports.repo;
   const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), signal });
   try {
@@ -110,6 +110,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
     const templateApps = parseAppsManifest(appsYaml).apps.map((a) => a.name);
     return {
       appsYaml,
+      npmrc: await repo.readFile(cloned.workdir, ".npmrc"),
       manifest: manifest.data,
       folders: async (app) => (await repo.listDir(cloned.workdir, app)).length > 0,
       tree: (chosen) => readTemplateTree(repo, cloned.workdir, { templateApps, chosen }),
@@ -136,14 +137,16 @@ export async function resolveTenantAppsUnit(
   if (!template) return refuse(`the catalog declares no tenant.appsBundle and tenant.appsRepo in ${TENANT_MANIFEST_PATH} — the template a tenant's repository is created from`);
   const unit = tenantAppsUnit(template.name, input.subdomain);
   if (!consumerName.safeParse(unit).success) return refuse(`"${unit}" is not a unit name (lower-case letters, digits and hyphens, at most 40 characters) — choose a shorter subdomain`);
-  // The bundle's build installs the organisation's private packages with its packages reader (#220).
-  if (!input.organisations(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit));
   input.log(`template ${template.repo} (${template.name}), organisation ${org}, repository ${tenantAppsRepoURL(org, template.name, input.subdomain)}`);
   const read = await readTemplate(ports, template.repo, input.signal);
   let offered: string[];
   const unfolded: string[] = [];
   try {
     offered = parseAppsManifest(read.appsYaml).apps.map((a) => a.name);
+    // The bundle's build installs what the template's .npmrc routes to GitHub Packages with the
+    // organisation's packages reader (#220, #221) — asked here, before anything is created.
+    const scopes = npmrcPackageScopes(read.npmrc);
+    if (scopes.length > 0 && !input.organisations(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes));
     for (const app of input.chosen) if (offered.includes(app) && !(await read.folders(app))) unfolded.push(app);
     if (!read.manifest.builds.some((b) => b.name === template.name)) return refuse(`${template.repo} declares no build named ${template.name} in its ${CONSUMER_MANIFEST_PATH} — the tenant's build takes its containerfile from that entry`);
   } finally {

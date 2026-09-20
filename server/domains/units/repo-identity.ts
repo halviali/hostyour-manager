@@ -10,9 +10,11 @@
 //    every open; else the organisation's REPOSITORY PAT where one is recorded, sealed again under
 //    the unit's own name so the unit's offboard takes its row and never the organisation's; else a
 //    refusal naming both halves;
-//  - the PACKAGES identity: the organisation's PACKAGES READER, required for every unit. An App
-//    installation token reads no private npm package whatever the App's permissions say, so a
-//    build's `.npmrc` carries this token (onboard-seed-repo-pat.ts), never the repository's.
+//  - the PACKAGES identity: the organisation's PACKAGES READER, required for a unit whose
+//    repository routes a scope to GitHub Packages (its `.npmrc`, npmrcPackageScopes) and for no
+//    other (#221). An App installation token reads no private npm package whatever the App's
+//    permissions say, so a build's `.npmrc` carries this token (onboard-seed-repo-pat.ts), never
+//    the repository's.
 // Callers: the onboard POST and its prefill (api.ts, api-onboard-prefill.ts), the tenant build
 // units (tenant-builds.ts) and the tenant's own apps repository (tenant-apps-steps.ts).
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
@@ -27,9 +29,8 @@ export type RepoIdentityApp = Pick<GitHubApp, "reachesRepository" | "installatio
 export type OrganisationIdentityReader = (org: string) => { packagesCredentialId: string | null; repoCredentialId: string | null } | null;
 
 /** The identity chosen for one repository: the App's installation token (minted now, for the reads
- *  the caller makes before any run exists) or the organisation's repository PAT, opened now. Beside
- *  it, the id of the organisation's packages reader, which every build of the unit is seeded with. */
-export type RepoIdentity = ({ kind: "github-app"; token: string } | { kind: "pat"; token: string }) & { packagesCredentialId: string };
+ *  the caller makes before any run exists) or the organisation's repository PAT, opened now. */
+export type RepoIdentity = { kind: "github-app"; token: string } | { kind: "pat"; token: string };
 
 /** Whether the App reaches a repository named by its URL — the measurement behind the rule. */
 export async function appReachesRepoURL(app: Pick<GitHubApp, "reachesRepository">, repoURL: string, signal?: AbortSignal): Promise<boolean> {
@@ -39,19 +40,25 @@ export async function appReachesRepoURL(app: Pick<GitHubApp, "reachesRepository"
 
 export const ORGANISATIONS_PAGE = "the Organisations page";
 
-/** The refusal an owner without a packages reader gets, one sentence every caller uses. */
-export function packagesReaderMissing(owner: string, repo: string): string {
-  return `organisation ${owner} records no packages reader — a token that reads its private npm packages is needed for every unit of it (${owner}/${repo}); record it on ${ORGANISATIONS_PAGE} first`;
+/** The refusal a repository routing a scope to GitHub Packages gets where its organisation records
+ *  no packages reader — one sentence every caller uses. */
+export function packagesReaderMissing(owner: string, repo: string, scopes: readonly string[]): string {
+  return `organisation ${owner} records no packages reader, and ${owner}/${repo} installs private npm packages of ${scopes.map((s) => `@${s}`).join(", ")} from GitHub Packages (its .npmrc) — record a token that reads them on ${ORGANISATIONS_PAGE} first`;
+}
+
+/** The scopes a repository's `.npmrc` routes to GitHub Packages — the one measurement that says
+ *  whether its build needs the organisation's packages reader. Empty for no `.npmrc`. */
+export function npmrcPackageScopes(npmrc: string | null): string[] {
+  return [...(npmrc ?? "").matchAll(/^@([^:\s]+):registry=https:\/\/npm\.pkg\.github\.com\/?\s*$/gm)].map((m) => m[1]!);
 }
 
 /** The rule, judged without minting or opening anything: what identity ${owner}/${repo} gets, or
  *  why it gets none. The plan-time half — the run's step resolves the same way and seals. */
-export async function judgeRepoIdentity(input: { repoURL: string; githubApp?: Pick<GitHubApp, "reachesRepository" | "installationOrg"> | undefined; organisations: OrganisationIdentityReader; signal?: AbortSignal }): Promise<{ kind: "github-app" | "pat"; packagesCredentialId: string; repoCredentialId?: string } | { refused: string }> {
+export async function judgeRepoIdentity(input: { repoURL: string; githubApp?: Pick<GitHubApp, "reachesRepository" | "installationOrg"> | undefined; organisations: OrganisationIdentityReader; signal?: AbortSignal }): Promise<{ kind: "github-app" | "pat"; repoCredentialId?: string } | { refused: string }> {
   const { owner, repo } = parseGitHubOwnerRepo(input.repoURL);
   const org = input.organisations(owner);
-  if (!org?.packagesCredentialId) return { refused: packagesReaderMissing(owner, repo) };
-  if (input.githubApp && (await appReachesRepoURL(input.githubApp, input.repoURL, input.signal))) return { kind: "github-app", packagesCredentialId: org.packagesCredentialId };
-  if (org.repoCredentialId) return { kind: "pat", packagesCredentialId: org.packagesCredentialId, repoCredentialId: org.repoCredentialId };
+  if (input.githubApp && (await appReachesRepoURL(input.githubApp, input.repoURL, input.signal))) return { kind: "github-app" };
+  if (org?.repoCredentialId) return { kind: "pat", repoCredentialId: org.repoCredentialId };
   const where = input.githubApp ? `is installed in the organisation ${await input.githubApp.installationOrg(input.signal)} and does not reach ${owner}/${repo}` : "is not configured on this manager";
   return { refused: `the platform's GitHub App ${where}, and organisation ${owner} records no repository PAT — install the App on the repository, or record the organisation's repository PAT (repo + workflow + admin:repo_hook) on ${ORGANISATIONS_PAGE}` };
 }
@@ -61,10 +68,10 @@ export async function judgeRepoIdentity(input: { repoURL: string; githubApp?: Pi
 export async function resolveRepoIdentity(input: { repoURL: string; githubApp?: RepoIdentityApp | undefined; organisations: OrganisationIdentityReader; store: Pick<CredentialStore, "open">; signal?: AbortSignal }): Promise<RepoIdentity> {
   const judged = await judgeRepoIdentity(input);
   if ("refused" in judged) throw errValidation(judged.refused);
-  if (judged.kind === "github-app") return { kind: "github-app", token: await input.githubApp!.installationToken(input.signal), packagesCredentialId: judged.packagesCredentialId };
+  if (judged.kind === "github-app") return { kind: "github-app", token: await input.githubApp!.installationToken(input.signal) };
   const pat = await input.store.open(judged.repoCredentialId!, { purpose: "repo-identity:organisation-pat" });
   try {
-    return { kind: "pat", token: pat.toString("utf8"), packagesCredentialId: judged.packagesCredentialId };
+    return { kind: "pat", token: pat.toString("utf8") };
   } finally {
     pat.fill(0);
   }
@@ -84,11 +91,9 @@ export async function sealRepoIdentity(store: Pick<CredentialStore, "seal">, ide
 }
 
 /** The packages reader of a unit's organisation, by the owner of its repository URL — what the
- *  build seed and the App-token refresh write beside the repository token. Throws the refusal
- *  where none is recorded: a build without it cannot install a private package. */
-export function packagesReaderFor(organisations: OrganisationIdentityReader, repoURL: string): string {
-  const { owner, repo } = parseGitHubOwnerRepo(repoURL);
-  const id = organisations(owner)?.packagesCredentialId;
-  if (!id) throw errValidation(packagesReaderMissing(owner, repo));
-  return id;
+ *  build seed and the App-token refresh write beside the repository token; null where the
+ *  organisation records none. Whether that is a refusal depends on the repository's `.npmrc`:
+ *  the seed step and the packages probe decide (npmrcPackageScopes). */
+export function packagesReaderFor(organisations: OrganisationIdentityReader, repoURL: string): string | null {
+  return organisations(parseGitHubOwnerRepo(repoURL).owner)?.packagesCredentialId ?? null;
 }

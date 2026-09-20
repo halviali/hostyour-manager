@@ -62,9 +62,9 @@ export interface AppTokenRefreshDeps {
  *  App for a `github-app` credential. The value is zeroed after the write and never logged. Throws
  *  where the open or the write fails. Writes Vault only: the deletion that lets the value reach the
  *  pipeline is `deleteBuildSecrets`, called by both callers after this succeeded. */
-export async function refreshUnitRepoPat(deps: { store: Pick<CredentialStore, "open">; seeder: Pick<VaultSeeder, "refreshBuildRepoPat"> }, unit: string, credentialId: string, packagesCredentialId: string, use: UseContext): Promise<void> {
+export async function refreshUnitRepoPat(deps: { store: Pick<CredentialStore, "open">; seeder: Pick<VaultSeeder, "refreshBuildRepoPat"> }, unit: string, credentialId: string, packagesCredentialId: string | null, use: UseContext): Promise<void> {
   const token = await deps.store.open(credentialId, use);
-  const packages = await deps.store.open(packagesCredentialId, use).catch((e: unknown) => { token.fill(0); throw e; });
+  const packages = packagesCredentialId ? await deps.store.open(packagesCredentialId, use).catch((e: unknown) => { token.fill(0); throw e; }) : Buffer.alloc(0);
   try {
     await deps.seeder.refreshBuildRepoPat({ consumerName: unit, pat: token.toString("utf8"), packages: packages.toString("utf8") });
   } finally {

@@ -299,6 +299,7 @@ describe("onboard run definition", () => {
     await expect(step.run(ctx(p, "seed-repo-pat", []))).rejects.toThrow(/repo-pat put failed/);
   });
 
+
   it("routes a slave-targeted onboard to the RESOLVED slave clients + per-slave ArgoCD namespace", async () => {
     const slaveArgo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
     const slaveCluster = new FakeClusterReader({

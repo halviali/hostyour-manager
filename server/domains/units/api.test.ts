@@ -217,7 +217,7 @@ describe("consumer API", () => {
   // reaches the repository (a credential row storing nothing), the organisation's repository PAT
   // where it does not (sealed again under the unit's name), a refusal naming the page else; and the
   // organisation's packages reader is required whichever reads.
-  it("onboards a repository the GitHub App reaches under the App, one it does not under the organisation's repository PAT, and refuses one whose organisation records nothing", async () => {
+  it("onboards a repository the GitHub App reaches under the App, one it does not under the organisation's repository PAT, and refuses one whose organisation records no repository PAT", async () => {
     seedCluster();
     const githubApp = new FakeGitHubApp();
     const { app, executor, cookie, store } = await make(true, undefined, githubApp);
@@ -243,11 +243,11 @@ describe("consumer API", () => {
     const row = (await store.list({ kind: "pat" })).find((c) => c.id === second.repoCredentialId);
     expect(row?.label).toBe("repository PAT (acme)");
     expect((await store.open(second.repoCredentialId, { purpose: "test:assert-sealed" })).toString("utf8")).toBe(RAW_PAT);
-    // An organisation recording no packages reader is refused before anything is sealed.
+    // An organisation recording nothing at all, not reached by the App, is refused naming the repository PAT and the page.
     db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
     const none = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, consumerName: "acme3" }) });
     expect(none.status).toBe(400);
-    expect(await none.text()).toContain("organisation x records no packages reader");
+    expect(await none.text()).toContain("organisation x records no repository PAT");
   });
 
   it("a PAT in the request body is ignored — params_json carries ONLY the sealed reference of the organisation's identity, never a value", async () => {

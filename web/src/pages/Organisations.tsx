@@ -13,8 +13,8 @@ type Which = "packages-reader" | "repository-pat";
  *
  * Two credentials. The PACKAGES READER is a token that reads the organisation's private npm
  * packages — GitHub grants the platform's App no access to a private package whatever its
- * permissions say, so every build's `.npmrc` carries this token; it is required before any unit of
- * the organisation can be onboarded. The REPOSITORY PAT is the repository identity only where the
+ * permissions say, so a build's `.npmrc` carries this token; it is required for every unit whose
+ * repository installs private packages from GitHub Packages (#221). The REPOSITORY PAT is the repository identity only where the
  * App is not installed in the organisation. Each token is measured against GitHub before it is
  * sealed, and only its fingerprint ever comes back.
  */
@@ -90,7 +90,7 @@ function OrganisationCard(props: { entry: OrganisationIdentityView; onChanged: (
         which="packages-reader"
         title="Packages reader"
         standing={entry.packagesReader}
-        hint="A token that reads the organisation's private npm packages: a classic PAT with read:packages, or a fine-grained PAT with Packages: Read for this organisation. Required before any unit of the organisation is onboarded — the App's own token cannot read packages."
+        hint="A token that reads the organisation's private npm packages: a classic PAT with read:packages, or a fine-grained PAT with Packages: Read for this organisation. Required for every unit whose repository installs private packages from GitHub Packages (its .npmrc) — the App's own token cannot read packages."
         required
         onChanged={props.onChanged}
         onError={props.onError}
@@ -151,7 +151,7 @@ function CredentialRow(props: { org: string; which: Which; title: string; standi
         {props.standing ? (
           <span className="chip chip--ok">recorded {new Date(props.standing.recordedAt).toLocaleDateString()} · {props.standing.fingerprint}</span>
         ) : (
-          <span className={props.required ? "chip chip--warn" : "chip"}>{props.required ? "missing" : "not needed"}</span>
+          <span className={props.required ? "chip chip--warn" : "chip"}>{props.required ? "not recorded" : "not needed"}</span>
         )}
       </div>
       <p className="servercard__reading">{props.hint}</p>

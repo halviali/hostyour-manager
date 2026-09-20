@@ -79,7 +79,7 @@ describe("probeBuildUnit", () => {
     db.db.update(organisationIdentities).set({ repoCredentialId: "cred_pat" }).where(eq(organisationIdentities.org, "example-org")).run();
     expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "its organisation's repository PAT; its packages read with the organisation's packages reader" }]);
     db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "example-org")).run();
-    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("organisation example-org records no packages reader") }]);
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("organisation example-org records no repository PAT") }]);
   });
   it("a registered unit's stored credential reads the hooks; without admin:repo_hook it fails by name", async () => {
     const github = new FakeGitHubConsumer();

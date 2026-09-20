@@ -10,7 +10,9 @@ import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, 
 import { unitBuildNamespace } from "./build-rbac.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 import { probePackages } from "./onboard-probes.ts";
-import { packagesReaderFor } from "./repo-identity.ts";
+import { npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "./repo-identity.ts";
+import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import type { StepCtx } from "../../executor/types.ts";
 import { readOrganisationIdentity } from "./organisations.ts";
 
 /** The onboard `seed-repo-pat` step: write the unit's build entry secret/build/<name>/repo-pat on
@@ -26,6 +28,28 @@ import { readOrganisationIdentity } from "./organisations.ts";
  *  rule on data holds, and the cas conflict is the existence proof. UNCONDITIONAL in both onboard
  *  forms and fail-closed: a failed write fails the run. The value is opened from the sealed store
  *  (never re-plumbed raw through params) and zeroed after the write. */
+/** The organisation's packages reader where the repository routes a scope to GitHub Packages (its
+ *  `.npmrc` at the pinned commit, read the way the packages probe reads it), null where it routes
+ *  none — and a refusal, naming the organisation and the scopes, where a scope is routed and the
+ *  organisation records no reader (#221). */
+async function packagesReaderOrRefuse(ports: OnboardPorts, p: OnboardParams, ctx: StepCtx): Promise<string | null> {
+  const id = packagesReaderFor((org) => readOrganisationIdentity(ctx.db, org), p.repoURL);
+  if (id) return id;
+  const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
+  let scopes: string[];
+  try {
+    scopes = npmrcPackageScopes(await ports.repo.readFile(clone.workdir, ".npmrc"));
+  } finally {
+    await ports.repo.dispose(clone.workdir);
+  }
+  if (scopes.length > 0) {
+    const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
+    throw errValidation(packagesReaderMissing(owner, repo, scopes));
+  }
+  ctx.log("meta", `${p.repoURL} routes no scope to GitHub Packages — no packages reader needed, the entry's packages property is empty`);
+  return null;
+}
+
 export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
   return {
     name: "seed-repo-pat",
@@ -33,9 +57,11 @@ export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
     // What the seeded packages reader will be asked to read by the build: one private package per scope.
     probe: (ctx) => probePackages(ports, p, ctx),
     run: async (ctx) => {
-      const packagesCredentialId = packagesReaderFor((org) => readOrganisationIdentity(ctx.db, org), p.repoURL);
+      const packagesCredentialId = await packagesReaderOrRefuse(ports, p, ctx);
       const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:seed-repo-pat", runId: ctx.runId });
-      const packages = await ctx.creds.open(packagesCredentialId, { purpose: "consumer-onboard:seed-repo-pat", runId: ctx.runId }).catch((e: unknown) => { pat.fill(0); throw e; });
+      const packages = packagesCredentialId
+        ? await ctx.creds.open(packagesCredentialId, { purpose: "consumer-onboard:seed-repo-pat", runId: ctx.runId }).catch((e: unknown) => { pat.fill(0); throw e; })
+        : Buffer.alloc(0);
       let created: boolean;
       try {
         ({ created } = await ports.seeder.seedBuildRepoPat({ consumerName: p.consumerName, pat: pat.toString("utf8"), packages: packages.toString("utf8") }));
@@ -80,7 +106,7 @@ export function refreshRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step 
       }
       const namespace = unitBuildNamespace(p.consumerName);
       const before = await readBuildSecretRefreshTimes(kube, p.consumerName);
-      const packagesCredentialId = packagesReaderFor((org) => readOrganisationIdentity(ctx.db, org), p.repoURL);
+      const packagesCredentialId = await packagesReaderOrRefuse(ports, p, ctx);
       await refreshUnitRepoPat({ store: ctx.creds, seeder: ports.seeder }, p.consumerName, p.repoCredentialId, packagesCredentialId, { purpose: "consumer-onboard:refresh-repo-pat", runId: ctx.runId });
       const path = `${KV_MOUNT}/build/${p.consumerName}/repo-pat`;
       ctx.log("meta", `${path} rewritten (properties pat, packages) with the credentials' current values`);

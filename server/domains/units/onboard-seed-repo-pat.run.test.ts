@@ -6,11 +6,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
-import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
+import { refreshRepoPatStep, seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { BUILD_TARGET_SECRETS } from "./app-token-refresh.ts";
 import { ports, buildSecretRows, FakeBuildPlaneClusterReader, FakeSeeder, BUILD_SECRETS_MATERIALIZED_AT } from "./onboard.fixture.ts";
 import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
+import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { organisationIdentities } from "../../db/schema/organisations.ts";
+import { eq } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
@@ -121,5 +124,22 @@ describe("onboard refresh-repo-pat step", () => {
     expect(after.find((r) => r.targetSecret === "bump-git-https")?.refreshTime).not.toBe(BUILD_SECRETS_MATERIALIZED_AT);
     expect(after.filter((r) => r.targetSecret !== "bump-git-https").map((r) => r.refreshTime)).toEqual([BUILD_SECRETS_MATERIALIZED_AT, BUILD_SECRETS_MATERIALIZED_AT]);
     expect(after.every((r) => r.ready)).toBe(true);
+  });
+});
+
+// The packages reader is the build's business (#221): where the organisation records none, the
+// repository's .npmrc decides — no scope routed to GitHub Packages seeds an empty packages value,
+// a routed scope refuses naming the organisation and the scopes.
+describe("onboard seed-repo-pat step — the packages reader where a scope is routed", () => {
+  it("seeds an empty packages value for a repository routing no scope, and refuses one routing a scope where the organisation records no reader", async () => {
+    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    const prt = ports();
+    const logs: string[] = [];
+    await seedRepoPatStep(prt, params()).run(ctx(logs, "ghs_repo"));
+    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_repo", packages: "" }]);
+    expect(logs.some((l) => l.includes("routes no scope to GitHub Packages — no packages reader needed"))).toBe(true);
+    const routed = ports({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { ".npmrc": "@x:registry=https://npm.pkg.github.com\n" } }) });
+    await expect(seedRepoPatStep(routed, params()).run(ctx([], "ghs_repo")))
+      .rejects.toThrow(/organisation x records no packages reader, and x\/acme installs private npm packages of @x from GitHub Packages .* Organisations page/);
   });
 });

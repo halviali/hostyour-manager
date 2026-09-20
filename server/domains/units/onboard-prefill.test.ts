@@ -86,12 +86,6 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
     expect(String((err as Error).message)).toContain("Organisations page");
   });
 
-  it("refuses a repository whose organisation records no packages reader, whichever identity would read it", async () => {
-    const githubApp = new FakeGitHubApp();
-    const err = await readOnboardPrefill({ github: new FakeGitHubConsumer(), githubApp, organisations: organisations([]), store }, request({ repoURL: `https://github.com/${githubApp.org}/acme.git` }), signal()).catch((e: unknown) => e);
-    expect(String((err as Error).message)).toContain(`organisation ${githubApp.org} records no packages reader`);
-    expect(String((err as Error).message)).toContain("Organisations page");
-  });
 
   it("refuses a repository on a manager with no App and no repository PAT, saying which half is missing", async () => {
     const err = await readOnboardPrefill({ github: new FakeGitHubConsumer(), organisations: organisations(["x"]), store }, request(), signal()).catch((e: unknown) => e);
