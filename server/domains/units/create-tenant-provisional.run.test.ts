@@ -60,7 +60,7 @@ const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 const APPS = [{ name: "erp" }];
 const EXPECTED = tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod");
 /** The four cleanup names create-tenant arms — the shared teardown under its ABORT flavour. */
-const ABORT_STEPS = [`abort-${GUID}-remove`, `abort-${GUID}-watch-prune`, `abort-${GUID}-delete-projects`, `abort-${GUID}-record`];
+const ABORT_STEPS = [`abort-${GUID}-delete-apps-repository`, `abort-${GUID}-remove`, `abort-${GUID}-watch-prune`, `abort-${GUID}-delete-projects`, `abort-${GUID}-record`];
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1

@@ -300,6 +300,15 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, ...apps }, `tenant-apps-repo(${guid}): ${apps.appsImage} ${trailer(runId)}`);
   }
 
+  /** The inverse of setTenantAppsRepo (tenant-apps-repo-delete.ts): the tenant is its platform alone
+   *  again, the three bundle fields gone together the way the schema demands them together. */
+  async clearTenantAppsRepo(stage: Stage, guid: string, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    const { appsRepo: _gone, ...rest } = current.entry;
+    return this.write(stage, guid, { ...rest, appsImage: "", appsImageTag: "" }, `tenant-apps-repo(${guid}): removed ${trailer(runId)}`);
+  }
+
   /** Repoint the tenant's `cluster` field — the whole bracket moves at once: every member appset
    *  selects on this one field, so the source slave stops generating the fan-out and the target
    *  starts. The file keeps its path, so a tenant moves within its stage, never across one. */

@@ -275,6 +275,10 @@ export function buildTenantOnboarding(
     // withdraws the bucket keys create-tenant minted, through the same store.
     seeder,
     ...(objectStore ? { objectStore } : {}),
+    // A tenant's apps repository goes with its last app (#217): deleted through the App that created
+    // it, its build registration removed from the same registrations the onboarding wrote.
+    ...(githubApp ? { githubApp } : {}),
+    buildRegistrations: registrations,
   };
 
   // The tenant relocation ports: the lifecycle set (registrations/resolver/dns/argo-sync/apex) plus the

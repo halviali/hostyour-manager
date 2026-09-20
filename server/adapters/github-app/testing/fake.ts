@@ -22,6 +22,8 @@ export class FakeGitHubApp implements GitHubApp {
   readonly reachable = new Map<string, boolean>();
   /** Only the calls that actually created a repository — not the idempotent-skip calls. */
   readonly created: CreateRepositoryInput[] = [];
+  /** Every repository deleteRepository took away, as `org/name`. */
+  readonly deleted: string[] = [];
 
   /** Pre-seed a standing repository so a test can drive the already-exists path. */
   seedRepository(org: string, name: string): void {
@@ -59,5 +61,14 @@ export class FakeGitHubApp implements GitHubApp {
     this.repos.add(key);
     this.created.push(input);
     return { created: true };
+  }
+
+  async deleteRepository(input: { org: string; name: string }): Promise<{ deleted: boolean }> {
+    if (this.failWith) throw this.failWith;
+    const key = `${input.org}/${input.name}`;
+    if (!this.repos.has(key)) return { deleted: false };
+    this.repos.delete(key);
+    this.deleted.push(key);
+    return { deleted: true };
   }
 }

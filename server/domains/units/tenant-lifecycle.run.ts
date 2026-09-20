@@ -11,6 +11,7 @@ import type { ArgoAppStatusMap, WorkloadStatus } from "../../adapters/kube/port.
 import { TENANT_LABEL_KEY, memberApplication, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { deleteTenantAppsRepository } from "./tenant-apps-repo-delete.ts";
 
 // tenant-suspend / tenant-resume / remove-app — the
 // tenant (multi-app fan-out) analogues of the consumer suspend/resume/offboard runs (suspend-resume.
@@ -276,6 +277,20 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
         const status = await argoReader.watchApplicationSet(argoNamespace, names, allPruned(names), { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: tenantSelector(tc.guid) });
         if (!allPruned(names)(status)) throw errValidation(`app "${app}" of tenant ${tc.guid} was not pruned — ${lingering(status)}; the registration dropped it but its workloads linger`);
         ctx.log("meta", `app "${app}" of tenant ${tc.guid} pruned — every sibling member is untouched`);
+      },
+    },
+    {
+      name: "delete-apps-repository",
+      title: "Delete the tenant's apps repository where this was its last app",
+      run: async (ctx) => {
+        // The repository stands as long as an app does (#217): read what the drop left.
+        const tc = loadTenantCluster(ctx.db, tenantId);
+        const current = await ports.registrations.readTenant(tc.stage, tc.guid);
+        if (current && current.entry.apps.length > 0) {
+          ctx.log("meta", `tenant ${tc.guid} still deploys ${current.entry.apps.map((a) => a.name).join(", ")} — its apps repository stays`);
+          return;
+        }
+        await deleteTenantAppsRepository(ctx, ports, { stage: tc.stage, guid: tc.guid }, { clear: true });
       },
     },
     {

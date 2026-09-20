@@ -45,6 +45,7 @@ const REQUEST: TenantPurgeRequest = { guid: GUID, stage: "prod", clusterId: "cls
  *  namespace, its Applications or its unfinished deprovision still stand. */
 const STEP_ORDER = [
   "attest-target",
+  `purge-${GUID}-delete-apps-repository`,
   `purge-${GUID}-remove`,
   `purge-${GUID}-watch-prune`,
   `purge-${GUID}-delete-projects`,

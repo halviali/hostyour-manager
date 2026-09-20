@@ -9,6 +9,7 @@ import { attestTenantTargetStep, clearRelocationHold, loadTenantCluster, type Te
 import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
 import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
+import { deleteTenantAppsRepository } from "./tenant-apps-repo-delete.ts";
 
 // tenant-offboard — the tenant analogue of the consumer
 // offboard.run.ts, split into its own file for the 400-line budget (it reuses the shared helpers from
@@ -30,6 +31,20 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
   const tenantId = params.tenantId;
   return [
     attestTenantTargetStep(ports, tenantId),
+    // The tenant's apps repository goes with the tenant (#217), read off the registration while it
+    // still stands — the next step git-rms it.
+    {
+      name: "delete-apps-repository",
+      title: "Delete the tenant's apps repository, where this platform created one",
+      run: async (ctx) => {
+        const tc = loadTenantCluster(ctx.db, tenantId);
+        if ((await ports.registrations.scanTenant(tc.stage, tc.guid)).status !== "read") {
+          ctx.log("meta", `tenant ${tc.guid}'s registration is not readable — an apps repository it may name is left standing`);
+          return;
+        }
+        await deleteTenantAppsRepository(ctx, ports, { stage: tc.stage, guid: tc.guid }, { clear: false });
+      },
+    },
     {
       name: "remove-tenant",
       title: "Remove the tenant registration (GitOps un-deploy)",

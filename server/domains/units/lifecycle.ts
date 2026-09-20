@@ -18,6 +18,7 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { ObjectStore } from "../../adapters/object-store/port.ts";
+import type { GitHubApp } from "../../adapters/github-app/port.ts";
 
 // Every lifecycle run resolves the RIGHT kube clients + ArgoCD namespace for its target cluster at run
 // time via `resolver.resolve(clusterId)`. The master path resolves to
@@ -196,6 +197,13 @@ export interface TenantLifecyclePorts {
    *  and skipped when absent, the same shape seeder has: the store is what MINTED the keys, so a
    *  purge running without one has none it could take back, and the step says so. */
   objectStore?: ObjectStore;
+  /** The platform's GitHub App — what created a tenant's apps repository, and the only thing that
+   *  deletes it (tenant-apps-repo-delete.ts). Optional but UNCONDITIONALLY needed by the delete
+   *  where a repository is recorded: absent ⇒ the step fails loud, never a silent skip. */
+  githubApp?: GitHubApp;
+  /** The build registrations (registrations/<unit>/build.yaml) the bundle's build-only onboarding
+   *  wrote — its removal goes with the repository. Optional and said when absent. */
+  buildRegistrations?: Pick<Registrations, "removeBuildRegistration">;
 }
 
 /** A tenant + its cluster context, resolved from the tenants row (tnt_) and its clusters row. The

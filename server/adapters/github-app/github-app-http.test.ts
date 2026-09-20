@@ -170,6 +170,27 @@ describe("github-app adapter — createRepository", () => {
   });
 });
 
+describe("github-app adapter — deleteRepository (#217)", () => {
+  const TOKEN_ROUTE = { "POST /app/installations/42/access_tokens": { status: 201, body: { token: "ghs_one", expires_at: expiresAt(Date.now() + 3_600_000) } } };
+
+  it("DELETEs /repos/{org}/{name} with the INSTALLATION token and answers {deleted:true} on 204, {deleted:false} on 404", async () => {
+    const stub = stubFetch({ ...TOKEN_ROUTE, "DELETE /repos/example-org/example-apps-acme": { status: 204, body: {} }, "DELETE /repos/example-org/gone": { status: 404, body: { message: "Not Found" } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    expect(await client.deleteRepository({ org: "example-org", name: "example-apps-acme" })).toEqual({ deleted: true });
+    expect(bearerOf(stub.seen.find((x) => x.path === "/repos/example-org/example-apps-acme")!)).toBe("ghs_one");
+    expect(await client.deleteRepository({ org: "example-org", name: "gone" })).toEqual({ deleted: false });
+  });
+
+  it("surfaces a refusal (403: the App lacks administration:write) with GitHub's message and the status", async () => {
+    const stub = stubFetch({ ...TOKEN_ROUTE, "DELETE /repos/example-org/example-apps-acme": { status: 403, body: { message: "Must have admin rights to Repository." } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    const err = await client.deleteRepository({ org: "example-org", name: "example-apps-acme" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubAppError);
+    expect((err as GitHubAppError).status).toBe(403);
+    expect((err as GitHubAppError).message).toMatch(/admin rights/);
+  });
+});
+
 describe("github-app adapter — reachesRepository, the measured rule behind every repository credential", () => {
   it("answers true only when the installation covering the repository IS this one, with the App's JWT and never a token", async () => {
     const stub = stubFetch({ "GET /repos/example-org/acme/installation": { status: 200, body: { id: 42, account: { login: "example-org" } } } });
