@@ -213,6 +213,8 @@ export interface TenantCluster {
    *  constant `auth` plus an implied trio stood here instead. */
   members: string[];
   identityProvider: string;
+  /** The owner the tenant was onboarded under — what a bundle created later is onboarded under too. */
+  owner: string;
 }
 
 export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
@@ -229,6 +231,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     clusterId: cluster.id,
     members: tenant.members,
     identityProvider: tenant.identityProvider,
+    owner: tenant.owner ?? tenant.subdomain,
   };
 }
 

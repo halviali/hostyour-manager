@@ -23,6 +23,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, ORG } from "./tenant-apps-repo.fixture.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
@@ -318,9 +319,29 @@ describe("add-app streaming planner", () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
     await makeAddAppDef(ports({ helm })).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
     expect(helm.requests.find((r) => r.namespace === `${GUID}-${NEW_APP}-prod`)?.valuesObject).toMatchObject({ tenant: { appsImage: TEST_BUNDLE.appsImage, appsImageTag: TEST_BUNDLE.appsImageTag } });
-    // A tenant registered without a bundle (the empty pair) has nothing the new app's engine could mount.
-    const def = makeAddAppDef(ports({ registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) }));
-    await expect(def.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(/has no apps bundle/);
+  });
+
+  // A tenant onboarded as its platform alone (#211) has no bundle: its first app is judged against
+  // the TEMPLATE's catalog, the plan freezes the apps unit and the bundle at the placeholder tag, and
+  // the run creates the bundle before the member is fanned out (#213).
+  it("a tenant without a bundle: the plan freezes the apps unit and the steps create the bundle first, rendered at the placeholder", async () => {
+    seedClusters();
+    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML.replace("  perApp:", `${TEMPLATE_SPEC}  perApp:`), ...APP_OVERLAYS } });
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
+    const { tenantAppsManifest: _own, ...rest } = ports({ repo, helm, registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) });
+    const prt = withAppsTemplate(rest);
+    const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: "web" }, planCtx());
+    expect(result.outcome).toBe("planned");
+    if (result.outcome !== "planned") return;
+    expect(result.params).toMatchObject({ app: "web", appsImage: "acme-apps", appsUnit: { org: ORG }, subdomain: "acme" });
+    expect(helm.requests.find((r) => r.namespace === `${GUID}-web-prod`)?.valuesObject).toMatchObject({ tenant: { appsImage: "acme-apps" } });
+    const names = result.plan.steps.map((s) => s.name);
+    expect(names.slice(0, 7)).toEqual(["attest-target", "create-repository", "write-tree", "onboard-build-only", "record-apps-repo", "refresh-images", "ensure-images"]);
+    expect(names.indexOf("apply-appproject")).toBeGreaterThan(names.indexOf("ensure-images"));
+    expect(result.plan.summary).toContain(`${ORG}/acme-apps is created from`);
+    // Without the App nothing can create the repository, and the plan says so.
+    const { githubApp: _none, ...noApp } = prt;
+    await expect(makeAddAppDef(noApp).planStream!({ tenantId: "tnt_1", app: "web" }, planCtx())).rejects.toThrow(/no GitHub App identity/);
   });
 
   it("freezes both requested seed tiers into params (default false when the request omits them)", async () => {

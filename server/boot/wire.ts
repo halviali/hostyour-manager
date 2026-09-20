@@ -338,7 +338,7 @@ export async function wire(): Promise<Wired> {
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
-      registerTenantAppCatalogRoute(a, { db: db.db, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.tenantAppsManifest ? { tenantAppsManifest: units.tenantAppsManifest } : {}) });
+      registerTenantAppCatalogRoute(a, { db: db.db, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.tenantAppsManifest ? { tenantAppsManifest: units.tenantAppsManifest } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {
         config, db: db.db, sqlite: db.sqlite, store, logger,
         github,

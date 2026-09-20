@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { parse as parseYaml } from "yaml";
 import type { RunDefinition, Step, Plan, PlanStreamCtx } from "../../executor/types.ts";
-import { STAGE } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { appName, guid as guidSchema, subdomain as subdomainSchema } from "../../../shared/tenant.ts";
 import { ConsumerManifestSchema, type TenantSpec } from "../../../shared/consumer.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
@@ -51,7 +51,7 @@ export type TenantAppsRepoParams = z.infer<typeof TenantAppsRepoParams>;
 
 /** The catalog's tenant spec off this installation's books branch — where `appsOrg`, `appsBundle`
  *  and `appsRepo` are stated (the same clone validateTenant makes). */
-async function readTenantSpec(ports: TenantOnboardPorts, ctx: PlanStreamCtx): Promise<TenantSpec | null> {
+export async function readTenantSpec(ports: TenantOnboardPorts, ctx: PlanStreamCtx): Promise<TenantSpec | null> {
   const cloned = await ports.repo.cloneAtRef({ repoURL: ports.catalogRepoUrl, ref: ports.registrations.branch, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), signal: ctx.signal });
   try {
     const text = await ports.repo.readFile(cloned.workdir, TENANT_MANIFEST_PATH);
@@ -62,10 +62,40 @@ async function readTenantSpec(ports: TenantOnboardPorts, ctx: PlanStreamCtx): Pr
   }
 }
 
+/** The record of the bundle on the tenant's registration, after its first build: appsRepo, appsImage
+ *  and the tag read off the release. Composed by this run and by tenant-add-app where the tenant
+ *  had no bundle yet (hostyour-manager#213). */
+export function recordAppsRepoStep(ports: TenantOnboardPorts, p: { subdomain: string; guid: string; stage: Stage; org: string }, runtime: TenantAppsRepoRuntime): Step {
+  const unit = tenantAppsUnit(p.subdomain);
+  const url = tenantAppsRepoURL(p.org, p.subdomain);
+  return {
+    name: "record-apps-repo",
+    title: "Record the apps repository, image and tag on the tenant's registration",
+    run: async (ctx) => {
+      const appsImageTag = runtime.appsImageTag;
+      if (!appsImageTag) {
+        throw errValidation(`the tag ${unit} was built at is not in this pass's memory — onboard-build-only reads it off the release and a resumed pass has none; the registration cannot name an image without its tag`);
+      }
+      const current = await ports.registrations.readTenant(p.stage, p.guid);
+      if (!current) {
+        ctx.checkpoint({ appsRepo: url, appsImage: unit, appsImageTag, registration: "absent" });
+        ctx.log("meta", `tenant ${p.guid} has no registration at ${p.stage} yet — appsRepo ${url}, appsImage ${unit} and appsImageTag ${appsImageTag} ride this run's record; a tenant-create writes them`);
+        return;
+      }
+      if (current.entry.appsRepo === url && current.entry.appsImage === unit && current.entry.appsImageTag === appsImageTag) {
+        ctx.log("meta", `tenant ${p.guid}'s registration already names ${url} and ${unit}:${appsImageTag} — nothing to commit`);
+        return;
+      }
+      const { commit } = await ports.registrations.setTenantAppsRepo(p.stage, p.guid, { appsRepo: url, appsImage: unit, appsImageTag }, ctx.runId);
+      ctx.checkpoint({ commit, appsRepo: url, appsImage: unit, appsImageTag });
+      ctx.log("meta", `tenant ${p.guid}'s registration now names ${url} and the image ${unit}:${appsImageTag} (${commit}) — its fan-out mounts the tenant's own bundle from here on`);
+    },
+  };
+}
+
 function standaloneSteps(ports: TenantOnboardPorts, p: TenantAppsRepoParams): Step[] {
   // Read defensively: the armed check evaluates def.steps({}) with no params at all.
   const unit = tenantAppsUnit(p.subdomain ?? "");
-  const url = tenantAppsRepoURL(p.org ?? "", p.subdomain ?? "");
   const runtime: TenantAppsRepoRuntime = {};
   return [
     {
@@ -78,29 +108,7 @@ function standaloneSteps(ports: TenantOnboardPorts, p: TenantAppsRepoParams): St
       },
     },
     ...tenantAppsRepoSteps(ports, p, runtime),
-    {
-      name: "record-apps-repo",
-      title: "Record the apps repository, image and tag on the tenant's registration",
-      run: async (ctx) => {
-        const appsImageTag = runtime.appsImageTag;
-        if (!appsImageTag) {
-          throw errValidation(`the tag ${unit} was built at is not in this pass's memory — onboard-build-only reads it off the release and a resumed pass has none; the registration cannot name an image without its tag`);
-        }
-        const current = await ports.registrations.readTenant(p.stage, p.guid);
-        if (!current) {
-          ctx.checkpoint({ appsRepo: url, appsImage: unit, appsImageTag, registration: "absent" });
-          ctx.log("meta", `tenant ${p.guid} has no registration at ${p.stage} yet — appsRepo ${url}, appsImage ${unit} and appsImageTag ${appsImageTag} ride this run's record; a tenant-create writes them`);
-          return;
-        }
-        if (current.entry.appsRepo === url && current.entry.appsImage === unit && current.entry.appsImageTag === appsImageTag) {
-          ctx.log("meta", `tenant ${p.guid}'s registration already names ${url} and ${unit}:${appsImageTag} — nothing to commit`);
-          return;
-        }
-        const { commit } = await ports.registrations.setTenantAppsRepo(p.stage, p.guid, { appsRepo: url, appsImage: unit, appsImageTag }, ctx.runId);
-        ctx.checkpoint({ commit, appsRepo: url, appsImage: unit, appsImageTag });
-        ctx.log("meta", `tenant ${p.guid}'s registration now names ${url} and the image ${unit}:${appsImageTag} (${commit}) — its fan-out mounts the tenant's own bundle from here on`);
-      },
-    },
+    recordAppsRepoStep(ports, { subdomain: p.subdomain ?? "", guid: p.guid ?? "", stage: p.stage ?? "prod", org: p.org ?? "" }, runtime),
   ];
 }
 

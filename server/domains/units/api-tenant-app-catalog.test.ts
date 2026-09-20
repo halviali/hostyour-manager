@@ -86,7 +86,11 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     const noApp = await serve({ registrations: registrationsWith() });
     expect((await read(noApp.app, noApp.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("no GitHub App identity") });
     const noBundle = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), tenantAppsManifest: manifest });
-    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("has no apps bundle (appsRepo)") });
+    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("has no apps bundle yet, and this Manager reads no app catalog") });
+    // With the template's catalog wired, a tenant without a bundle is offered the template's apps, none deployed:
+    // adding the first one creates the bundle (#213).
+    const fromTemplate = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), tenantAppsManifest: manifest, appCatalog: { list: async () => CATALOG } });
+    expect((await read(fromTemplate.app, fromTemplate.cookie)).body).toEqual({ apps: CATALOG.apps.map((a) => ({ ...a, deployed: false })) });
     const noManifest = await serve({ registrations: registrationsWith(), tenantAppsManifest: async () => null });
     expect((await read(noManifest.app, noManifest.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining(`${TEST_BUNDLE.appsRepo} carries no apps.yaml`) });
   });
