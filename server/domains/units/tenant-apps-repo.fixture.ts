@@ -86,9 +86,9 @@ export const PLACEHOLDER_TAG = "0.0.0-placeholder";
 /** What a create-tenant test of a tenant WITH apps needs beside its own ports: the GitHub App the
  *  repository is created with (installed in ORG), the template scripted on the catalog's reader, and
  *  the placeholder tag on the chain. The catalog manifest itself carries TEMPLATE_SPEC. */
-export function withAppsTemplate(ports: TenantOnboardPorts): TenantOnboardPorts & { githubApp: FakeGitHubApp } {
+export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string, string> = {}): TenantOnboardPorts & { githubApp: FakeGitHubApp } {
   if (!(ports.repo instanceof FakeRepoReader)) throw new Error("withAppsTemplate scripts the template on a FakeRepoReader");
-  ports.repo.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: TEMPLATE_FILES });
+  ports.repo.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, ...files } });
   const githubApp = new FakeGitHubApp();
   githubApp.org = ORG;
   const chain = ports.resolveClusterValueFiles;

@@ -9,7 +9,6 @@ import {
   makeAppCatalogProvider,
   readAppCatalog,
   readAppsManifest,
-  readTenantAppsManifest,
 } from "./app-catalog.ts";
 
 /** The engine chart the fixture product declares — the stand-in reads it out of the manifest, so
@@ -99,46 +98,6 @@ describe("readAppsManifest (the primitive: one apps repository, one credential)"
     const repo = new FakeRepoReader({ files: {} });
     expect(await readAppsManifest({ repo, repoURL: APPS_REPO })).toBeNull();
     expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD" }]);
-  });
-});
-
-describe("readTenantAppsManifest (a standing tenant's own catalog, under the credential its build registration names)", () => {
-  const TENANT_REPO = "https://github.com/acme/acme-tenant-apps.git";
-  const UNIT = "acme-apps";
-  /** The bundle's build registration as the installation carries it: registrations/<unit>/build.yaml
-   *  naming the github-app credential sealed at the onboarding. */
-  const registered = (repoCredentialId = "cred_app"): ((unit: string) => Promise<{ repoCredentialId?: string } | null>) =>
-    async (unit) => (unit === UNIT ? { repoCredentialId } : null);
-
-  it("clones the tenant's repository at its default branch head under the build registration's credential id — nothing is sealed, nothing is purged", async () => {
-    const repo = new FakeRepoReader({});
-    repo.scriptFor(TENANT_REPO, { files: { [APPS_MANIFEST_PATH]: APPS_YAML } });
-    const asked: string[] = [];
-    const m = await readTenantAppsManifest({ appsRepo: TENANT_REPO, unit: UNIT, repo, buildUnitRegistration: async (unit) => { asked.push(unit); return registered()(unit); } });
-    expect(m?.apps.map((a) => a.name)).toEqual(["erp", "web"]);
-    expect(asked).toEqual([UNIT]);
-    // The id off the registration is what the reader opens — the store mints the App's token behind it.
-    expect(repo.clones).toEqual([{ repoURL: TENANT_REPO, ref: "HEAD", credentialId: "cred_app" }]);
-  });
-
-  it("answers null where the repository carries no apps.yaml", async () => {
-    const repo = new FakeRepoReader({ files: { "README.md": "x" } });
-    expect(await readTenantAppsManifest({ appsRepo: TENANT_REPO, unit: UNIT, repo, buildUnitRegistration: registered() })).toBeNull();
-  });
-
-  it("lets a failed clone through", async () => {
-    const repo: RepoReader = {
-      cloneAtRef: async () => { throw new Error("clone failed: authentication required"); },
-      readFile: async () => null, listDir: async () => [], dispose: async () => {},
-    };
-    await expect(readTenantAppsManifest({ appsRepo: TENANT_REPO, unit: UNIT, repo, buildUnitRegistration: registered() })).rejects.toThrow(/clone failed/);
-  });
-
-  it("refuses, naming tenant-apps-repo, where the unit has no build registration or one naming no credential — and clones nothing", async () => {
-    const repo = new FakeRepoReader({});
-    await expect(readTenantAppsManifest({ appsRepo: TENANT_REPO, unit: UNIT, repo, buildUnitRegistration: async () => null })).rejects.toThrow(/acme-apps is not registered build-only .* tenant-apps-repo/);
-    await expect(readTenantAppsManifest({ appsRepo: TENANT_REPO, unit: UNIT, repo, buildUnitRegistration: async () => ({}) })).rejects.toThrow(/registrations\/acme-apps\/build\.yaml names no credential/);
-    expect(repo.clones).toEqual([]);
   });
 });
 

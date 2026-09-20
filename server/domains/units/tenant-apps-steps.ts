@@ -256,9 +256,14 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
           ? [refreshRepoPatStep(onboard, params), triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]
           : buildOnlySteps(onboard, params, release);
         ctx.log("meta", `${unit}: version ${version}, channel ${channel}, release run on ${p.stage}, build plane ${master.domain} — ${p.registered ? "registered build-only, its release is re-run" : "onboarded build-only by this run"}`);
+        // The chain's own cleanups (write-registration arms remove-build-registration and
+        // remove-consumer-webhook) are the consumer onboarding's, and this run kind has no
+        // implementation for them: the bundle is the tenant's and stays registered build-only on
+        // an abort, so a later run finds it registered and re-releases it (#215).
+        const chainCtx: StepCtx = { ...ctx, registerCleanup: () => undefined };
         for (const step of chain) {
           ctx.log("meta", `${unit}: ${step.title}`);
-          await step.run(ctx);
+          await step.run(chainCtx);
         }
         // The bundle's tag is what its release's PipelineRun states (the `image-tag` result), and
         // nothing else names it: no chart's builds[] pins a tenant's bundle, so the registration

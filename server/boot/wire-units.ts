@@ -40,7 +40,7 @@ import { makeRestartWorkloadsDef } from "../domains/units/restart-workloads.run.
 import { makeSetSizeDef } from "../domains/units/set-size.run.ts";
 import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
-import { type AppCatalogProvider, type TenantAppsManifestReader } from "../domains/units/app-catalog.ts";
+import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { HttpPublicProbe } from "../adapters/http-probe/http-probe.ts";
 import type { RelocationPorts } from "../domains/units/relocation.ts";
 import type { ConsumerRelocationPorts } from "../domains/units/relocation-world-consumer.ts";
@@ -116,7 +116,6 @@ export interface UnitsWiring {
    *  build registration names — threaded to the route GET /api/tenants/:id/app-catalog; the SAME
    *  closure the tenant-add-app plan judges against. Undefined without tenant onboarding or without
    *  the App; the route then answers { apps: [], reason }. */
-  tenantAppsManifest?: TenantAppsManifestReader;
   /** The shared activation client (ONE HttpActivator for the whole manager), threaded to
    *  registerTenantRoutes so the operator-driven POST /api/tenants/:id/invite-admin can call a
    *  tenant's own example-auth first-admin bootstrap. Always constructed here. */
@@ -319,7 +318,6 @@ export function buildUnits(
     ...(tenant.resolver ? { tenantResolver: tenant.resolver } : {}),
     ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
-    ...(tenant.tenantAppsManifest ? { tenantAppsManifest: tenant.tenantAppsManifest } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     // The shared activation client is always constructed above — surface it for the tenant invite route.

@@ -91,14 +91,6 @@ describe("gateT4Apps", () => {
     expect(gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog: { apps: [...CATALOG.apps, { name: "shop", title: "Shop", description: "", selections: {} }] } }).status).toBe("pass");
   });
 
-  it("names the tenant's own apps.yaml and the tenant-apps-repo run when the catalog is a standing tenant's", () => {
-    const apps = [app("shop")];
-    const g = gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog: CATALOG, isTenantCatalog: true });
-    expect(g.status).toBe("fail");
-    expect(g.found).toBe(`app "shop" is not in the tenant's own apps.yaml (erp, crm).`);
-    expect(g.reason).toMatch(/reaches it through tenant-apps-repo/);
-  });
-
   it("rejects a selection the catalog does not declare for the app — a field set true, or any selections key", () => {
     const apps = [app("crm")];
     const base = { members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog: CATALOG };
@@ -190,20 +182,6 @@ describe("validateTenant — the app catalog", () => {
     const unknownSelection = await validateTenant(req({ apps: [{ name: "erp", seedReference: true }] }), deps(repo, helm));
     expect(unknownSelection.verdict).toBe("fail");
     expect(unknownSelection.report.gates.find((g) => g.id === "T4")?.found).toMatch(/chooses "seedReference", which the catalog does not declare for it \(declared: seedDemo\)/);
-  });
-
-  it("judges against a tenant's OWN catalog when one is handed in, and clones the template for nothing", async () => {
-    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
-    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE, [APPS_MANIFEST_PATH]: APPS_YAML } });
-    // The tenant's apps.yaml names "shop" with a selection of its own, and no "crm" — the template's names the reverse.
-    const tenantCatalog = { apps: [{ name: "shop", title: "Shop", description: "", selections: { seedPrices: { title: "Prices", default: false } }, databases: ["shop"] }] };
-    const shop = await validateTenant(req({ apps: [{ name: "shop", selections: { seedPrices: true } }], tenantCatalog }), deps(repo, helm));
-    expect(shop.verdict).toBe("pass");
-    expect(repo.clones.map((c) => c.repoURL)).toEqual([REPO_OF_REQ]); // the catalog checkout only — the template is not read
-    expect(helm.requests.find((r) => r.releaseName === `${PROBE}-shop-1`)?.valuesObject).toMatchObject({ databases: { mongodb: { databases: ["shop"] } } });
-    const crm = await validateTenant(req({ apps: [app("crm")], tenantCatalog }), deps(repo, helm));
-    expect(crm.verdict).toBe("fail");
-    expect(crm.report.gates.find((g) => g.id === "T4")?.found).toBe(`app "crm" is not in the tenant's own apps.yaml (shop).`);
   });
 
   it("falls back to the overlay stand-in where the template carries no apps.yaml, and says so in the log", async () => {

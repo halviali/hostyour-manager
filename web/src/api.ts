@@ -564,8 +564,8 @@ export const listTenantTargets = (): Promise<TenantTargetView[]> => req<TenantTa
  *  "catalog unavailable" note and can still onboard a tenant with no apps. */
 export const listTenantAppCatalog = (): Promise<AppsManifest> => req<AppsManifest>("/api/tenants/app-catalog");
 export const getTenant = (id: string): Promise<TenantDetailView> => req<TenantDetailView>(`/api/tenants/${id}`);
-/** ONE tenant's own catalog (GET /api/tenants/:id/app-catalog): the apps its bundle's apps.yaml
- *  carries, each marked deployed. The route degrades with `reason` or `error` (shared/apps-manifest.ts
+/** ONE tenant's catalog (GET /api/tenants/:id/app-catalog): the apps the catalog's template offers,
+ *  each marked deployed. The route degrades with `reason` or `error` (shared/apps-manifest.ts
  *  TenantAppCatalogView), and the tenant page renders whichever is set instead of "no apps". */
 export const getTenantAppCatalog = (id: string): Promise<TenantAppCatalogView> => req<TenantAppCatalogView>(`/api/tenants/${id}/app-catalog`);
 export const getTenantLive = (id: string): Promise<TenantLiveView> => req<TenantLiveView>(`/api/tenants/${id}/live`);

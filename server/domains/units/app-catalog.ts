@@ -5,11 +5,9 @@
 // carries no list of apps and no list of selections. The template is the repository a tenant's own
 // apps repository is copied from, never a unit: the platform does not build it and no tenant mounts
 // it, so nothing here reaches for a registration or a unit's credential. readAppsManifest is the
-// primitive: one apps repository, one credential. A STANDING tenant's own catalog is its own
-// bundle's apps.yaml, read through the same primitive by readTenantAppsManifest with the credential
-// the bundle's BUILD registration names — a `github-app` credential, which the store opens by
-// minting a fresh installation token from the App (security/store.ts), so the id stored at the
-// onboarding is as good a day later as it was that hour.
+// primitive: one apps repository, one credential. A standing tenant is offered the same template
+// catalog when an app is added (api-tenant-app-catalog.ts): what the template names can be added,
+// and tenant-apps-repo carries the folder into the tenant's own repository (hostyour-manager#215).
 //
 // WHERE NO MANIFEST STANDS — the catalog declares no template, or the template carries no apps.yaml
 // yet — the catalog is what it was before the manifest existed: the engine chart's
@@ -82,40 +80,6 @@ export async function readAppsManifest(input: ReadAppsManifestInput): Promise<Ap
   } finally {
     await input.repo.dispose(cloned.workdir);
   }
-}
-
-/** The two facts of a tenant's own bundle a catalog read takes: the repository, and the unit whose
- *  build registration names the credential the clone opens. */
-export interface TenantAppsBundle {
-  /** The tenant's own apps repository — `appsRepo` off its registration (shared/tenant.ts). */
-  appsRepo: string;
-  /** The bundle's unit, `<subdomain>-apps` (tenant-apps-tree.ts tenantAppsUnit). */
-  unit: string;
-}
-
-export interface ReadTenantAppsManifestInput extends TenantAppsBundle {
-  /** A reader that opens a SEALED credential by id (wire-tenants.ts: the tenant family's reader
-   *  does, for every id but the catalog's own). */
-  repo: RepoReader;
-  /** The unit's registration on this installation (create-tenant.run.ts TenantOnboardPorts
-   *  buildUnitRegistration): its `repoCredentialId` is what the clone opens. */
-  buildUnitRegistration: (unit: string) => Promise<{ repoCredentialId?: string } | null>;
-  signal?: AbortSignal;
-}
-
-/** The reader of ONE tenant's own catalog, closed over the reader and the registrations where the
- *  ports are built: `tenant-add-app` judges against what it answers and the tenant page shows it. */
-export type TenantAppsManifestReader = (bundle: TenantAppsBundle, signal?: AbortSignal) => Promise<AppsManifest | null>;
-
-/** A standing tenant's OWN catalog: the apps.yaml of its bundle's repository, cloned at its default
- *  branch head with the credential the bundle's BUILD registration names — the build registration
- *  is the one holder of that id, and the store mints the value at the open. Nothing is sealed and
- *  nothing is purged. null where the repository carries no apps.yaml; throws where the unit is not
- *  registered (naming the run that registers it), the clone fails or the file does not parse. */
-export async function readTenantAppsManifest(input: ReadTenantAppsManifestInput): Promise<AppsManifest | null> {
-  const credentialId = (await input.buildUnitRegistration(input.unit))?.repoCredentialId;
-  if (!credentialId) throw errValidation(`${input.unit} is not registered build-only on this installation — registrations/${input.unit}/build.yaml names no credential to read ${input.appsRepo} with; the tenant-apps-repo run registers it`);
-  return readAppsManifest({ repo: input.repo, repoURL: input.appsRepo, credentialId, ...(input.signal ? { signal: input.signal } : {}) });
 }
 
 export interface ReadAppCatalogInput {

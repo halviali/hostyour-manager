@@ -370,11 +370,6 @@ export interface AppsCheckInput {
   /** The app catalog the apps and their selections are held against (app-catalog.ts): the apps
    *  manifest of the apps repository, or the overlay stand-in where none stands. */
   catalog: AppsManifest;
-  /** Whether `catalog` is a STANDING tenant's own apps.yaml (add-app reads it off the bundle's
-   *  repository) rather than the template's a new tenant chooses from. An app the tenant's own
-   *  repository lacks is refused as a folder `tenant-apps-repo` brings, not as one nothing offers.
-   *  Absent, the catalog is the template's. */
-  isTenantCatalog?: boolean;
 }
 
 const T4_EXPECTED =
@@ -404,15 +399,10 @@ export function gateT4Apps(input: AppsCheckInput): GateResult {
     const entry = known.get(app.name);
     if (entry === undefined) {
       const names = [...known.keys()].join(", ") || "which is empty";
-      return input.isTenantCatalog
-        ? t4Reject(
-            `app "${cap(app.name)}" is not in the tenant's own ${APPS_MANIFEST_PATH} (${names}).`,
-            `the tenant's repository names every app its bundle carries; a folder it lacks reaches it through tenant-apps-repo, which copies the folder from the template, so the plan is rejected.`,
-          )
-        : t4Reject(
-            `app "${cap(app.name)}" is not in the app catalog (${names}).`,
-            `the catalog names every app the bundle carries; an app it does not name has no folder to mount and no selections to offer, so the plan is rejected.`,
-          );
+      return t4Reject(
+        `app "${cap(app.name)}" is not in the app catalog (${names}).`,
+        `the catalog names every app the bundle carries; an app it does not name has no folder to mount and no selections to offer, so the plan is rejected.`,
+      );
     }
     const unknown = chosenSelections(app).filter((s) => !(s in entry.selections));
     if (unknown.length > 0) {

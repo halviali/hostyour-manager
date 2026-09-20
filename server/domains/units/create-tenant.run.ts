@@ -28,7 +28,6 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import type { TenantAppsManifestReader } from "./app-catalog.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
@@ -151,11 +150,6 @@ export interface TenantOnboardPorts {
    *  (adapters/github-app). Absent ⇒ a run kind that creates a tenant's repository refuses at the
    *  plan, naming the three config keys; every other tenant run kind is untouched. */
   githubApp?: GitHubApp;
-  /** A standing tenant's OWN catalog — its bundle's apps.yaml, read off `appsRepo` under the
-   *  `github-app` credential the bundle's build registration names (app-catalog.ts
-   *  readTenantAppsManifest). tenant-add-app judges the new app against what it answers. Absent
-   *  without the App, which opens that kind; add-app then refuses, naming it. */
-  tenantAppsManifest?: TenantAppsManifestReader;
 }
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely

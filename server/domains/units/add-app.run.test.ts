@@ -14,8 +14,6 @@ import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { TenantRegistrationSchema, type TenantValidationReport } from "../../../shared/tenant.ts";
-import type { AppsManifest } from "../../../shared/apps-manifest.ts";
-import type { TenantAppsManifestReader } from "./app-catalog.ts";
 import type { StepCtx, PlanStreamCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -55,7 +53,7 @@ tenant:
     - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
     - { name: jobs, chart: charts/example-jobs }
     - { name: report, chart: charts/example-report }
-  perApp:
+${TEMPLATE_SPEC}  perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
 `;
@@ -92,21 +90,12 @@ function repoWithManifest(resolvedSha = SHA): FakeRepoReader {
   return new FakeRepoReader({ resolvedSha, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } });
 }
 
-/** The tenant's OWN catalog as its bundle's apps.yaml declares it: the standing "erp" and the new
- *  app, each with the two seed selections. What the fixture's tenantAppsManifest port answers. */
-const TENANT_CATALOG: AppsManifest = {
-  apps: ["erp", NEW_APP].map((name) => ({
-    name, title: name.toUpperCase(), description: "",
-    selections: { seedReference: { title: "Reference data", default: false }, seedDemo: { title: "Demo data", default: false } },
-  })),
-};
-
-/** The port that reads a tenant's own catalog, answering a scripted manifest and recording which
- *  repository it was asked for. */
-function tenantCatalogPort(manifest: AppsManifest | null = TENANT_CATALOG): { port: TenantAppsManifestReader; asked: string[] } {
-  const asked: string[] = [];
-  return { asked, port: async ({ appsRepo }) => { asked.push(appsRepo); return manifest; } };
-}
+/** The TEMPLATE's apps.yaml as the fixture scripts it: the standing "erp", "web", and the new app,
+ *  each with the two seed selections — what every tenant's "Add app" is judged against (#215). */
+const TEMPLATE_APPS = (extra = ""): Record<string, string> => ({
+  "apps.yaml": `apps:\n${["erp", "web", NEW_APP].map((name) => `  - name: ${name}\n    title: ${name.toUpperCase()}\n    selections:\n      seedReference: { title: "Reference data", default: false }\n      seedDemo: { title: "Demo data", default: false }\n${name === NEW_APP ? extra : ""}`).join("")}`,
+  [`${NEW_APP}/package.json`]: "{}\n",
+});
 
 /** A FakePlatformRepo pre-seeded with a live tenant carrying one app ("erp") — the registration file a
  *  create-tenant run would have committed, so add-app's readTenant folds it back correctly. */
@@ -125,9 +114,9 @@ function seededPlatformRepo(bundle: { appsRepo?: string; appsImage?: string; app
 // projects) into a FakeClusterKubeResolver whose master path resolves to argoNamespace "argocd".
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
-function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboardPorts {
+function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}, template: Record<string, string> = TEMPLATE_APPS()): TenantOnboardPorts {
   const { argo, cluster, projects, ...portOver } = over;
-  return {
+  return withAppsTemplate({
     repo: repoWithManifest(),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(seededPlatformRepo()),
@@ -154,9 +143,8 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
       { unit: "swissbookai", build: "swissbookai-api" },
     ],
     consumerHostLabels: async () => ["example-platform", "swissbookai"],
-    tenantAppsManifest: tenantCatalogPort().port,
     ...portOver,
-  };
+  }, template);
 }
 
 function params(over: Partial<AddAppParams> = {}): AddAppParams {
@@ -316,11 +304,19 @@ describe("add-app streaming planner", () => {
     await expect(def.planStream!({ tenantId: "tnt_1", app: "erp" }, planCtx())).rejects.toThrow(/already exists/);
   });
 
-  it("renders the new app with the tenant's OWN bundle off its registration, and refuses a tenant that has none", async () => {
+  // A standing bundle carries every app of its tenant: adding one the bundle lacks extends it —
+  // the tenant-apps-repo steps ahead of the image gate, the render at the standing tag until
+  // refresh-images re-renders at the built one (#215).
+  it("renders the new app with the tenant's OWN bundle at its standing tag, and the steps extend the bundle with the app before the image gate", async () => {
     seedClusters();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
-    await makeAddAppDef(ports({ helm })).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    const result = await makeAddAppDef(ports({ helm })).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
     expect(helm.requests.find((r) => r.namespace === `${GUID}-${NEW_APP}-prod`)?.valuesObject).toMatchObject({ tenant: { appsImage: TEST_BUNDLE.appsImage, appsImageTag: TEST_BUNDLE.appsImageTag } });
+    expect(result.outcome).toBe("planned");
+    if (result.outcome !== "planned") return;
+    expect(result.params).toMatchObject({ appsImage: TEST_BUNDLE.appsImage, appsUnit: { org: ORG } });
+    expect(result.plan.steps.map((s) => s.name).slice(0, 7)).toEqual(["attest-target", "create-repository", "write-tree", "onboard-build-only", "record-apps-repo", "refresh-images", "ensure-images"]);
+    expect(result.plan.summary).toContain(`${ORG}/${TEST_BUNDLE.appsImage} gains "${NEW_APP}"`);
   });
 
   // A tenant onboarded as its platform alone (#211) has no bundle: its first app is judged against
@@ -328,10 +324,8 @@ describe("add-app streaming planner", () => {
   // the run creates the bundle before the member is fanned out (#213).
   it("a tenant without a bundle: the plan freezes the apps unit and the steps create the bundle first, rendered at the placeholder", async () => {
     seedClusters();
-    const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML.replace("  perApp:", `${TEMPLATE_SPEC}  perApp:`), ...APP_OVERLAYS } });
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
-    const { tenantAppsManifest: _own, ...rest } = ports({ repo, helm, registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) });
-    const prt = withAppsTemplate(rest);
+    const prt = ports({ helm, registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) });
     const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: "web" }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
@@ -389,53 +383,24 @@ describe("add-app streaming planner", () => {
   it("freezes every further selection into params, and T4 refuses one the TENANT's entry does not declare", async () => {
     seedClusters();
     const def = makeAddAppDef(ports());
-    // The tenant's apps.yaml declares the two seed selections for the new app and nothing else — so a
-    // further selection is exactly what T4 refuses here.
+    // The template's apps.yaml declares the two seed selections for the new app and nothing else —
+    // so a further selection is exactly what T4 refuses here.
     const refused = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP, selections: { seedPrices: true } }, planCtx());
     expect(refused.outcome).toBe("rejected");
     expect(refused.outcome === "rejected" && refused.summary).toMatch(/T4/);
     const planned = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP, seedReference: true, selections: {} }, planCtx());
     expect(planned.outcome === "planned" && planned.params.selections).toEqual({});
-    // The same selection passes once the tenant's own entry declares it, and a seed tier it does not
-    // declare is refused — the tenant's entry, not the template's, is the judge.
-    const own = tenantCatalogPort({ apps: [{ name: NEW_APP, title: "CRM", description: "", selections: { seedPrices: { title: "Prices", default: false } } }] }).port;
-    const accepted = await makeAddAppDef(ports({ tenantAppsManifest: own })).planStream!({ tenantId: "tnt_1", app: NEW_APP, selections: { seedPrices: true } }, planCtx());
+    // The same selection passes once the template's entry declares it — the template's catalog is
+    // the judge, for a standing tenant as for a new one.
+    const priced = ports({}, TEMPLATE_APPS(`      seedPrices: { title: "Prices", default: false }\n`));
+    const accepted = await makeAddAppDef(priced).planStream!({ tenantId: "tnt_1", app: NEW_APP, selections: { seedPrices: true } }, planCtx());
     expect(accepted.outcome === "planned" && accepted.params.selections).toEqual({ seedPrices: true });
-    const tier = await makeAddAppDef(ports({ tenantAppsManifest: own })).planStream!({ tenantId: "tnt_1", app: NEW_APP, seedDemo: true }, planCtx());
-    expect(tier.outcome === "rejected" && tier.summary).toMatch(/T4/);
   });
 
-  it("reads the tenant's OWN catalog off its registration's appsRepo, and opens no stored credential of the unit", async () => {
+  it("refuses by name an app the template's catalog lacks, and a Manager without the App", async () => {
     seedClusters();
-    const catalog = tenantCatalogPort();
-    const registrationsAsked: string[] = [];
-    const def = makeAddAppDef(ports({ tenantAppsManifest: catalog.port, buildUnitRegistration: async (unit) => { registrationsAsked.push(unit); return null; } }));
-    const result = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
-    expect(result.outcome).toBe("planned");
-    expect(catalog.asked).toEqual([TEST_BUNDLE.appsRepo]);
-    expect(registrationsAsked).toEqual([]);
-  });
-
-  it("refuses by name an app the tenant's apps.yaml lacks, saying the folder comes through tenant-apps-repo — the template is never the judge", async () => {
-    seedClusters();
-    // The template's catalog (the overlay stand-in of the fixture checkout) names "crm"; the tenant's
-    // own apps.yaml names only "erp".
-    const own = tenantCatalogPort({ apps: TENANT_CATALOG.apps.filter((a) => a.name === "erp") }).port;
-    const result = await makeAddAppDef(ports({ tenantAppsManifest: own })).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
-    expect(result.outcome).toBe("rejected");
-    if (result.outcome !== "rejected") return;
-    expect(result.summary).toMatch(/T4/);
-    const t4 = (result.planJson as TenantValidationReport).gates.find((g) => g.id === "T4");
-    expect(t4?.status).toBe("fail");
-    expect(t4?.found).toContain(`app "${NEW_APP}" is not in the tenant's own apps.yaml (erp)`);
-    expect(t4?.reason).toContain("tenant-apps-repo");
-  });
-
-  it("refuses a tenant whose repository carries no apps.yaml, and one this Manager cannot read for want of the App", async () => {
-    seedClusters();
-    const none = makeAddAppDef(ports({ tenantAppsManifest: tenantCatalogPort(null).port }));
-    await expect(none.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(/carries no apps\.yaml at its default branch/);
-    const { tenantAppsManifest: _unused, ...withoutApp } = ports();
+    await expect(makeAddAppDef(ports()).planStream!({ tenantId: "tnt_1", app: "shop" }, planCtx())).rejects.toThrow(/shop is not in the template's apps\.yaml/);
+    const { githubApp: _none, ...withoutApp } = ports();
     await expect(makeAddAppDef(withoutApp).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx())).rejects.toThrow(/no GitHub App identity/);
   });
 

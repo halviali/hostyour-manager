@@ -15,9 +15,10 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
-// GET /api/tenants/:id/app-catalog — one tenant's own catalog over HTTP: the apps its bundle's
-// apps.yaml names, each marked deployed where the registration's apps[] carries it, and the
-// read's three degradations, each a sentence and never a bare empty list.
+// GET /api/tenants/:id/app-catalog — one tenant's catalog over HTTP: the apps the catalog's
+// TEMPLATE names (what can be added to any tenant, #215), each marked deployed where the
+// registration's apps[] carries it, and the read's degradations, each a sentence and never a bare
+// empty list.
 
 const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
@@ -69,34 +70,28 @@ const read = async (app: Hono<AppEnv>, cookie: string, id = "tnt_1"): Promise<{ 
 };
 
 describe("GET /api/tenants/:id/app-catalog", () => {
-  it("answers the bundle's apps off the registration's appsRepo, each marked deployed where the registration's apps[] names it", async () => {
-    const asked: { appsRepo: string; unit: string }[] = [];
-    const { app, cookie } = await serve({ registrations: registrationsWith(), tenantAppsManifest: async (bundle) => { asked.push(bundle); return CATALOG; } });
+  it("answers the template's apps, each marked deployed where the registration's apps[] names it — with a bundle and without one alike", async () => {
+    const template = { list: async () => CATALOG };
+    const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template });
     const { status, body } = await read(app, cookie);
     expect(status).toBe(200);
     expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }] });
-    // The bundle's unit is composed from the tenant's subdomain — its build registration names the credential.
-    expect(asked).toEqual([{ appsRepo: TEST_BUNDLE.appsRepo, unit: "acme-apps" }]);
+    // A tenant onboarded as its platform alone (#211) has no bundle yet: the same template, nothing deployed.
+    const noBundle = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), appCatalog: template });
+    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }] });
   });
 
-  it("says why there is no catalog: not wired, no App, no bundle, no apps.yaml — each a reason, never a bare empty list", async () => {
-    const manifest = async (): Promise<AppsManifest | null> => CATALOG;
-    const unwired = await serve({ tenantAppsManifest: manifest });
+  it("says why there is no catalog: not wired, no catalog reader, not onboarded — each a reason, never a bare empty list", async () => {
+    const unwired = await serve({ appCatalog: { list: async () => CATALOG } });
     expect((await read(unwired.app, unwired.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("tenant onboarding is not configured") });
-    const noApp = await serve({ registrations: registrationsWith() });
-    expect((await read(noApp.app, noApp.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("no GitHub App identity") });
-    const noBundle = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), tenantAppsManifest: manifest });
-    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("has no apps bundle yet, and this Manager reads no app catalog") });
-    // With the template's catalog wired, a tenant without a bundle is offered the template's apps, none deployed:
-    // adding the first one creates the bundle (#213).
-    const fromTemplate = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), tenantAppsManifest: manifest, appCatalog: { list: async () => CATALOG } });
-    expect((await read(fromTemplate.app, fromTemplate.cookie)).body).toEqual({ apps: CATALOG.apps.map((a) => ({ ...a, deployed: false })) });
-    const noManifest = await serve({ registrations: registrationsWith(), tenantAppsManifest: async () => null });
-    expect((await read(noManifest.app, noManifest.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining(`${TEST_BUNDLE.appsRepo} carries no apps.yaml`) });
+    const noReader = await serve({ registrations: registrationsWith() });
+    expect((await read(noReader.app, noReader.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("reads no app catalog") });
+    const notOnboarded = await serve({ registrations: new TenantRegistrations(new FakePlatformRepo()), appCatalog: { list: async () => CATALOG } });
+    expect((await read(notOnboarded.app, notOnboarded.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("is not onboarded") });
   });
 
   it("answers { apps: [], error } when the read fails, and 404 for a tenant the inventory does not know", async () => {
-    const { app, cookie } = await serve({ registrations: registrationsWith(), tenantAppsManifest: async () => { throw new Error("clone failed: authentication required"); } });
+    const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: { list: async () => { throw new Error("clone failed: authentication required"); } } });
     expect((await read(app, cookie)).body).toEqual({ apps: [], error: "clone failed: authentication required" });
     expect((await read(app, cookie, "tnt_none")).status).toBe(404);
   });

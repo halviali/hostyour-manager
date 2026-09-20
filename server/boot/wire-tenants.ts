@@ -32,7 +32,7 @@ import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/c
 import type { RegisteredUnit, TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import { makeCheckTenantsDef } from "../domains/units/check-tenants.run.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
-import { makeAppCatalogProvider, readTenantAppsManifest, type AppCatalogProvider, type TenantAppsManifestReader } from "../domains/units/app-catalog.ts";
+import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
@@ -63,7 +63,6 @@ export interface TenantFamily {
   /** The app-type catalog its wizard read route serves. Undefined when the family is not configured. */
   appCatalog?: AppCatalogProvider;
   /** The reader of one tenant's own catalog. Undefined without the family or without a GitHub App. */
-  tenantAppsManifest?: TenantAppsManifestReader;
   /** The catalog URL its live read resolves the fan-out's pin against. Undefined when the family is
    *  not configured. */
   catalogRepoUrl?: string;
@@ -127,9 +126,9 @@ export function buildTenantOnboarding(
     : async (): Promise<Buffer> => Buffer.from(await app!.installationToken(), "utf8");
 
   // The reader clones the catalog and the apps template under the catalog's own read credential,
-  // and a tenant's OWN repository under the credential its build registration names
-  // (readTenantAppsManifest below): the one id names the configured token, every other id is opened
-  // from the store — a `github-app` id by minting the App's token at the open.
+  // and a tenant's OWN repository under the credential its build registration names: the one id
+  // names the configured token, every other id is opened from the store — a `github-app` id by
+  // minting the App's token at the open.
   const repo = new GitRepoReader({ openCredential: (id) => (id === CATALOG_READ_CREDENTIAL_ID ? openDeployToken() : store.open(id, { purpose: "tenant-apps-read" })) });
   // ONE INSTALLATION, ONE BOOKS BRANCH NAME, IN BOTH REPOSITORIES, so the name is taken off the
   // platform repo rather than resolved a second time here and the two can never disagree. In
@@ -201,13 +200,6 @@ export function buildTenantOnboarding(
     }
     return null;
   };
-  // A standing tenant's OWN catalog: its bundle's apps.yaml off the repository its registration
-  // names, cloned by the reader above under the `github-app` credential the bundle's build
-  // registration names — the store mints the App's token at the open, so the id sealed at the
-  // onboarding never goes stale. Absent without the App, which is what opens that kind. ONE
-  // closure, judged against by tenant-add-app and served by GET /api/tenants/:id/app-catalog, so
-  // the page offers what the plan accepts.
-  const tenantAppsManifest: TenantAppsManifestReader | undefined = githubApp && ((bundle, signal) => readTenantAppsManifest({ ...bundle, repo, buildUnitRegistration, ...(signal ? { signal } : {}) }));
   // create-tenant + add-app drive the full port set (git reader + helm + the second platform repo);
   // the kube clients are resolved per target cluster at run time via the resolver.
   const onboardPorts: TenantOnboardPorts = {
@@ -250,7 +242,6 @@ export function buildTenantOnboarding(
     // Creates a tenant's own repository in the organisation the App is installed in. Absent ⇒ the run
     // kind that needs it refuses at the plan, naming the three config keys.
     ...(githubApp ? { githubApp } : {}),
-    ...(tenantAppsManifest ? { tenantAppsManifest } : {}),
   };
   // The create-tenant wizard's app catalog: the SAME reader + read credential validateTenant clones
   // the catalog with, on the books branch, and the apps template (tenant.appsRepo) read with that
@@ -339,5 +330,5 @@ export function buildTenantOnboarding(
   // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
-  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, ...(tenantAppsManifest ? { tenantAppsManifest } : {}), tenantRegistrations, carryTrunkToBooksBranch };
+  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, carryTrunkToBooksBranch };
 }

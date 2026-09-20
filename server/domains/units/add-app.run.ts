@@ -6,7 +6,6 @@ import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { guid as guidSchema, appName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
-import { APPS_MANIFEST_PATH, type AppsManifest } from "../../../shared/apps-manifest.ts";
 import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -84,11 +83,12 @@ export const AddAppParams = z.object({
   // build — resolved at plan time exactly as create-tenant resolves its own (planBuildUnits).
   buildUnits: z.array(BuildUnitSchema).default([]),
   catalogRepoUrl: z.string().min(1),
-  // THE TENANT'S BUNDLE WHERE NONE STOOD (hostyour-manager#213): a tenant onboarded as its platform
-  // alone has no `<subdomain>-apps` repository, and this app is its first. The run then creates the
-  // bundle from the catalog's template with this app in it, builds it and records it on the
-  // registration BEFORE the member is fanned out — the four steps of tenant-apps-repo — and the
-  // fan-out is rendered again at the built tag (refresh-images). Absent on a tenant with a bundle.
+  // THE TENANT'S BUNDLE (hostyour-manager#213, #215): every app lives in the tenant's own
+  // `<subdomain>-apps` repository, so adding one carries the bundle along — created from the
+  // catalog's template where none stood, extended with this app's folder and entry where one does
+  // (write-tree appends what the repository lacks and removes nothing) — built, and recorded on the
+  // registration BEFORE the member is fanned out, the fan-out rendered again at the built tag
+  // (refresh-images). The four steps of tenant-apps-repo, composed here.
   appsUnit: TenantAppsUnitSchema.optional(),
   appsImage: z.string().optional(), // the bundle's image name, set beside appsUnit
   subdomain: z.string().default(""),
@@ -202,16 +202,17 @@ function addAppSteps(ports: TenantOnboardPorts, p: AddAppParams): Step[] {
       ...buildUnitStep(() => ports.onboard?.(), { guid: p.guid, owner: p.owner, stage: p.stage }, unit),
       probe: (ctx: ProbeCtx) => probeBuildUnit(() => ports.onboard?.(), ports, p, unit, ctx),
     })),
-    // The tenant's first bundle, where none stood: created from the template with this app, built,
-    // recorded on the registration (tenant-apps-repo's own steps, composed here).
+    // The tenant's bundle, created where none stood and extended where one does: this app's folder
+    // and entry from the template, built, recorded on the registration (tenant-apps-repo's own
+    // steps, composed here).
     ...(p.appsUnit
       ? [
         ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [p.app] }, runtime),
         recordAppsRepoStep(ports, { subdomain: p.subdomain, guid: p.guid, stage: p.stage, org: p.appsUnit.org }, runtime),
       ]
       : []),
-    // The image gate, the SAME steps create-tenant runs: where a bundle was just built the fan-out is
-    // rendered again at its tag, then the new app's pinned images must EXIST in the tenant cluster's
+    // The image gate, the SAME steps create-tenant runs: the fan-out is rendered again at the tag the
+    // bundle was just built at, then the new app's pinned images must EXIST in the tenant cluster's
     // registrations before the pointer append fans it out. A probe — an image no build unit above
     // produced fails the run naming every absent tag.
     ...tenantImageSteps(ports, { guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: [app], seedUsers: p.seedUsers, registryHost: p.registryHost, requiredImages: p.requiredImages, ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}) }, runtime),
@@ -358,38 +359,26 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       if (current.entry.apps.some((a) => a.name === req.app)) {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
-      // Every tenant with an app mounts its own bundle. A tenant registered WITHOUT one — onboarded as
-      // its platform alone — gets it from this run (#213): the bundle is created from the catalog's
-      // template with this app as its first, built, and recorded before the member is fanned out; the
-      // plan judges the app against the TEMPLATE's catalog and renders the bundle at the placeholder
-      // tag, as create-tenant does for a tenant born with apps. A tenant WITH a bundle is judged
-      // against its OWN catalog — what its repository carries is what can be deployed — never the
-      // template's.
-      const { appsRepo, appsImage: standingImage, appsImageTag: standingTag } = current.entry;
-      const hasBundle = Boolean(appsRepo && standingImage && standingTag);
+      // Every app lives in the tenant's own bundle, and the catalog's TEMPLATE names what can be
+      // added (#213, #215): the app is judged against the template's catalog, and the bundle steps
+      // carry its folder and entry into the tenant's repository — creating the repository where
+      // none stood (a tenant onboarded as its platform alone), appending to it where one does. The
+      // fan-out is rendered at the tag the bundle stands at (the placeholder where it is not built
+      // yet), exactly as create-tenant renders a tenant born with apps; refresh-images re-renders at
+      // the built tag before the image gate.
+      const { appsImage: standingImage, appsImageTag: standingTag } = current.entry;
+      const hasBundle = Boolean(current.entry.appsRepo && standingImage && standingTag);
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
-      let tenantCatalog: AppsManifest | undefined;
-      let appsUnit: AddAppParams["appsUnit"];
-      let appsImage: string;
-      let appsImageTag: string;
-      if (hasBundle) {
-        if (!ports.tenantAppsManifest) throw errValidation(`this Manager holds no GitHub App identity, so tenant ${tc.guid}'s repository ${appsRepo} cannot be read — set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY`);
-        const read = await ports.tenantAppsManifest({ appsRepo: appsRepo!, unit: tenantAppsUnit(current.entry.subdomain) }, ctx.signal);
-        if (!read) throw errValidation(`${appsRepo} carries no ${APPS_MANIFEST_PATH} at its default branch — nothing says which apps tenant ${tc.guid}'s bundle carries; tenant-apps-repo writes it`);
-        tenantCatalog = read;
-        appsImage = standingImage!;
-        appsImageTag = standingTag!;
-        ctx.log(`tenant ${tc.guid}'s catalog: ${appsRepo} names ${tenantCatalog.apps.map((a) => a.name).join(", ") || "no app"}`);
-      } else {
-        if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
-        const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
-        if (resolved.outcome === "refused") throw errValidation(resolved.why);
-        appsUnit = resolved.unit;
-        appsImage = tenantAppsUnit(current.entry.subdomain);
-        appsImageTag = placeholderTagFromChain(clusterValueFiles);
-        ctx.log(`tenant ${tc.guid} has no apps bundle yet — this run creates ${appsUnit.org}/${appsImage} from ${appsUnit.templateRepoURL} with "${req.app}" as its first app, builds it and records it before the member is fanned out`);
-      }
+      if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
+      if (resolved.outcome === "refused") throw errValidation(resolved.why);
+      const appsUnit = resolved.unit;
+      const appsImage = hasBundle ? standingImage! : tenantAppsUnit(current.entry.subdomain);
+      const appsImageTag = hasBundle ? standingTag! : placeholderTagFromChain(clusterValueFiles);
+      ctx.log(hasBundle
+        ? `tenant ${tc.guid}'s bundle ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL}, is built and recorded before the member is fanned out`
+        : `tenant ${tc.guid} has no apps bundle yet — this run creates ${appsUnit.org}/${appsImage} from ${appsUnit.templateRepoURL} with "${req.app}" as its first app, builds it and records it before the member is fanned out`);
       // The registration is the GitOps truth for the tenant's target slave; apply-appproject pins the
       // new member's project against exactly it.
       const { cluster } = current.entry;
@@ -401,7 +390,6 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
           ref: ports.registrations.branch,
           stage: tc.stage,
           apps: [{ name: req.app, seedReference: req.seedReference, seedDemo: req.seedDemo, selections: req.selections }],
-          ...(tenantCatalog ? { tenantCatalog } : {}),
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           seedUsers: current.entry.seedUsers,
@@ -462,7 +450,8 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         syncUnits,
         buildUnits: built.units,
         catalogRepoUrl: ports.catalogRepoUrl,
-        ...(appsUnit ? { appsUnit, appsImage } : {}),
+        appsUnit,
+        appsImage,
         subdomain: current.entry.subdomain,
         owner: tc.owner,
         seedUsers: current.entry.seedUsers,
@@ -472,7 +461,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         kind: "tenant-add-app",
         targetKind: "tenant",
         targetId: tc.tenantId,
-        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at catalog ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${appsUnit ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first; the member is fanned out at the built tag.` : ""}`,
+        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at catalog ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),

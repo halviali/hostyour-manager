@@ -21,8 +21,8 @@ import { TenantStatusBadge, UnfinishedTenantNotice } from "../components/TenantS
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Per-tenant detail. Renders the apps of the tenant's OWN bundle (its repository's apps.yaml, read
- *  by GET /api/tenants/:id/app-catalog) folded with the inventory's per-app rows, each marked deployed
+/** Per-tenant detail. Renders the apps the catalog's template offers (read by
+ *  GET /api/tenants/:id/app-catalog) folded with the inventory's per-app rows, each marked deployed
  *  or not (tenantAppRows.ts); the add-app control (TenantAddAppForm) offers the undeployed ones with
  *  their selections and fans ONE into the live tenant; and the tenant-wide lifecycle actions
  *  (suspend / resume / offboard). Every action plans a Run and hands off to the generic Run screen —

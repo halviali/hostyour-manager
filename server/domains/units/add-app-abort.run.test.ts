@@ -25,6 +25,11 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { TEMPLATE_SPEC, TEMPLATE_MANIFEST, TENANT_URL, withAppsTemplate } from "./tenant-apps-repo.fixture.ts";
+import { ports as onboardPorts, FakeBuildPlaneClusterReader } from "./onboard.fixture.ts";
+import { FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 // ABORT-WITH-CLEANUP on an add-app run, driven through the REAL executor — the member-scoped sibling
@@ -44,7 +49,12 @@ const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
-const fakeCreds = { open: async () => Buffer.from("x", "utf8") } as unknown as CredentialStore;
+// A store of one kind: the App's row the bundle steps seal (#215), listed back to the scope preflight.
+const fakeCreds = {
+  open: async () => Buffer.from("x", "utf8"),
+  seal: async (i: { kind: string; label: string; fingerprint: string }) => ({ id: "cred_app", kind: i.kind, label: i.label, fingerprint: i.fingerprint }),
+  list: async ({ kind }: { kind: string }) => (kind === "github-app" ? [{ id: "cred_app", kind, label: "GitHub App (acme-apps)", fingerprint: "fp" }] : []),
+} as unknown as CredentialStore;
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -60,7 +70,7 @@ tenant:
     - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
     - { name: jobs, chart: charts/example-jobs }
     - { name: report, chart: charts/example-report }
-  perApp:
+${TEMPLATE_SPEC}  perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
 `;
@@ -93,7 +103,17 @@ interface Harness {
 function harness(): Harness {
   const registrations = new TenantRegistrations(seededPlatformRepo());
   const argo = new FakeMasterArgoReader({});
+  // The bundle steps ahead of the fan-out (#215): the tenant's repository is extended with the app,
+  // released build-only and built — one seeded release run of the bundle's unit answers the watch.
+  const buildPlane = new FakeBuildPlane();
+  buildPlane.seedReleaseRun(TEST_BUNDLE.appsImage, { runName: `${TEST_BUNDLE.appsImage}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true, imageTag: TEST_BUNDLE.appsImageTag });
+  // The tenant repository as the build-only chain reads it back: the manifest write-tree commits.
+  const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
+  unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, TEST_BUNDLE.appsImage) } });
+  const onboard = onboardPorts({ repo: unitReader, consumerRepo: new FakeConsumerRepo(), github: new FakeGitHubConsumer(), buildPlane, buildClusterReader: new FakeBuildPlaneClusterReader(TEST_BUNDLE.appsImage) });
   const ports: TenantOnboardPorts = {
+    onboard: () => ({ ports: onboard }),
+    buildUnitRegistration: async () => null,
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations,
@@ -115,10 +135,9 @@ function harness(): Harness {
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
-    // The tenant's own catalog names the new app with no selection — the plan judges against it.
-    tenantAppsManifest: async () => ({ apps: [{ name: NEW_APP, title: NEW_APP, description: "", selections: {} }] }),
   };
-  const def = makeAddAppDef(ports) as unknown as AnyRunDefinition;
+  // The template's catalog names the new app with no selection — the plan judges against it.
+  const def = makeAddAppDef(withAppsTemplate(ports, { "apps.yaml": `apps:\n  - name: ${NEW_APP}\n    title: ${NEW_APP}\n`, [`${NEW_APP}/package.json`]: "{}\n" })) as unknown as AnyRunDefinition;
   const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });
   return { executor, registrations, argo };
 }
@@ -126,6 +145,9 @@ function harness(): Harness {
 function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  // The master the bundle's build-only onboarding runs against (#215).
+  db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
+  db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active" }).run();
   db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
   db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp", status: "active" }).run();
 }

@@ -77,10 +77,9 @@ export interface TenantCatalogAppView extends AppEntry {
 
 /** GET /api/tenants/:id/app-catalog — a READ, and it degrades the way the orphan scan does: `apps`
  *  alone is the answer only while neither field below is set. `reason` names why there is no catalog
- *  to read BY DESIGN (tenant onboarding not wired, no GitHub App, a tenant without a bundle, a
- *  repository without an apps.yaml); `error` means the read itself failed (the App refused, the clone
- *  failed, the file does not parse), so `apps: []` says NOTHING and the page must show the error,
- *  never "the bundle carries no app". Declared beside the entry it extends rather than in
+ *  to read BY DESIGN (tenant onboarding not wired, no catalog reader, a tenant not onboarded);
+ *  `error` means the read itself failed (the template's clone failed, its apps.yaml does not parse),
+ *  so `apps: []` says NOTHING and the page must show the error, never "the catalog offers no app". Declared beside the entry it extends rather than in
  *  api-types.ts, which stands at the file-size budget. */
 export interface TenantAppCatalogView {
   apps: TenantCatalogAppView[];
