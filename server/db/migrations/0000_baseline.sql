@@ -64,6 +64,19 @@ CREATE TABLE `credentials` (
 --> statement-breakpoint
 CREATE INDEX `credentials_server_ix` ON `credentials` (`server_id`);--> statement-breakpoint
 CREATE INDEX `credentials_fingerprint_ix` ON `credentials` (`fingerprint`);--> statement-breakpoint
+CREATE TABLE `dns_writes` (
+	`name` text NOT NULL,
+	`type` text NOT NULL,
+	`content` text NOT NULL,
+	`act` text NOT NULL,
+	`owner_kind` text NOT NULL,
+	`owner_name` text NOT NULL,
+	`owner_stage` text,
+	`run_id` text NOT NULL,
+	`written_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
+	PRIMARY KEY(`name`, `type`)
+);
+--> statement-breakpoint
 CREATE TABLE `apps` (
 	`id` text PRIMARY KEY NOT NULL,
 	`cluster_id` text NOT NULL,
@@ -201,6 +214,14 @@ CREATE TABLE `operators` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `operators_username_uq` ON `operators` (`username`);--> statement-breakpoint
 CREATE UNIQUE INDEX `operators_subject_uq` ON `operators` (`subject`) WHERE subject IS NOT NULL;--> statement-breakpoint
+CREATE TABLE `organisation_identities` (
+	`org` text PRIMARY KEY NOT NULL,
+	`packages_credential_id` text,
+	`repo_credential_id` text,
+	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `events` (
 	`id` text PRIMARY KEY NOT NULL,
 	`run_id` text NOT NULL,
@@ -264,19 +285,6 @@ CREATE TABLE `steps` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `steps_run_ordinal_uq` ON `steps` (`run_id`,`ordinal`);--> statement-breakpoint
 CREATE UNIQUE INDEX `steps_run_name_uq` ON `steps` (`run_id`,`name`);--> statement-breakpoint
-CREATE TABLE `dns_writes` (
-	`name` text NOT NULL,
-	`type` text NOT NULL,
-	`content` text NOT NULL,
-	`act` text NOT NULL,
-	`owner_kind` text NOT NULL,
-	`owner_name` text NOT NULL,
-	`owner_stage` text,
-	`run_id` text NOT NULL,
-	`written_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
-	PRIMARY KEY(`name`, `type`)
-);
---> statement-breakpoint
 -- Append-only invariants for events + audit. A Run IS the audit record, and an audit record you can
 -- rewrite is not one, so the guard is triggers rather than convention: every UPDATE and DELETE on
 -- either table aborts. A retention pass drops the triggers and recreates them inside one

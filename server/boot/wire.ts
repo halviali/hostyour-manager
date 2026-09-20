@@ -43,6 +43,7 @@ import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
+import { registerOrganisationRoutes } from "../domains/units/api-organisations.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
 import { migrateRegistrations } from "../domains/units/registrations-migration.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
@@ -337,6 +338,9 @@ export async function wire(): Promise<Wired> {
       registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.catalogRepoUrl ? { catalogRepoUrl: units.catalogRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
+      // The organisation identities (#219): recorded here, derived per unit by every onboarding. The
+      // measurement rides the consumer client where it is wired; without it nothing can be recorded.
+      if (units.github) registerOrganisationRoutes(a, { db: db.db, store, github: units.github, ...(githubApp ? { githubApp } : {}), actor: runActor });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
       registerTenantAppCatalogRoute(a, { db: db.db, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {

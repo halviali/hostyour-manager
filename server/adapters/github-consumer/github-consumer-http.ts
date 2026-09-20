@@ -7,7 +7,7 @@ import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
   DispatchWorkflowInput,
 } from "./port.ts";
-import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener } from "./port.ts";
+import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener, type OrgTokenReading } from "./port.ts";
 
 type FetchLike = typeof fetch;
 
@@ -100,6 +100,18 @@ export class HttpGitHubConsumer implements GitHubConsumer {
       throw new GitHubConsumerError(`GitHub GET ${base} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
     }
     return { classic: true, scopes: header.split(",").map((s) => s.trim()).filter(Boolean) };
+  }
+
+  async readOrgToken(input: { org: string; token: string; signal?: AbortSignal }): Promise<OrgTokenReading> {
+    const path = `/orgs/${encodeURIComponent(input.org)}/packages?package_type=npm&per_page=1`;
+    const res = await this.send(input.token, path, input.signal ? { signal: input.signal } : undefined);
+    const header = res.headers.get("x-oauth-scopes");
+    const scopes: TokenScopes = header === null ? { classic: false, scopes: [] } : { classic: true, scopes: header.split(",").map((s) => s.trim()).filter(Boolean) };
+    if (res.ok) return { ...scopes, packages: "reads" };
+    if (res.status === 401) return { ...scopes, packages: "invalid" };
+    if (res.status === 403) return { ...scopes, packages: "unreadable" };
+    if (res.status === 404) return { ...scopes, packages: "absent" };
+    throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
   }
 
   async ensureHook(input: EnsureHookInput): Promise<EnsureHookResult> {

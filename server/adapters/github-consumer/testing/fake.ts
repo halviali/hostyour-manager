@@ -6,7 +6,7 @@
 // contract the HTTP client answers.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput,
+  DispatchWorkflowInput, OrgTokenReading,
 } from "../port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener } from "../port.ts";
 
@@ -55,6 +55,20 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   /** "@scope/name" → the tokens that may read it; a package not seeded answers "absent", one seeded
    *  and asked with another token "unreadable" (readPackage). */
   readonly packages = new Map<string, string[]>();
+  /** org → the tokens that read its packages (readOrgToken answers "reads" for them, "unreadable"
+   *  for any other token of a seeded organisation, "absent" for an organisation not seeded);
+   *  `tokenInvalid` answers "invalid". The scopes half is `tokenScopes`, as readTokenScopes. */
+  readonly orgPackageReaders = new Map<string, string[]>();
+  /** Every organisation readOrgToken was asked about, with the token — a test asserts the measurement. */
+  readonly orgReads: { org: string; token: string }[] = [];
+
+  async readOrgToken(input: { org: string; token: string }): Promise<OrgTokenReading> {
+    this.orgReads.push({ org: input.org, token: input.token });
+    if (this.tokenInvalid) return { ...this.tokenScopes, packages: "invalid" };
+    const readers = this.orgPackageReaders.get(input.org);
+    if (readers === undefined) return { ...this.tokenScopes, packages: "absent" };
+    return { ...this.tokenScopes, packages: readers.includes(input.token) ? "reads" : "unreadable" };
+  }
 
   // ---- the release trigger (trigger-release) ----
   /** Every dispatch call, in order — a test asserts the trigger fired once with {version, channel,

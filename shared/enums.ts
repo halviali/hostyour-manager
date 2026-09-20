@@ -490,7 +490,7 @@ export const EPHEMERAL_STREAM = "ephemeral" as const;
 /** What a run may emit: the three persisted streams, or the live-only one. */
 export type RunOutputStream = EventStream | typeof EPHEMERAL_STREAM;
 
-export const TARGET_KIND = ["server", "cluster", "app", "tenant", "credential", "all", "self"] as const;
+export const TARGET_KIND = ["server", "cluster", "app", "tenant", "credential", "organisation", "all", "self"] as const;
 export type TargetKind = (typeof TARGET_KIND)[number];
 
 // The mutexes a run can hold. `server` is derived from the plan's own targets (server/executor/locks.ts

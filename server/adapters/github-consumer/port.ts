@@ -87,6 +87,10 @@ export interface DeleteHookResult {
 }
 
 /** The granted scopes of a consumer PAT, read off GitHub's X-OAuth-Scopes response header. */
+export interface OrgTokenReading extends TokenScopes {
+  packages: "reads" | "unreadable" | "absent" | "invalid";
+}
+
 export interface TokenScopes {
   /** true iff GitHub returned an X-OAuth-Scopes header — i.e. this is a CLASSIC PAT. Fine-grained
    *  tokens authenticate but omit the header entirely, so `false` means "not a classic PAT" and the
@@ -118,6 +122,14 @@ export interface GitHubConsumer {
    *  401 (the PAT is invalid/expired) and GitHubConsumerError on any other transport/HTTP fault. A
    *  fine-grained token authenticates (2xx) but returns no header ⇒ {classic:false, scopes:[]}. */
   readTokenScopes(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<TokenScopes>;
+  /** ONE read that measures a token AGAINST AN ORGANISATION (organisations.ts, #219): GET
+   *  /orgs/{org}/packages?package_type=npm with the token. The answer carries both facts an
+   *  organisation identity is judged on — the X-OAuth-Scopes header (a classic PAT's scopes, absent
+   *  on a fine-grained token, as readTokenScopes reads it) and whether the token reads the
+   *  organisation's packages: 200 ⇒ "reads" (classic read:packages or fine-grained Packages: Read),
+   *  403 ⇒ "unreadable" (a token without it), 404 ⇒ "absent" (no such organisation, or one the
+   *  token cannot see), 401 ⇒ "invalid". Any other transport/HTTP fault throws GitHubConsumerError. */
+  readOrgToken(input: { org: string; token: string; signal?: AbortSignal }): Promise<OrgTokenReading>;
   /** REPLACING create: list the repo's hooks, DELETE every one that targets the EventListener path
    *  (targetsEventListener) but is not the current `targetUrl` — a stale hook fires an old entry
    *  point into nothing — then keep the exact match ({created:false}) or create the push-webhook

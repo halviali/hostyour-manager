@@ -191,6 +191,20 @@ function stubFetchWithHeaders(routes: Record<string, { status: number; headers?:
   }) as unknown as typeof fetch;
 }
 
+describe("github-consumer adapter — readOrgToken, one read that measures a token against an organisation (#219)", () => {
+  const PATH = "GET /orgs/acme-org/packages?package_type=npm&per_page=1";
+  it("answers reads on 200 with the classic scopes off the header; unreadable on 403, absent on 404, invalid on 401 — fine-grained where the header is absent", async () => {
+    const reads = new HttpGitHubConsumer({ fetchImpl: stubFetchWithHeaders({ [PATH]: { status: 200, headers: { "x-oauth-scopes": "repo, read:packages" }, body: [] } }) });
+    expect(await reads.readOrgToken({ org: "acme-org", token: "ghp_x" })).toEqual({ classic: true, scopes: ["repo", "read:packages"], packages: "reads" });
+    for (const [status, packages] of [[403, "unreadable"], [404, "absent"], [401, "invalid"]] as const) {
+      const c = new HttpGitHubConsumer({ fetchImpl: stubFetchWithHeaders({ [PATH]: { status, body: { message: "x" } } }) });
+      expect(await c.readOrgToken({ org: "acme-org", token: "github_pat_y" })).toEqual({ classic: false, scopes: [], packages });
+    }
+    const other = new HttpGitHubConsumer({ fetchImpl: stubFetchWithHeaders({ [PATH]: { status: 500, body: { message: "boom" } } }) });
+    await expect(other.readOrgToken({ org: "acme-org", token: "ghp_x" })).rejects.toThrow(GitHubConsumerError);
+  });
+});
+
 describe("github-consumer adapter — readTokenScopes", () => {
   it("parses the granted classic scopes off X-OAuth-Scopes", async () => {
     const client = new HttpGitHubConsumer({ fetchImpl: stubFetchWithHeaders({
