@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f7d170ad-4882-4fb7-b948-4bcf2adf7028",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "9550d472-c9e8-42f9-9d50-e4d2197f8f9b",
+  "prevId": "f7d170ad-4882-4fb7-b948-4bcf2adf7028",
   "tables": {
     "audit": {
       "name": "audit",
@@ -1208,6 +1208,53 @@
           "where": "subject IS NOT NULL"
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "organisation_identities": {
+      "name": "organisation_identities",
+      "columns": {
+        "org": {
+          "name": "org",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "packages_credential_id": {
+          "name": "packages_credential_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "repo_credential_id": {
+          "name": "repo_credential_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

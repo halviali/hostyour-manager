@@ -1,7 +1,9 @@
--- The schema, in ONE migration. The tables and indexes are what drizzle-kit generates from
--- server/db/schema/*.ts; the two sections after them are what it cannot produce — the append-only
--- triggers and the reserved system operators. Regenerating this file drops both; re-add them at the
--- end, after the tables they touch exist.
+-- The BASELINE: the schema as every standing database was first built, the tables and indexes as
+-- drizzle-kit generated them from server/db/schema/*.ts, plus the two sections it cannot produce —
+-- the append-only triggers and the reserved system operators. This file is NEVER edited again and
+-- never regenerated: a database that ran it carries a __drizzle_migrations row for it, and a
+-- changed or re-stamped baseline re-runs against that database at boot and dies on
+-- `table audit already exists` (hostyour-manager#222, apps1 on 0.8.230).
 --
 -- ONE GENERATED LINE IS WORTH A LOOK AFTER EVERY REGENERATION: `servers_one_master_uq` is an
 -- index over an EXPRESSION, and the generator's SQL emitter splits an expression holding a comma
@@ -10,12 +12,12 @@
 -- by hand to a single parenthesised expression, or a database built from the file dies inside
 -- migrate() with `no such column`.
 --
--- THERE IS EXACTLY ONE MIGRATION AND THIS FILE IS THE SCHEMA. A column change is made here, inside
--- the CREATE TABLE, and never as a second migration beside it. Nothing has run an older shape of it:
--- every install is a fresh install, and a development database on a machine is recreated rather than
--- migrated. A stored-value change — a run kind or a provenance word respelled — is therefore made in
--- the CREATE TABLE default and in the writers, with no ALTER and no UPDATE carrying old rows across,
--- because there are no old rows to carry.
+-- EVERY SCHEMA CHANGE IS A NEW MIGRATION BESIDE THIS ONE: edit server/db/schema/*.ts, run
+-- `npm run db:generate -- --name <what-changed>`, and commit the generated 000N_<name>.sql with its
+-- snapshot and journal entry. The migrator applies the new file alone on a standing database and
+-- every file in order on a fresh one; no database is recreated for a schema change. A stored-value
+-- change — a run kind or a provenance word respelled — is a migration too where rows carry the old
+-- word, or a change of the writers alone where none do.
 --
 -- EVERY CHUNK BETWEEN TWO BREAKPOINT MARKERS MUST CONTAIN A STATEMENT. The migrator splits this
 -- file on the marker drizzle writes between statements and prepares each chunk, so a chunk holding
@@ -28,12 +30,9 @@
 -- UNIT_SIZE_SEED, and boot inserts any that are missing (create-only, so an edited row is never
 -- reset). Seeding them in SQL as well would put the same figures in two places, free to drift.
 --
--- Every edit here also bumps `when` in meta/_journal.json. That timestamp is the migrator's ONLY
--- gate: it runs an entry when the newest created_at in __drizzle_migrations is older than the
--- entry's `when`, and it checks no hash. Left unbumped, a database holding rows from an earlier
--- shape of this file is simply skipped — it boots green with a schema short of whatever the edit
--- added and dies much later on `no such column`. Bumped, that same database fails inside migrate()
--- at boot with `table audit already exists`, which is the signal to recreate it.
+-- `when` in meta/_journal.json is the migrator's ONLY gate: it runs an entry when the newest
+-- created_at in __drizzle_migrations is older than the entry's `when`, and it checks no hash. The
+-- baseline's `when` therefore never moves; a generated migration carries its own, later one.
 CREATE TABLE `audit` (
 	`id` text PRIMARY KEY NOT NULL,
 	`ts` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
@@ -64,19 +63,6 @@ CREATE TABLE `credentials` (
 --> statement-breakpoint
 CREATE INDEX `credentials_server_ix` ON `credentials` (`server_id`);--> statement-breakpoint
 CREATE INDEX `credentials_fingerprint_ix` ON `credentials` (`fingerprint`);--> statement-breakpoint
-CREATE TABLE `dns_writes` (
-	`name` text NOT NULL,
-	`type` text NOT NULL,
-	`content` text NOT NULL,
-	`act` text NOT NULL,
-	`owner_kind` text NOT NULL,
-	`owner_name` text NOT NULL,
-	`owner_stage` text,
-	`run_id` text NOT NULL,
-	`written_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
-	PRIMARY KEY(`name`, `type`)
-);
---> statement-breakpoint
 CREATE TABLE `apps` (
 	`id` text PRIMARY KEY NOT NULL,
 	`cluster_id` text NOT NULL,
@@ -214,14 +200,6 @@ CREATE TABLE `operators` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `operators_username_uq` ON `operators` (`username`);--> statement-breakpoint
 CREATE UNIQUE INDEX `operators_subject_uq` ON `operators` (`subject`) WHERE subject IS NOT NULL;--> statement-breakpoint
-CREATE TABLE `organisation_identities` (
-	`org` text PRIMARY KEY NOT NULL,
-	`packages_credential_id` text,
-	`repo_credential_id` text,
-	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
-	`updated_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `events` (
 	`id` text PRIMARY KEY NOT NULL,
 	`run_id` text NOT NULL,
@@ -285,6 +263,19 @@ CREATE TABLE `steps` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `steps_run_ordinal_uq` ON `steps` (`run_id`,`ordinal`);--> statement-breakpoint
 CREATE UNIQUE INDEX `steps_run_name_uq` ON `steps` (`run_id`,`name`);--> statement-breakpoint
+CREATE TABLE `dns_writes` (
+	`name` text NOT NULL,
+	`type` text NOT NULL,
+	`content` text NOT NULL,
+	`act` text NOT NULL,
+	`owner_kind` text NOT NULL,
+	`owner_name` text NOT NULL,
+	`owner_stage` text,
+	`run_id` text NOT NULL,
+	`written_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
+	PRIMARY KEY(`name`, `type`)
+);
+--> statement-breakpoint
 -- Append-only invariants for events + audit. A Run IS the audit record, and an audit record you can
 -- rewrite is not one, so the guard is triggers rather than convention: every UPDATE and DELETE on
 -- either table aborts. A retention pass drops the triggers and recreates them inside one
