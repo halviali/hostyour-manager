@@ -170,9 +170,9 @@ export function createMgmtStep(target: SlaveTarget, ports: DeploySlavePorts & An
           // register keeps a live slave's plane intact.
           const labels = credLabels(server.name);
           ctx.log("meta", `sealing the cluster bearer credential ("${labels.bearer}")...`);
-          cp.clusterBearerCredId = await sealTokenOnce(ctx, { kind: "kubeconfig", label: labels.bearer, serverId: target.serverId, token: blob.argocdToken });
+          cp.clusterBearerCredId = await sealTokenOnce(ctx, { kind: "kubeconfig", purpose: "cluster-bearer", label: labels.bearer, serverId: target.serverId, token: blob.argocdToken });
           ctx.log("meta", `sealing the vault reviewer credential ("${labels.reviewer}")...`);
-          cp.reviewerJwtCredId = await sealTokenOnce(ctx, { kind: "other", label: labels.reviewer, serverId: target.serverId, token: blob.reviewerToken });
+          cp.reviewerJwtCredId = await sealTokenOnce(ctx, { kind: "other", purpose: "reviewer-jwt", label: labels.reviewer, serverId: target.serverId, token: blob.reviewerToken });
           localTx(ctx, (tx) => {
             const existingPlane = (cluster.planeJson as Record<string, unknown> | null) ?? {};
             tx.update(clusters).set({ planeJson: { ...existingPlane, kube: { server: blob.server, caData: blob.caData } } }).where(eq(clusters.id, cluster.id)).run();

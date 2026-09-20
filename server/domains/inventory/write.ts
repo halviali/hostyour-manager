@@ -21,9 +21,7 @@ import { isMasterRole } from "../../../shared/enums.ts";
 // working way into the machine that survives the machine's own configuration, so the two run kinds
 // that shut a password door destroy it in the same breath as the daemon's setting
 // (runs/defs/password-login.kit.ts purgeBootstrapPasswordStep): turning sshd's door off and leaving
-// this one open would close one of two doors.
-
-const BOOTSTRAP_FP = "bootstrap-password";
+// this one open would close one of two doors. Such a row is found by its purpose (#225).
 
 export const CreateServerInput = z.object({
   name: z.string().min(1).max(63).regex(/^[a-z0-9][a-z0-9-]*$/, "lowercase letters, digits and hyphens only"),
@@ -57,7 +55,7 @@ export type CreateServerInput = z.infer<typeof CreateServerInput>;
  * on a Vault-backed store, the value behind it, and is idempotent on a server that has none.
  */
 export async function purgeBootstrapPassword(creds: CredentialStore, serverId: string): Promise<boolean> {
-  const stored = (await creds.list({ serverId, kind: "other" })).filter((c) => c.fingerprint === BOOTSTRAP_FP);
+  const stored = await creds.list({ subject: { kind: "server", id: serverId }, purpose: "bootstrap-password" });
   for (const c of stored) await creds.purge(c.id);
   return stored.length > 0;
 }
@@ -77,11 +75,11 @@ export async function serverCredFlags(creds: CredentialStore): Promise<Map<strin
     map.set(serverId, f);
     return f;
   };
-  for (const c of await creds.list({ kind: "ssh_key", excludeRotated: true })) {
-    if (c.serverId) flags(c.serverId).hasKey = true;
+  for (const c of await creds.list({ purpose: "ssh-key", excludeRotated: true })) {
+    if (c.subject.kind === "server") flags(c.subject.id).hasKey = true;
   }
-  for (const c of await creds.list({ kind: "other" })) {
-    if (c.serverId && c.fingerprint === BOOTSTRAP_FP) flags(c.serverId).hasPassword = true;
+  for (const c of await creds.list({ purpose: "bootstrap-password" })) {
+    if (c.subject.kind === "server") flags(c.subject.id).hasPassword = true;
   }
   return map;
 }
@@ -124,7 +122,7 @@ export async function deleteServer(db: Db, creds: CredentialStore, actor: string
   if (isMasterRole(row.role)) throw errValidation("The master (this manager) cannot be deleted.");
   const cluster = db.select().from(clusters).where(eq(clusters.serverId, id)).get();
   if (cluster) throw errValidation("This server has a cluster — remove the cluster first (a rebuild/remove Run), not delete.");
-  for (const c of await creds.list({ serverId: id })) await creds.purge(c.id);
+  for (const c of await creds.list({ subject: { kind: "server", id } })) await creds.purge(c.id);
   db.delete(servers).where(eq(servers.id, id)).run();
   writeAudit(db, { actor, action: "server.deleted", targetKind: "server", targetId: id, detail: { name: row.name } });
 }

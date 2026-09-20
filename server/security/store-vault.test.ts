@@ -58,7 +58,7 @@ describe("CredentialStore — vault mode (values in Vault KV)", () => {
 
     d.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "hostyour1" }).run();
     const secret = "sesame-open-1234";
-    const ref = await store.seal({ kind: "other", label: "pw", plaintext: Buffer.from(secret, "utf8"), fingerprint: "bootstrap-password", serverId: "srv_1" });
+    const ref = await store.seal({ kind: "other", label: "pw", plaintext: Buffer.from(secret, "utf8"), fingerprint: "bootstrap-password", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt"});
 
     const row = d.select().from(credentials).where(eq(credentials.id, ref.id)).get();
     expect(row?.encryptedBlob).toBe(`vault:v1:${ref.id}`);
@@ -67,7 +67,7 @@ describe("CredentialStore — vault mode (values in Vault KV)", () => {
 
     expect((await store.open(ref.id, { purpose: "test" })).toString("utf8")).toBe(secret);
 
-    const list = await store.list({ serverId: "srv_1" });
+    const list = await store.list({ subject: { kind: "server", id: "srv_1" } });
     expect(list.map((c) => c.kind)).toEqual(["other"]);
   });
 
@@ -75,7 +75,7 @@ describe("CredentialStore — vault mode (values in Vault KV)", () => {
     const d = db();
     const vault = new FakeVault();
     const store = new CredentialStore({ db: d, logger, vault });
-    const ref = await store.seal({ kind: "other", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
+    const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
     await store.purge(ref.id);
     expect(vault.kv.size).toBe(0);
     expect(d.select().from(credentials).where(eq(credentials.id, ref.id)).get()).toBeUndefined();
@@ -85,7 +85,7 @@ describe("CredentialStore — vault mode (values in Vault KV)", () => {
     const d = db();
     const vault = new FakeVault();
     const store = new CredentialStore({ db: d, logger, vault });
-    const ref = await store.seal({ kind: "other", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
+    const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
     vault.kv.clear();
     await expect(store.open(ref.id, { purpose: "t" })).rejects.toThrow(/missing from Vault/);
   });

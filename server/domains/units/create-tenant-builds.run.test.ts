@@ -2,12 +2,11 @@
 // every missing image to the repository the catalogue's tenant.buildRepos names and asks one PAT per
 // repository the installation has not registered; the run onboards each such unit build-only before
 // the tenant's own writes and re-reads the image set off the pins the builds wrote.
+import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
-import { organisationIdentities } from "../../db/schema/organisations.ts";
-import { eq } from "drizzle-orm";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { resolveBuildUnits, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
@@ -216,7 +215,7 @@ describe("create-tenant planStream — the build units and their organisation's 
   });
   it("refuses, naming the organisation and the page, a build unit whose organisation records no identity", async () => {
     seedClusters();
-    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "acme")).run();
+    dropCredentialRows(db.db, { kind: "organisation", id: "acme" });
     const prt = withAppsTemplate(ports({ registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }) }));
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");

@@ -147,11 +147,11 @@ describe("the password-login run kinds — the shape of an act that cannot be te
       role: "master", status: "healthy", preflightJson: { hostKey: "SHA256:x" },
     }).run();
     for (const id of [SLAVE_ID, MASTER_ID]) {
-      await store.seal({ kind: "ssh_key", label: `key ${id}`, plaintext: Buffer.from("dummy"), fingerprint: `SHA256:${id}`, serverId: id });
+      await store.seal({ kind: "ssh_key", label: `key ${id}`, plaintext: Buffer.from("dummy"), fingerprint: `SHA256:${id}`, subject: { kind: "server", id: id }, purpose: "ssh-key"});
     }
     await store.seal({
       kind: "other", label: "adopt password for s1", plaintext: Buffer.from("sesame"),
-      fingerprint: BOOTSTRAP_FP, serverId: SLAVE_ID,
+      fingerprint: BOOTSTRAP_FP, subject: { kind: "server", id: SLAVE_ID }, purpose: "bootstrap-password",
     });
     return { db, store };
   }
@@ -413,9 +413,9 @@ describe("the password-login run kinds — the shape of an act that cannot be te
     await runOfKind("cluster-password-login-disable", db, store);
     // Purged, not revoked: a revoked row keeps the encrypted blob, and the blob IS the password.
     expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(false);
-    expect((await store.list({ serverId: SLAVE_ID, kind: "other" }))).toHaveLength(0);
+    expect((await store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "bootstrap-password" }))).toHaveLength(0);
     // The key it was replaced by is untouched.
-    expect(await store.list({ serverId: SLAVE_ID, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "ssh-key" })).toHaveLength(1);
   });
 
   it("writes the reading back on the row, so the card stops showing the state before the change", async () => {
@@ -466,7 +466,7 @@ describe("the password-login run kinds — the shape of an act that cannot be te
 
     it(`${kind} refuses a host no ssh_key credential stands for — there would be nothing to fall back on`, async () => {
       const { db, store } = await setup();
-      for (const c of await store.list({ serverId: SLAVE_ID, kind: "ssh_key" })) await store.purge(c.id);
+      for (const c of await store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "ssh-key" })) await store.purge(c.id);
       // The row is untouched and still says `healthy`, which is where a deployment leaves every
       // machine it reached: what refuses is the credential, and it is the same fact ctx.ssh() would
       // look for at the run's first step.

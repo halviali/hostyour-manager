@@ -39,7 +39,7 @@ describe("CredentialStore — keyfile mode (AES-256-GCM at rest)", () => {
     expect(store.mode()).toBe("keyfile");
 
     const secret = "sesame-open-1234";
-    const ref = await store.seal({ kind: "other", label: "pw", plaintext: Buffer.from(secret, "utf8"), fingerprint: "bootstrap-password" });
+    const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "pw", plaintext: Buffer.from(secret, "utf8"), fingerprint: "bootstrap-password" });
     const row = d.select().from(credentials).where(eq(credentials.id, ref.id)).get();
     expect(row?.encryptedBlob.startsWith("v1:")).toBe(true);
     expect(row?.encryptedBlob).not.toContain(secret);
@@ -52,7 +52,7 @@ describe("CredentialStore — keyfile mode (AES-256-GCM at rest)", () => {
     const d = db();
     const store = new CredentialStore({ db: d, logger });
     expect(store.mode()).toBe("plaintext");
-    const ref = await store.seal({ kind: "other", label: "x", plaintext: Buffer.from("hi", "utf8"), fingerprint: "f" });
+    const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "x", plaintext: Buffer.from("hi", "utf8"), fingerprint: "f" });
     const row = d.select().from(credentials).where(eq(credentials.id, ref.id)).get();
     expect(row?.encryptedBlob.startsWith("plain:v0:")).toBe(true);
     expect((await store.open(ref.id, { purpose: "t" })).toString("utf8")).toBe("hi");
@@ -62,7 +62,7 @@ describe("CredentialStore — keyfile mode (AES-256-GCM at rest)", () => {
     const d = db();
     const key = randomBytes(32);
     const store = new CredentialStore({ db: d, logger, dataKey: key });
-    const ref = await store.seal({ kind: "other", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
+    const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
     const row = d.select().from(credentials).where(eq(credentials.id, ref.id)).get();
     const flipped = `v1:${Buffer.from((row?.encryptedBlob ?? "").slice(3), "base64").fill(0).toString("base64")}`;
     d.update(credentials).set({ encryptedBlob: flipped }).where(eq(credentials.id, ref.id)).run();

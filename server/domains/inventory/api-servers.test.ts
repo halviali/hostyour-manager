@@ -140,13 +140,13 @@ describe("server inventory API", () => {
       await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s6", host: "10.1.1.12", sshUser: "hostyour1" });
       await h.store.seal({
         kind: "ssh_key", label: "SSH key for s5", plaintext: Buffer.from("private-key-material"),
-        fingerprint: "SHA256:managerkey", serverId: server.id, publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
+        fingerprint: "SHA256:managerkey", subject: { kind: "server", id: server.id }, purpose: "ssh-key", publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
       });
       // A row sealed a password before this surface stopped taking one still holds a working way in,
       // so the flag that says so must go on being reported.
       await h.store.seal({
         kind: "other", label: "password for s5", plaintext: Buffer.from("shared-secret-xyz"),
-        fingerprint: "bootstrap-password", serverId: server.id,
+        fingerprint: "bootstrap-password", subject: { kind: "server", id: server.id }, purpose: "bootstrap-password",
       });
 
       const res = await h.app.request("/api/servers", authed(h.cookie));
@@ -240,7 +240,7 @@ describe("server inventory API", () => {
       ).json()) as { server: ServerView };
       await h.store.seal({
         kind: "ssh_key", label: "SSH key for s5", plaintext: Buffer.from("private"),
-        fingerprint: "SHA256:managerkey", serverId: server.id, publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
+        fingerprint: "SHA256:managerkey", subject: { kind: "server", id: server.id }, purpose: "ssh-key", publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
       });
       expect(await serverCredFlags(h.store)).toEqual(new Map([[server.id, { hasPassword: false, hasKey: true }]]));
 

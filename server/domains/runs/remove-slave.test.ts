@@ -173,7 +173,7 @@ describe("cluster-remove-slave", () => {
     // The row and the credential follow the act: a machine that takes no key of ours is one no
     // ctx.ssh() can reach, so a sealed key left standing would offer run kinds that die at their
     // first session.
-    expect(await h.store.list({ serverId: SLAVE_ID, kind: "ssh_key", excludeRotated: true })).toHaveLength(0);
+    expect(await h.store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "ssh-key", excludeRotated: true })).toHaveLength(0);
     const row = h.db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get();
     expect(row?.status).toBe("bare");
     expect(row?.adoptedAt).toBeNull();
@@ -202,7 +202,7 @@ describe("cluster-remove-slave", () => {
     // key stays sealed and the row is not moved to `bare` by a step that reached nothing.
     expect(h.hosts.authorizedKeys).toEqual([IMAGE_KEY_LINE]);
     expect(h.hosts.passwordLogin).toBe("yes");
-    expect(await h.store.list({ serverId: SLAVE_ID, kind: "ssh_key", excludeRotated: true })).toHaveLength(1);
+    expect(await h.store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "ssh-key", excludeRotated: true })).toHaveLength(1);
 
     // The rows still follow, which is the whole point of going on: the cluster is removed and the
     // machine reads `undeployed` — it keeps what the deployment left on it and this installation
@@ -217,7 +217,7 @@ describe("cluster-remove-slave", () => {
     // route at all, and the step must not report that as a machine that refused one.
     const h = await makeHarness();
     seedLiveSlave(h);
-    for (const key of await h.store.list({ serverId: SLAVE_ID, kind: "ssh_key", excludeRotated: true })) await h.store.purge(key.id);
+    for (const key of await h.store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "ssh-key", excludeRotated: true })) await h.store.purge(key.id);
     const logs = await putBack(h);
     expect(logs.join("\n")).toContain("leave-host is skipped: this manager holds no SSH key for s1");
     expect(h.hosts.log.filter((c) => c.host === "10.1.1.11")).toHaveLength(0);

@@ -4,7 +4,6 @@ import { seedUnitSizes } from "./unit-size.ts";
 import { eq } from "drizzle-orm";
 import { pino } from "pino";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { organisationIdentities } from "../../db/schema/organisations.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { Executor } from "../../executor/executor.ts";
 import { RunEventBus } from "../../executor/bus.ts";
@@ -156,10 +155,9 @@ function seedCluster(): void {
 const REQUEST = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team-acme", chartPath: "deploy/chart" };
 
 async function sealPat(store: CredentialStore): Promise<string> {
-  const ref = await store.seal({ kind: "pat", label: "repository PAT (acme)", plaintext: Buffer.from("github_pat_journey", "utf8"), fingerprint: "sha256:test" });
+  const ref = await store.seal({ kind: "pat", label: "repository PAT (acme)", plaintext: Buffer.from("github_pat_journey", "utf8"), fingerprint: "sha256:test", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity" });
   // The organisation's packages reader, a real row the seed step opens beside the unit's token (#220).
-  const packages = await store.seal({ kind: "pat", label: "packages reader (x)", plaintext: Buffer.from("ghp_packages_x", "utf8"), fingerprint: "sha256:pkg" });
-  db.db.update(organisationIdentities).set({ packagesCredentialId: packages.id }).where(eq(organisationIdentities.org, "x")).run();
+  await store.seal({ kind: "pat", label: "packages reader (x)", plaintext: Buffer.from("ghp_packages_x", "utf8"), fingerprint: "sha256:pkg", subject: { kind: "organisation", id: "x" }, purpose: "packages-reader" });
   return ref.id;
 }
 

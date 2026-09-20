@@ -291,7 +291,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     // measurement rather than a sentence about a row that held nothing.
     await store.seal({
       kind: "other", label: "bootstrap password for s1", plaintext: Buffer.from("bootstrap-pw-0011"),
-      fingerprint: "bootstrap-password", serverId: SLAVE_ID,
+      fingerprint: "bootstrap-password", subject: { kind: "server", id: SLAVE_ID }, purpose: "bootstrap-password",
     });
     expect((await serverCredFlags(store)).get(SLAVE_ID)?.hasPassword).toBe(true);
     const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
@@ -329,8 +329,8 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db, executor } = await makeHarness();
     db.db.insert(servers).values({ id: "srv_other", name: "s2", host: "s2.example.com", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", status: "active", slaveId: 7 }).run();
-    db.sqlite.prepare("INSERT INTO credentials (id, kind, label, server_id, encrypted_blob, fingerprint) VALUES (?,?,?,?,?,?)")
-      .run("cred_other", "kubeconfig", "s2 cluster bearer (argocd-manager)", "srv_other", "plain:v0:t", "sha256:t");
+    db.sqlite.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES (?,?,?,?,?,?,?,?)")
+      .run("cred_other", "kubeconfig", "s2 cluster bearer (argocd-manager)", "server", "srv_other", "cluster-bearer", "plain:v0:t", "sha256:t");
 
     const { plan } = await executor.plan("cluster-deploy-slave", PARAMS);
 
@@ -448,8 +448,8 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     }).run();
     const ctx = bareStepCtx(db, store);
     const labels = credLabels("s1");
-    await sealTokenOnce(ctx, { kind: "kubeconfig", label: labels.bearer, serverId: SLAVE_ID, token: "tok-bearer" });
-    await sealTokenOnce(ctx, { kind: "other", label: labels.reviewer, serverId: SLAVE_ID, token: "tok-reviewer" });
+    await sealTokenOnce(ctx, { kind: "kubeconfig", purpose: "cluster-bearer", label: labels.bearer, serverId: SLAVE_ID, token: "tok-bearer" });
+    await sealTokenOnce(ctx, { kind: "other", purpose: "reviewer-jwt", label: labels.reviewer, serverId: SLAVE_ID, token: "tok-reviewer" });
 
     const register = registerStep(statedTarget(SLAVE_ID, PARAMS.domain, "prod"));
     await register.run(ctx);
@@ -470,17 +470,17 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const lines: string[] = [];
     const ctx: StepCtx = { ...bareStepCtx(db, store), log: (_stream, text) => { lines.push(text); } };
     const label = credLabels("s1").bearer;
-    const id1 = await sealTokenOnce(ctx, { kind: "kubeconfig", label, serverId: SLAVE_ID, token: "token-mint-one" });
+    const id1 = await sealTokenOnce(ctx, { kind: "kubeconfig", purpose: "cluster-bearer", label, serverId: SLAVE_ID, token: "token-mint-one" });
     // the emit re-minted the token on the retry: same label, different bytes — must UPDATE
     // the logical credential, never blind-insert a duplicate
-    const id2 = await sealTokenOnce(ctx, { kind: "kubeconfig", label, serverId: SLAVE_ID, token: "token-mint-two" });
+    const id2 = await sealTokenOnce(ctx, { kind: "kubeconfig", purpose: "cluster-bearer", label, serverId: SLAVE_ID, token: "token-mint-two" });
     expect(id2).not.toBe(id1);
     const old = db.sqlite.prepare("SELECT rotated_at FROM credentials WHERE id=?").get(id1) as { rotated_at: number | null };
     expect(old.rotated_at).not.toBeNull(); // superseded row carries provenance
     // register's resolver (newest-by-label) finds the rotated-in credential
-    expect(await newestCredId(ctx, { serverId: SLAVE_ID, kind: "kubeconfig", label })).toBe(id2);
+    expect(await newestCredId(ctx, { serverId: SLAVE_ID, purpose: "cluster-bearer", label })).toBe(id2);
     // the reuse fast-path stays intact, and every path logs its story
-    expect(await sealTokenOnce(ctx, { kind: "kubeconfig", label, serverId: SLAVE_ID, token: "token-mint-two" })).toBe(id2);
+    expect(await sealTokenOnce(ctx, { kind: "kubeconfig", purpose: "cluster-bearer", label, serverId: SLAVE_ID, token: "token-mint-two" })).toBe(id2);
     expect(lines.some((l) => l.includes(`credential "${label}" sealed`))).toBe(true);
     expect(lines.some((l) => l.includes("rotated in place"))).toBe(true);
     expect(lines.some((l) => l.includes("reusing"))).toBe(true);
@@ -496,12 +496,12 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const fp = "sha256:" + createHash("sha256").update(token, "utf8").digest("hex");
     await store.seal({
       kind: "kubeconfig", label: "edge1 cluster bearer (argocd-manager) — s1",
-      plaintext: Buffer.from(token), fingerprint: fp, serverId: SLAVE_ID,
+      plaintext: Buffer.from(token), fingerprint: fp, subject: { kind: "server", id: SLAVE_ID }, purpose: "cluster-bearer",
     });
     const ctx = bareStepCtx(db, store);
     const label = credLabels("s1").bearer;
-    const id = await sealTokenOnce(ctx, { kind: "kubeconfig", label, serverId: SLAVE_ID, token });
-    expect(await newestCredId(ctx, { serverId: SLAVE_ID, kind: "kubeconfig", label })).toBe(id);
+    const id = await sealTokenOnce(ctx, { kind: "kubeconfig", purpose: "cluster-bearer", label, serverId: SLAVE_ID, token });
+    expect(await newestCredId(ctx, { serverId: SLAVE_ID, purpose: "cluster-bearer", label })).toBe(id);
   });
 
   it("hardenPreflightForSlave: every check hard; 80/443/snapd warns promoted to fails; the catalogue's own view untouched", () => {

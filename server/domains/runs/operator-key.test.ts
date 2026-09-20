@@ -154,7 +154,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     }).run();
     for (const id of [SLAVE_ID, MASTER_ID]) {
       await store.seal({
-        kind: "ssh_key", label: `key ${id}`, plaintext: Buffer.from("dummy"), fingerprint: MINE_FP, serverId: id,
+        kind: "ssh_key", label: `key ${id}`, plaintext: Buffer.from("dummy"), fingerprint: MINE_FP, subject: { kind: "server", id: id }, purpose: "ssh-key",
         publicKey: `ssh-ed25519 ${BLOB_MINE}`,
       });
     }
@@ -390,7 +390,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     it(`${kind} refuses a host no ssh_key credential stands for — there is no session to edit over`, async () => {
       const { db, store, keyId } = await setup();
       const params = kind === "cluster-authorized-keys-read" ? { serverId: SLAVE_ID } : { serverId: SLAVE_ID, operatorKeyId: keyId };
-      for (const c of await store.list({ serverId: SLAVE_ID, kind: "ssh_key" })) await store.purge(c.id);
+      for (const c of await store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "ssh-key" })) await store.purge(c.id);
       // The row is untouched and still says `healthy`: what refuses is the credential, which is the
       // same thing ctx.ssh() looks for at the run's first step.
       expect(db.db.select().from(servers).where(eq(servers.id, SLAVE_ID)).get()?.status).toBe("healthy");
@@ -424,7 +424,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
     const all = await store.list();
     expect(all.map((c) => c.fingerprint)).not.toContain(PAT_FP);
     for (const id of [SLAVE_ID, MASTER_ID]) {
-      const keys = await store.list({ serverId: id, kind: "ssh_key" });
+      const keys = await store.list({ subject: { kind: "server", id: id }, purpose: "ssh-key" });
       expect(keys).toHaveLength(1);
       expect(keys[0]?.fingerprint).toBe(MINE_FP);
     }

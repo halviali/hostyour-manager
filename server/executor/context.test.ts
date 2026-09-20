@@ -143,7 +143,7 @@ describe("RunContext — multi-target SSH cache (one session per target host and
     db.db.insert(servers).values({ id: slaveId, name: "s1", host: "10.1.1.11", sshPort: 22, sshUser: "root" }).run();
     db.db.insert(servers).values({ id: masterId, name: "m1", host: "10.1.1.1", sshPort: 22, sshUser: "root" }).run();
     for (const [id, fp] of [[slaveId, "SHA256:slave"], [masterId, "SHA256:master"]] as const) {
-      await store.seal({ kind: "ssh_key", label: `key ${id}`, plaintext: Buffer.from("dummy"), fingerprint: fp, serverId: id });
+      await store.seal({ kind: "ssh_key", label: `key ${id}`, plaintext: Buffer.from("dummy"), fingerprint: fp, subject: { kind: "server", id: id }, purpose: "ssh-key"});
     }
     const rc = new RunContext({
       runId: "run_z", db: db.db, creds: store, bus: new RunEventBus(), logger, params: {},
@@ -225,7 +225,7 @@ describe("RunContext — which address a session opens on", () => {
         address: TAILNET_ADDRESS, coordinator: "https://tailnet.example.com",
       },
     }).run();
-    await store.seal({ kind: "ssh_key", label: "key", plaintext: Buffer.from("dummy"), fingerprint: "SHA256:k", serverId });
+    await store.seal({ kind: "ssh_key", label: "key", plaintext: Buffer.from("dummy"), fingerprint: "SHA256:k", subject: { kind: "server", id: serverId }, purpose: "ssh-key" });
     seedRunRows(db, { runId: "run_t", steps: [{ id: "step_1", name: "one" }, { id: "step_2", name: "two" }, { id: "step_3", name: "three" }] });
     return { db, store, serverId, dialled: [] };
   }

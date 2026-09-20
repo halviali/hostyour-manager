@@ -118,7 +118,7 @@ export async function recordAuthorizedKeysReading(
 ): Promise<AuthorizedKeysReadingResult | null> {
   const row = ctx.db.select({ name: servers.name }).from(servers).where(eq(servers.id, serverId)).get();
   if (!row) throw errNotFound(`server ${serverId} not found`);
-  const sealed = await ctx.creds.list({ serverId, kind: "ssh_key" });
+  const sealed = await ctx.creds.list({ subject: { kind: "server", id: serverId }, purpose: "ssh-key" });
   const cap = await remoteScriptCapture(ctx, session, "authorized-keys-probe", AUTHORIZED_KEYS_PROBE_SCRIPT, { timeoutMs: 60_000 });
   if (cap.result.code !== 0) {
     ctx.log("meta", `Authorized keys: the probe did not run (exit ${cap.result.code}) — this server's stored reading is unchanged.`);

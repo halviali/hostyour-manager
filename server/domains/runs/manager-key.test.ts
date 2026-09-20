@@ -186,7 +186,7 @@ describe("manager-key kit", () => {
   async function sealKey(store: CredentialStore, publicKey = "ssh-ed25519 AAAAmanager hostyour:s5"): Promise<void> {
     await store.seal({
       kind: "ssh_key", label: "SSH key for s5", plaintext: Buffer.from("dummy"),
-      fingerprint: "SHA256:managerkey", serverId: SERVER_ID, publicKey,
+      fingerprint: "SHA256:managerkey", subject: { kind: "server", id: SERVER_ID }, purpose: "ssh-key", publicKey,
     });
   }
 
@@ -243,7 +243,7 @@ describe("manager-key kit", () => {
       const b = bench();
       await runAll(b);
 
-      const held = await b.store.list({ serverId: SERVER_ID, kind: "ssh_key", excludeRotated: true });
+      const held = await b.store.list({ subject: { kind: "server", id: SERVER_ID }, purpose: "ssh-key", excludeRotated: true });
       expect(held).toHaveLength(1);
       expect(b.host.authorizedKeys).toEqual([held[0]?.publicKey]);
       expect(b.host.ntp).toBe("yes");
@@ -255,7 +255,7 @@ describe("manager-key kit", () => {
     it("runs a second time against the same machine and ships not one write", async () => {
       const b = bench();
       await runAll(b);
-      const key = (await b.store.list({ serverId: SERVER_ID, kind: "ssh_key", excludeRotated: true }))[0];
+      const key = (await b.store.list({ subject: { kind: "server", id: SERVER_ID }, purpose: "ssh-key", excludeRotated: true }))[0];
 
       b.host.commands.length = 0;
       const second = bench({ host: b.host });
@@ -265,7 +265,7 @@ describe("manager-key kit", () => {
       await runAll(second);
 
       expect(b.host.authorizedKeys).toEqual([key?.publicKey]); // no second copy of the line
-      expect((await second.store.list({ serverId: SERVER_ID, kind: "ssh_key", excludeRotated: true }))).toHaveLength(1);
+      expect((await second.store.list({ subject: { kind: "server", id: SERVER_ID }, purpose: "ssh-key", excludeRotated: true }))).toHaveLength(1);
       // Nothing that changes the machine was sent: no append, no set-ntp, and the drop-in script's
       // own measurement found the file already gone.
       expect(b.host.commands.filter((c) => c.includes(">> ~/.ssh/authorized_keys"))).toEqual([]);
@@ -278,7 +278,7 @@ describe("manager-key kit", () => {
       await runAll(b);
       b.host.commands.length = 0;
       const second = bench({ host: b.host });
-      const key = (await b.store.list({ serverId: SERVER_ID, kind: "ssh_key", excludeRotated: true }))[0];
+      const key = (await b.store.list({ subject: { kind: "server", id: SERVER_ID }, purpose: "ssh-key", excludeRotated: true }))[0];
       await sealKey(second.store, key?.publicKey);
       await runAll(second);
 

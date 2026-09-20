@@ -341,6 +341,25 @@ export type ServerAuthorizedKeysState = (typeof SERVER_AUTHORIZED_KEYS_STATE)[nu
 export const CREDENTIAL_KIND = ["ssh_key", "pat", "kubeconfig", "other", "github-app"] as const;
 export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 
+// WHOSE a credential is (hostyour-manager#225): a server's (the machine the Manager reaches), an
+// organisation's (its packages reader, its repository PAT), a unit's (the identity a consumer or a
+// tenant's build unit was onboarded under). The subject id is the server's row id, the
+// organisation's login as GitHub spells it, the unit's name.
+export const CREDENTIAL_SUBJECT = ["server", "organisation", "unit"] as const;
+export type CredentialSubjectKind = (typeof CREDENTIAL_SUBJECT)[number];
+
+// WHAT a credential is for — the closed vocabulary a reader asks by, never a label to parse:
+//   ssh-key             the Manager's own key to a server (kind ssh_key)
+//   bootstrap-password  a server's first-login password, purged once the key stands (kind other)
+//   cluster-bearer      a slave cluster's ArgoCD bearer for the Manager (kind kubeconfig)
+//   reviewer-jwt        a slave cluster's Vault reviewer JWT (kind other)
+//   packages-reader     an organisation's token that reads its private npm packages (kind pat)
+//   repository-pat      an organisation's repository PAT where the App is not installed (kind pat)
+//   repository-identity a unit's own repository identity: the App's row or the organisation PAT
+//                       sealed under the unit's name (kind github-app | pat)
+export const CREDENTIAL_PURPOSE = ["ssh-key", "bootstrap-password", "cluster-bearer", "reviewer-jwt", "packages-reader", "repository-pat", "repository-identity"] as const;
+export type CredentialPurpose = (typeof CREDENTIAL_PURPOSE)[number];
+
 // Every run kind the Manager can run. A literal with no definition behind it is a run kind the UI offers,
 // the API accepts and nothing can execute — the plan route answers "unknown run kind" only after the
 // operator has already asked for it. A run kind therefore enters this list WITH its implementation and

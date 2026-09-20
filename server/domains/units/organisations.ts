@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
-import { organisationIdentities } from "../../db/schema/organisations.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
+import { organisationIdentity, organisationsWithIdentity } from "../../security/store.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { fingerprintSecret } from "../../security/fingerprint.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -10,9 +9,10 @@ import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { OrganisationIdentityView, OrganisationCredentialView } from "../../../shared/api-types-organisations.ts";
 import { missingConsumerPatScopes } from "./pat-scopes.ts";
 
-// THE IDENTITY OF AN ORGANISATION (hostyour-manager#218, #219): recorded once, measured before it
-// is sealed, derived per unit from the owner of its repository URL by the identity rule
-// (repo-identity.ts). Two credentials per organisation, each optional on its own:
+// THE IDENTITY OF AN ORGANISATION (hostyour-manager#218, #219, #225): recorded once, measured
+// before it is sealed, derived per unit from the owner of its repository URL by the identity rule
+// (repo-identity.ts). Two credentials per organisation, each a row of the store whose subject is
+// the organisation and whose purpose says which (there is no table of ids beside the store):
 //  - the PACKAGES READER: what a build's `.npmrc` carries. GitHub grants an App installation token
 //    no access to a private npm package whatever the App's permissions say, so this is a PAT —
 //    classic with read:packages or fine-grained with Packages: Read — and the measurement is the
@@ -20,7 +20,8 @@ import { missingConsumerPatScopes } from "./pat-scopes.ts";
 //  - the REPOSITORY PAT: the repository identity where the platform's App is not installed in the
 //    organisation (repo + workflow + admin:repo_hook). Absent where the App reaches, the ordinary case.
 // A token is measured, sealed with its fingerprint, and zeroed; it is never logged and never
-// persisted raw. Replacing a credential revokes the row it replaces.
+// persisted raw. Replacing a credential revokes the row it replaces; the newest unrevoked row of a
+// purpose is the organisation's (store.ts organisationIdentity).
 
 export interface OrganisationDeps {
   db: Db;
@@ -41,49 +42,38 @@ export function assertOrgLogin(org: string): string {
   return org;
 }
 
-/** Every organisation with an identity recorded, and which of them the App is installed in. The
- *  fingerprints come through the store (the one reader of credential rows); the date is the
- *  organisation row's, written when the credential was recorded. */
+/** Every organisation with an identity recorded, and which of them the App is installed in. */
 export async function listOrganisationIdentities(deps: Pick<OrganisationDeps, "db" | "store" | "githubApp">, signal?: AbortSignal): Promise<OrganisationIdentityView[]> {
   const appOrg = deps.githubApp ? await deps.githubApp.installationOrg(signal) : null;
-  const rows = deps.db.select().from(organisationIdentities).all();
-  const fingerprints = new Map((await deps.store.list({ kind: "pat" })).map((c) => [c.id, c.fingerprint]));
-  const view = (id: string | null, at: Date): OrganisationCredentialView | null => {
-    const fingerprint = id ? fingerprints.get(id) : undefined;
-    return fingerprint ? { fingerprint, recordedAt: at.toISOString() } : null;
-  };
-  const views = rows.map((r) => ({
-    org: r.org,
-    appInstalled: r.org === appOrg,
-    packagesReader: view(r.packagesCredentialId, r.updatedAt),
-    repositoryPat: view(r.repoCredentialId, r.updatedAt),
-  }));
+  const orgs = organisationsWithIdentity(deps.db);
   // The App's own organisation is listed even before anything is recorded for it: it is the one
   // the operator most likely needs to complete.
-  if (appOrg && !rows.some((r) => r.org === appOrg)) views.unshift({ org: appOrg, appInstalled: true, packagesReader: null, repositoryPat: null });
-  return views.sort((a, b) => a.org.localeCompare(b.org));
+  if (appOrg && !orgs.includes(appOrg)) orgs.push(appOrg);
+  const rows = await deps.store.list({ kind: "pat" });
+  const view = (id: string | null): OrganisationCredentialView | null => {
+    const row = id ? rows.find((r) => r.id === id) : undefined;
+    return row ? { fingerprint: row.fingerprint, recordedAt: row.recordedAt } : null;
+  };
+  return orgs.sort().map((org) => {
+    const ids = organisationIdentity(deps.db, org);
+    return { org, appInstalled: org === appOrg, packagesReader: view(ids?.packagesCredentialId ?? null), repositoryPat: view(ids?.repoCredentialId ?? null) };
+  });
 }
 
 /** The credential ids an onboarding derives a unit's identity from — the identity rule's read. */
 export function readOrganisationIdentity(db: Db, org: string): { packagesCredentialId: string | null; repoCredentialId: string | null } | null {
-  const row = db.select().from(organisationIdentities).where(eq(organisationIdentities.org, org)).get();
-  return row ? { packagesCredentialId: row.packagesCredentialId, repoCredentialId: row.repoCredentialId } : null;
+  return organisationIdentity(db, org);
 }
 
-async function record(deps: OrganisationDeps, org: string, column: "packagesCredentialId" | "repoCredentialId", token: string, label: string): Promise<OrganisationCredentialView> {
+async function record(deps: OrganisationDeps, org: string, purpose: "packages-reader" | "repository-pat", token: string, label: string): Promise<OrganisationCredentialView> {
   const plaintext = Buffer.from(token, "utf8");
   const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
-  const ref = await deps.store.seal({ kind: "pat", label, plaintext, fingerprint });
-  const standing = deps.db.select().from(organisationIdentities).where(eq(organisationIdentities.org, org)).get();
-  const replaced = standing?.[column] ?? null;
-  const now = new Date();
-  // Literal keys per column: the schema census reads a writer's payload by name.
-  const values = column === "packagesCredentialId" ? { packagesCredentialId: ref.id, updatedAt: now } : { repoCredentialId: ref.id, updatedAt: now };
-  if (standing) deps.db.update(organisationIdentities).set(values).where(eq(organisationIdentities.org, org)).run();
-  else deps.db.insert(organisationIdentities).values({ org, createdAt: now, ...values }).run();
+  const standing = organisationIdentity(deps.db, org);
+  const replaced = purpose === "packages-reader" ? standing?.packagesCredentialId ?? null : standing?.repoCredentialId ?? null;
+  const ref = await deps.store.seal({ kind: "pat", label, plaintext, fingerprint, subject: { kind: "organisation", id: org }, purpose });
   if (replaced) await deps.store.revoke(replaced, `replaced by ${ref.id} (${label})`);
-  writeAudit(deps.db, { actor: deps.actor(), action: "organisation.credential_recorded", targetKind: "organisation", targetId: org, detail: { column, credentialId: ref.id, fingerprint, replaced } });
-  return { fingerprint, recordedAt: now.toISOString() };
+  writeAudit(deps.db, { actor: deps.actor(), action: "organisation.credential_recorded", targetKind: "organisation", targetId: org, detail: { purpose, credentialId: ref.id, fingerprint, replaced } });
+  return { fingerprint, recordedAt: ref.recordedAt };
 }
 
 /** Records the organisation's packages reader after measuring that it reads the organisation's
@@ -99,7 +89,7 @@ export async function recordPackagesReader(deps: OrganisationDeps, org: string, 
       ? `the token does not read the packages of ${org} — a classic PAT needs the read:packages scope (granted: ${reading.scopes.join(", ") || "none"})`
       : `the token does not read the packages of ${org} — a fine-grained PAT needs the "Packages: Read" permission for this organisation`);
   }
-  return record(deps, org, "packagesCredentialId", token, `packages reader (${org})`);
+  return record(deps, org, "packages-reader", token, `packages reader (${org})`);
 }
 
 /** Records the organisation's repository PAT after measuring its scopes: a classic PAT carrying
@@ -111,19 +101,14 @@ export async function recordRepositoryPat(deps: OrganisationDeps, org: string, t
   if (!reading.classic) throw errValidation(`the token is fine-grained, which reports no scopes — the repository PAT of an organisation is a CLASSIC PAT with ${REPOSITORY_PAT_SCOPES.join(" + ")}`);
   const missing = missingConsumerPatScopes(reading.scopes);
   if (missing.length > 0) throw errValidation(`the token lacks ${missing.join(", ")} (granted: ${reading.scopes.join(", ") || "none"}) — the repository PAT of an organisation carries ${REPOSITORY_PAT_SCOPES.join(" + ")}`);
-  return record(deps, org, "repoCredentialId", token, `repository PAT (${org})`);
+  return record(deps, org, "repository-pat", token, `repository PAT (${org})`);
 }
 
-/** Forgets one credential of the organisation: the row is revoked, the column cleared, and the
- *  organisation's row removed when nothing is left in it. */
+/** Forgets one credential of the organisation: its newest row of that purpose is revoked. */
 export async function forgetOrganisationCredential(deps: OrganisationDeps, org: string, which: "packages-reader" | "repository-pat"): Promise<void> {
-  const column = which === "packages-reader" ? "packagesCredentialId" : "repoCredentialId";
-  const standing = deps.db.select().from(organisationIdentities).where(eq(organisationIdentities.org, org)).get();
-  if (!standing?.[column]) throw errNotFound(`organisation ${org} records no ${which}`);
-  const other = column === "packagesCredentialId" ? standing.repoCredentialId : standing.packagesCredentialId;
-  const cleared = column === "packagesCredentialId" ? { packagesCredentialId: null, updatedAt: new Date() } : { repoCredentialId: null, updatedAt: new Date() };
-  if (other) deps.db.update(organisationIdentities).set(cleared).where(eq(organisationIdentities.org, org)).run();
-  else deps.db.delete(organisationIdentities).where(eq(organisationIdentities.org, org)).run();
-  await deps.store.revoke(standing[column], `forgotten: ${which} of ${org}`);
-  writeAudit(deps.db, { actor: deps.actor(), action: "organisation.credential_forgotten", targetKind: "organisation", targetId: org, detail: { column, credentialId: standing[column] } });
+  const standing = organisationIdentity(deps.db, org);
+  const id = which === "packages-reader" ? standing?.packagesCredentialId : standing?.repoCredentialId;
+  if (!id) throw errNotFound(`organisation ${org} records no ${which}`);
+  await deps.store.revoke(id, `forgotten: ${which} of ${org}`);
+  writeAudit(deps.db, { actor: deps.actor(), action: "organisation.credential_forgotten", targetKind: "organisation", targetId: org, detail: { purpose: which, credentialId: id } });
 }

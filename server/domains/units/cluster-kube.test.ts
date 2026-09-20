@@ -73,7 +73,7 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
   async function seedSlaveCluster(db: DbHandle, store: CredentialStore, opts: { plane: unknown }): Promise<string> {
     // The server row MUST exist before sealing: credentials.serverId is an FK to servers.id.
     db.db.insert(servers).values({ id: "srv_s1", name: "s1", host: "s1.example", lanHost: "10.1.1.11", sshUser: "ops", role: "slave", status: "healthy" }).run();
-    const bearer = await store.seal({ kind: "kubeconfig", label: "s1-bearer", plaintext: Buffer.from("slave-admin-token"), fingerprint: "fp1", serverId: "srv_s1" });
+    const bearer = await store.seal({ kind: "kubeconfig", label: "s1-bearer", plaintext: Buffer.from("slave-admin-token"), fingerprint: "fp1", subject: { kind: "server", id: "srv_s1" }, purpose: "cluster-bearer"});
     // Substitute the just-sealed credential id into the plane if the fixture asked for it.
     const plane = typeof opts.plane === "object" && opts.plane !== null && "credentialIds" in opts.plane
       ? { ...(opts.plane as Record<string, unknown>), credentialIds: { clusterBearer: bearer.id } }
@@ -210,8 +210,8 @@ describe("domains/units/cluster-kube over the plane the deploy-slave run wrote",
     }).run();
     const ctx = bareStepCtx(db, store);
     const labels = credLabels("s1");
-    await sealTokenOnce(ctx, { kind: "kubeconfig", label: labels.bearer, serverId: "srv_slave1", token: EMIT_ARGOCD_TOKEN });
-    await sealTokenOnce(ctx, { kind: "other", label: labels.reviewer, serverId: "srv_slave1", token: EMIT_REVIEWER_TOKEN });
+    await sealTokenOnce(ctx, { kind: "kubeconfig", purpose: "cluster-bearer", label: labels.bearer, serverId: "srv_slave1", token: EMIT_ARGOCD_TOKEN });
+    await sealTokenOnce(ctx, { kind: "other", purpose: "reviewer-jwt", label: labels.reviewer, serverId: "srv_slave1", token: EMIT_REVIEWER_TOKEN });
     await registerStep(statedTarget("srv_slave1", PARAMS.domain, "prod")).run(ctx);
 
     const row = db.db.select().from(clusters).where(eq(clusters.domain, PARAMS.domain)).get()!;

@@ -16,8 +16,6 @@ import { join } from "node:path";
 // ordinals survives a full reset, so the restart is coherent.
 const WIPE_ORDER = [
   "events", "steps", "run_locks", "runs",
-  // organisation_identities references credentials (its two sealed tokens), so it goes first.
-  "organisation_identities",
   "credentials", "tenant_apps", "tenants", "apps", "clusters", "servers",
   // operator_keys references nothing and nothing references it, so its place in the order is free.
   // It is WIPED and not kept: a reset takes the manager back to a fresh install, and a list of

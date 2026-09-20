@@ -1,3 +1,4 @@
+import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import type { Hono } from "hono";
@@ -6,7 +7,6 @@ import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
-import { organisationIdentities } from "../../db/schema/organisations.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
@@ -174,9 +174,9 @@ const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", ch
 /** Records an organisation's identity with REAL sealed rows of the store under test: its packages
  *  reader always, its repository PAT where `repoPat` is given (the App does not reach it). */
 async function recordOrganisation(store: CredentialStore, org: string, o: { repoPat?: string } = {}): Promise<void> {
-  const packages = await store.seal({ kind: "pat", label: `packages reader (${org})`, plaintext: Buffer.from(`ghp_packages_${org}`), fingerprint: `sha256:pkg-${org}` });
-  const repo = o.repoPat ? await store.seal({ kind: "pat", label: `repository PAT (${org})`, plaintext: Buffer.from(o.repoPat), fingerprint: `sha256:pat-${org}` }) : null;
-  db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, org)).run(); db.db.insert(organisationIdentities).values({ org, packagesCredentialId: packages.id, repoCredentialId: repo?.id ?? null }).run();
+  dropCredentialRows(db.db, { kind: "organisation", id: org });
+  await store.seal({ kind: "pat", label: `packages reader (${org})`, plaintext: Buffer.from(`ghp_packages_${org}`), fingerprint: `sha256:pkg-${org}`, subject: { kind: "organisation", id: org }, purpose: "packages-reader" });
+  if (o.repoPat) await store.seal({ kind: "pat", label: `repository PAT (${org})`, plaintext: Buffer.from(o.repoPat), fingerprint: `sha256:pat-${org}`, subject: { kind: "organisation", id: org }, purpose: "repository-pat" });
 }
 
 describe("consumer API", () => {
@@ -230,7 +230,7 @@ describe("consumer API", () => {
     const sealed = (await store.list({ kind: "github-app" })).find((c) => c.id === params.repoCredentialId);
     expect([sealed?.label, sealed?.fingerprint]).toEqual(["GitHub App (acme)", githubApp.identityFingerprint()]);
     // A repository outside the installation whose organisation records no repository PAT is refused naming both halves.
-    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
     await recordOrganisation(store, "x");
     const outside = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
     expect(outside.status).toBe(400);
@@ -244,7 +244,7 @@ describe("consumer API", () => {
     expect(row?.label).toBe("repository PAT (acme)");
     expect((await store.open(second.repoCredentialId, { purpose: "test:assert-sealed" })).toString("utf8")).toBe(RAW_PAT);
     // An organisation recording nothing at all, not reached by the App, is refused naming the repository PAT and the page.
-    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
     const none = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, consumerName: "acme3" }) });
     expect(none.status).toBe(400);
     expect(await none.text()).toContain("organisation x records no repository PAT");
@@ -264,7 +264,7 @@ describe("consumer API", () => {
     expect(params.repoPat).toBeUndefined();
     expect(runRow.params_json).not.toContain(RAW_PAT);
     expect(runRow.params_json).not.toContain("github_pat_stray");
-    expect((await store.list({ kind: "pat" })).map((c) => c.label).sort()).toEqual(["packages reader (x)", "repository PAT (acme)", "repository PAT (x)"]);
+    expect((await store.list({ subject: { kind: "unit", id: "acme" } })).map((c) => c.label)).toEqual(["repository PAT (acme)"]); // the stray value sealed nothing
   });
 
   it("lists onboarded consumers with their cluster", async () => {

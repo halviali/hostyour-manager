@@ -83,11 +83,11 @@ export async function resolveRepoIdentity(input: { repoURL: string; githubApp?: 
 export async function sealRepoIdentity(store: Pick<CredentialStore, "seal">, identity: RepoIdentity, label: string, githubApp?: Pick<GitHubApp, "identityFingerprint">): Promise<string> {
   if (identity.kind === "github-app") {
     if (!githubApp) throw errValidation("a github-app identity was chosen with no GitHub App to seal it under");
-    return (await store.seal({ kind: "github-app", label: `GitHub App (${label})`, plaintext: Buffer.alloc(0), fingerprint: githubApp.identityFingerprint() })).id;
+    return (await store.seal({ kind: "github-app", label: `GitHub App (${label})`, plaintext: Buffer.alloc(0), fingerprint: githubApp.identityFingerprint(), subject: { kind: "unit", id: label }, purpose: "repository-identity" })).id;
   }
   const plaintext = Buffer.from(identity.token, "utf8");
   const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
-  return (await store.seal({ kind: "pat", label: `repository PAT (${label})`, plaintext, fingerprint })).id;
+  return (await store.seal({ kind: "pat", label: `repository PAT (${label})`, plaintext, fingerprint, subject: { kind: "unit", id: label }, purpose: "repository-identity" })).id;
 }
 
 /** The packages reader of a unit's organisation, by the owner of its repository URL — what the

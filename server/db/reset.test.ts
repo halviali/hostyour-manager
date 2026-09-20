@@ -12,7 +12,7 @@ function seedClusters(db: DbHandle): void {
   const s = db.sqlite;
   s.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready')").run();
   s.prepare("INSERT INTO clusters (id, server_id, stage, domain, status) VALUES ('cl_s','srv_s','prod','s1.example.com','active')").run();
-  s.prepare("INSERT INTO credentials (id, kind, label, server_id, encrypted_blob, fingerprint) VALUES ('cred_s','ssh_key','k','srv_s','plain:v0:AA==','fp')").run();
+  s.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES ('cred_s','ssh_key','k','server','srv_s','ssh-key','plain:v0:AA==','fp')").run();
   s.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('run_1','deploy-slave','server','srv_s','{}','{}','succeeded','op_system')").run();
   s.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, status) VALUES ('st_1','run_1',0,'x','X','ok')").run();
   s.prepare("INSERT INTO events (id, run_id, stream, seq, text) VALUES ('ev_1','run_1','stdout',0,'hi')").run();

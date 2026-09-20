@@ -9,19 +9,28 @@ import { credId } from "../kernel/ids.ts";
 import { now } from "../kernel/clock.ts";
 import { currentActor } from "../kernel/actor.ts";
 import { AppError, errNotFound, errNotConfigured } from "../kernel/errors.ts";
-import type { CredentialKind } from "../../shared/enums.ts";
+import type { CredentialKind, CredentialPurpose, CredentialSubjectKind } from "../../shared/enums.ts";
 import type { VaultKv } from "../adapters/vault/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
 
 export type KeystoreMode = "plaintext" | "passphrase" | "keyfile" | "vault";
+
+/** Whose a credential is (hostyour-manager#225): the server's row id, the organisation's login, the unit's name. */
+export interface CredentialSubject {
+  kind: CredentialSubjectKind;
+  id: string;
+}
 
 export interface CredentialRef {
   id: string;
   kind: CredentialKind;
   label: string;
   fingerprint: string;
-  serverId?: string;
+  subject: CredentialSubject;
+  purpose: CredentialPurpose;
   publicKey?: string;
+  /** When the row was sealed, ISO — what a page shows beside the fingerprint. */
+  recordedAt: string;
 }
 
 export interface UseContext {
@@ -38,7 +47,8 @@ export interface SealInput {
   /** A public correlator of the value — for `github-app`, the App identity's own
    *  (GitHubApp.identityFingerprint), since there is no value to fingerprint. */
   fingerprint: string;
-  serverId?: string;
+  subject: CredentialSubject;
+  purpose: CredentialPurpose;
   publicKey?: string;
 }
 
@@ -64,8 +74,10 @@ function toRef(row: typeof credentials.$inferSelect): CredentialRef {
     kind: row.kind,
     label: row.label,
     fingerprint: row.fingerprint,
-    ...(row.serverId ? { serverId: row.serverId } : {}),
+    subject: { kind: row.subjectKind, id: row.subjectId },
+    purpose: row.purpose,
     ...(row.publicKey ? { publicKey: row.publicKey } : {}),
+    recordedAt: row.createdAt.toISOString(),
   };
 }
 
@@ -96,13 +108,43 @@ export function holdsManagerKey(db: Db, serverId: string): boolean {
     .select({ id: credentials.id })
     .from(credentials)
     .where(and(
-      eq(credentials.serverId, serverId),
-      eq(credentials.kind, "ssh_key"),
+      eq(credentials.subjectKind, "server"),
+      eq(credentials.subjectId, serverId),
+      eq(credentials.purpose, "ssh-key"),
       isNull(credentials.revokedAt),
       isNull(credentials.rotatedAt),
     ))
     .get();
   return row !== undefined;
+}
+
+/**
+ * The identity of an organisation, as its standing credential rows say (hostyour-manager#225): the
+ * id of its packages reader and of its repository PAT, each the newest unrevoked row of that
+ * purpose, null where none stands. The one read behind every identity rule (repo-identity.ts),
+ * synchronous like holdsManagerKey and for the same reason — presence is metadata SQLite keeps in
+ * every keystore mode, and a planner asks it before anyone approves.
+ */
+export function organisationIdentity(db: Db, org: string): { packagesCredentialId: string | null; repoCredentialId: string | null } | null {
+  const rows = db
+    .select({ id: credentials.id, purpose: credentials.purpose })
+    .from(credentials)
+    .where(and(eq(credentials.subjectKind, "organisation"), eq(credentials.subjectId, org), isNull(credentials.revokedAt)))
+    .orderBy(credentials.createdAt, credentials.id)
+    .all();
+  if (rows.length === 0) return null;
+  const newest = (purpose: CredentialPurpose): string | null => rows.filter((r) => r.purpose === purpose).at(-1)?.id ?? null;
+  return { packagesCredentialId: newest("packages-reader"), repoCredentialId: newest("repository-pat") };
+}
+
+/** Every organisation with a standing credential row, for the Organisations page. */
+export function organisationsWithIdentity(db: Db): string[] {
+  const rows = db
+    .selectDistinct({ org: credentials.subjectId })
+    .from(credentials)
+    .where(and(eq(credentials.subjectKind, "organisation"), isNull(credentials.revokedAt)))
+    .all();
+  return rows.map((r) => r.org).sort();
 }
 
 /**
@@ -168,6 +210,7 @@ export class CredentialStore {
    *  credential seals no value: its row is the marker, and open() mints the token. */
   async seal(input: SealInput): Promise<CredentialRef> {
     const id = credId();
+    const sealedAt = new Date(now());
     let blob: string;
     if (input.kind === "github-app") {
       blob = GITHUB_APP_BLOB;
@@ -185,7 +228,10 @@ export class CredentialStore {
         id,
         kind: input.kind,
         label: input.label,
-        serverId: input.serverId ?? null,
+        subjectKind: input.subject.kind,
+        subjectId: input.subject.id,
+        purpose: input.purpose,
+        createdAt: sealedAt,
         encryptedBlob: blob,
         fingerprint: input.fingerprint,
         publicKey: input.publicKey ?? null,
@@ -199,16 +245,18 @@ export class CredentialStore {
       action: "credential.created",
       targetKind: "credential",
       targetId: id,
-      detail: { kind: input.kind, fingerprint: input.fingerprint },
+      detail: { kind: input.kind, fingerprint: input.fingerprint, subject: input.subject, purpose: input.purpose },
     });
-    this.logger.debug({ id, kind: input.kind, fingerprint: input.fingerprint }, "credential sealed");
+    this.logger.debug({ id, kind: input.kind, fingerprint: input.fingerprint, subject: input.subject, purpose: input.purpose }, "credential sealed");
     return {
       id,
       kind: input.kind,
       label: input.label,
       fingerprint: input.fingerprint,
-      ...(input.serverId ? { serverId: input.serverId } : {}),
+      subject: input.subject,
+      purpose: input.purpose,
       ...(input.publicKey ? { publicKey: input.publicKey } : {}),
+      recordedAt: sealedAt.toISOString(),
     };
   }
 
@@ -267,7 +315,8 @@ export class CredentialStore {
       label: old.label,
       plaintext: next.plaintext,
       fingerprint: next.fingerprint,
-      ...(old.serverId ? { serverId: old.serverId } : {}),
+      subject: { kind: old.subjectKind, id: old.subjectId },
+      purpose: old.purpose,
       ...(next.publicKey ? { publicKey: next.publicKey } : {}),
     });
     this.db.update(credentials).set({ rotatedAt: new Date(now()) }).where(eq(credentials.id, oldId)).run();
@@ -331,9 +380,10 @@ export class CredentialStore {
    *  `excludeRotated` additionally drops superseded rows (rotatedAt set) so "newest ACTIVE key" is
    *  exact — off by default to keep every existing caller's behavior unchanged (they either count
    *  presence or run their own rotate bookkeeping over the rotated rows). */
-  async list(filter?: { serverId?: string; kind?: CredentialKind; excludeRotated?: boolean }): Promise<CredentialRef[]> {
+  async list(filter?: { subject?: CredentialSubject; purpose?: CredentialPurpose; kind?: CredentialKind; excludeRotated?: boolean }): Promise<CredentialRef[]> {
     const conds = [isNull(credentials.revokedAt)];
-    if (filter?.serverId) conds.push(eq(credentials.serverId, filter.serverId));
+    if (filter?.subject) conds.push(eq(credentials.subjectKind, filter.subject.kind), eq(credentials.subjectId, filter.subject.id));
+    if (filter?.purpose) conds.push(eq(credentials.purpose, filter.purpose));
     if (filter?.kind) conds.push(eq(credentials.kind, filter.kind));
     if (filter?.excludeRotated) conds.push(isNull(credentials.rotatedAt));
     const rows = this.db.select().from(credentials).where(and(...conds)).orderBy(credentials.createdAt, credentials.id).all();

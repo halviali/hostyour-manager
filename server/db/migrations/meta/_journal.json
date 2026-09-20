@@ -22,6 +22,20 @@
       "when": 1789929638694,
       "tag": "0002_apps-updated-at",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789930965583,
+      "tag": "0003_credential-subject-purpose",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789931011985,
+      "tag": "0004_credential-subject-required",
+      "breakpoints": true
     }
   ]
 }

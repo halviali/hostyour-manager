@@ -248,9 +248,9 @@ export function credLabels(name: string): { bearer: string; reviewer: string } {
  *                so later remove-/rebuild-slave Runs still find the newest (list order, the idiom
  *                below) and provenance stays on the superseded row;
  *   - seal     — no row for this kind+label yet ⇒ a fresh credential. */
-export async function sealTokenOnce(ctx: StepCtx, o: { kind: "kubeconfig" | "other"; label: string; serverId: string; token: string }): Promise<string> {
+export async function sealTokenOnce(ctx: StepCtx, o: { kind: "kubeconfig" | "other"; purpose: "cluster-bearer" | "reviewer-jwt"; label: string; serverId: string; token: string }): Promise<string> {
   const fingerprint = "sha256:" + createHash("sha256").update(o.token, "utf8").digest("hex");
-  const existing = await ctx.creds.list({ serverId: o.serverId, kind: o.kind });
+  const existing = await ctx.creds.list({ subject: { kind: "server", id: o.serverId }, purpose: o.purpose });
   const sameLabel = existing.filter((c) => c.label === o.label);
   const match = sameLabel.find((c) => c.fingerprint === fingerprint);
   if (match) {
@@ -263,7 +263,7 @@ export async function sealTokenOnce(ctx: StepCtx, o: { kind: "kubeconfig" | "oth
     ctx.log("meta", `credential "${o.label}" carries a changed token — rotated in place (${current.id} → ${ref.id})`);
     return ref.id;
   }
-  const ref = await ctx.creds.seal({ kind: o.kind, label: o.label, plaintext: Buffer.from(o.token, "utf8"), fingerprint, serverId: o.serverId });
+  const ref = await ctx.creds.seal({ kind: o.kind, label: o.label, plaintext: Buffer.from(o.token, "utf8"), fingerprint, subject: { kind: "server", id: o.serverId }, purpose: o.purpose });
   ctx.log("meta", `credential "${o.label}" sealed (${ref.id})`);
   return ref.id;
 }
@@ -272,8 +272,8 @@ export async function sealTokenOnce(ctx: StepCtx, o: { kind: "kubeconfig" | "oth
  *  credential lookup here uses — a rebuilt slave sealed a fresh row; the last one wins). Step 7's resolver: the
  *  credential store is the sanctioned cross-step channel for the step-4 IDs (a step never
  *  reads another step's checkpoint row — the runs schema is executor-owned). */
-export async function newestCredId(ctx: StepCtx, o: { serverId: string; kind: "kubeconfig" | "other"; label: string }): Promise<string | undefined> {
-  const list = await ctx.creds.list({ serverId: o.serverId, kind: o.kind });
+export async function newestCredId(ctx: StepCtx, o: { serverId: string; purpose: "cluster-bearer" | "reviewer-jwt"; label: string }): Promise<string | undefined> {
+  const list = await ctx.creds.list({ subject: { kind: "server", id: o.serverId }, purpose: o.purpose });
   return list.filter((c) => c.label === o.label).at(-1)?.id;
 }
 

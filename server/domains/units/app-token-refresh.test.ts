@@ -23,8 +23,8 @@ function fakeStore(minted: { value: string }): { store: Pick<CredentialStore, "l
   const store: Pick<CredentialStore, "list" | "open"> = {
     list: async (filter) => {
       const all = [
-        { id: "cred_app", kind: "github-app" as const, label: "GitHub App (acme-apps)", fingerprint: "sha256:app" },
-        { id: "cred_pat", kind: "pat" as const, label: "consumer repo PAT (shop)", fingerprint: "sha256:pat" },
+        { id: "cred_app", kind: "github-app" as const, label: "GitHub App (acme-apps)", fingerprint: "sha256:app", subject: { kind: "unit" as const, id: "acme-apps" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "cred_pat", kind: "pat" as const, label: "consumer repo PAT (shop)", fingerprint: "sha256:pat", subject: { kind: "unit" as const, id: "shop" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" },
       ];
       return all.filter((c) => !filter?.kind || c.kind === filter.kind);
     },

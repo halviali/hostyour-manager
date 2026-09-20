@@ -58,7 +58,7 @@ describe("inventory server CRUD", () => {
     // and never by this surface.
     await store.seal({
       kind: "ssh_key", label: `SSH key for ${view.name}`, plaintext: Buffer.from("private"),
-      fingerprint: "SHA256:managerkey", serverId: view.id, publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
+      fingerprint: "SHA256:managerkey", subject: { kind: "server", id: view.id }, purpose: "ssh-key", publicKey: "ssh-ed25519 AAAAkey hostyour:s5",
     });
     expect((await serverCredFlags(store)).get(view.id)?.hasKey).toBe(true);
 
@@ -76,7 +76,7 @@ describe("inventory server CRUD", () => {
     expect(await purgeBootstrapPassword(store, view.id)).toBe(false);
     await store.seal({
       kind: "other", label: `password for ${view.name}`, plaintext: Buffer.from("shared-secret-xyz"),
-      fingerprint: "bootstrap-password", serverId: view.id,
+      fingerprint: "bootstrap-password", subject: { kind: "server", id: view.id }, purpose: "bootstrap-password",
     });
     expect((await serverCredFlags(store)).get(view.id)?.hasPassword).toBe(true);
     expect(await purgeBootstrapPassword(store, view.id)).toBe(true);

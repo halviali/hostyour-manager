@@ -5,7 +5,7 @@
 import { PLATFORM_VALUES_COMMON } from "../../../shared/cluster-values.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import type { Db } from "../../db/client.ts";
-import { organisationIdentities } from "../../db/schema/organisations.ts";
+import { seedCredentialRow } from "../../security/store.fixture.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
@@ -102,15 +102,17 @@ export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string
   };
 }
 
-/** The organisation identities a tenant test stands on (#220): the App's organisation ORG records
- *  its packages reader (the App reaches every repository of it), and `acme` — the owner of the
- *  test catalog's build repositories, which the App does not reach — records a packages reader and
- *  a repository PAT. The credential ids name no row; a test that opens them fakes the store. */
+/** The organisation identities a tenant test stands on (#220, #225): the App's organisation ORG
+ *  records its packages reader (the App reaches every repository of it); `acme` — the owner of the
+ *  test catalog's build repositories, which the App does not reach — and `x`, the owner of the
+ *  consumer tests' repository, record a packages reader and a repository PAT. Rows of the store
+ *  with stable ids, opening to `token-of-<id>` under a real store. */
 export function recordTestOrganisations(db: Db): void {
-  db.insert(organisationIdentities).values([
-    { org: ORG, packagesCredentialId: "cred_pkg_org", repoCredentialId: null },
-    { org: "acme", packagesCredentialId: "cred_pkg_acme", repoCredentialId: "cred_pat_acme" },
-    // `x`, the owner of the consumer tests' repository (onboard.fixture.ts).
-    { org: "x", packagesCredentialId: "cred_pkg_x", repoCredentialId: "cred_pat_x" },
-  ]).run();
+  const pat = (id: string, org: string, purpose: "packages-reader" | "repository-pat"): void =>
+    seedCredentialRow(db, { id, kind: "pat", label: `${purpose === "packages-reader" ? "packages reader" : "repository PAT"} (${org})`, subject: { kind: "organisation", id: org }, purpose });
+  pat("cred_pkg_org", ORG, "packages-reader");
+  pat("cred_pkg_acme", "acme", "packages-reader");
+  pat("cred_pat_acme", "acme", "repository-pat");
+  pat("cred_pkg_x", "x", "packages-reader");
+  pat("cred_pat_x", "x", "repository-pat");
 }

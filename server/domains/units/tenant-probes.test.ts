@@ -1,8 +1,7 @@
+import { seedCredentialRow, dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
-import { organisationIdentities } from "../../db/schema/organisations.ts";
-import { eq } from "drizzle-orm";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
@@ -71,14 +70,14 @@ describe("probeBuildUnit", () => {
   // The organisation's identity, judged (#220): the App where it reaches, the organisation's
   // repository PAT else, a refusal naming the organisation where it records nothing.
   it("judges an unregistered unit's identity: the App where it reaches, the organisation's repository PAT else, a refusal where the organisation records nothing", async () => {
-    db.db.insert(organisationIdentities).values({ org: "example-org", packagesCredentialId: "cred_pkg", repoCredentialId: null }).run();
+    seedCredentialRow(db.db, { id: "cred_pkg", kind: "pat", label: "packages reader (example-org)", subject: { kind: "organisation", id: "example-org" }, purpose: "packages-reader" });
     const githubApp = new FakeGitHubApp();
     expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "reached by the platform's GitHub App; its packages read with the organisation's packages reader" }]);
     githubApp.reachable.set("example-org/example-jobs", false);
     expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("records no repository PAT") }]);
-    db.db.update(organisationIdentities).set({ repoCredentialId: "cred_pat" }).where(eq(organisationIdentities.org, "example-org")).run();
+    seedCredentialRow(db.db, { id: "cred_pat", kind: "pat", label: "repository PAT (example-org)", subject: { kind: "organisation", id: "example-org" }, purpose: "repository-pat" });
     expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "its organisation's repository PAT; its packages read with the organisation's packages reader" }]);
-    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "example-org")).run();
+    dropCredentialRows(db.db, { kind: "organisation", id: "example-org" });
     expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("organisation example-org records no repository PAT") }]);
   });
   it("a registered unit's stored credential reads the hooks; without admin:repo_hook it fails by name", async () => {

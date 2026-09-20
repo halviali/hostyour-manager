@@ -215,7 +215,7 @@ async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, 
  *  `bare` or `undeployed` is that run's own account of the machine, and this seed does not overwrite
  *  it. */
 async function stateMasterKey(db: Db, creds: CredentialStore, masterId: string, logger: Logger): Promise<void> {
-  const sealed = (await creds.list({ serverId: masterId, kind: "ssh_key", excludeRotated: true })).length > 0;
+  const sealed = (await creds.list({ subject: { kind: "server", id: masterId }, purpose: "ssh-key", excludeRotated: true })).length > 0;
   const row = db.select().from(servers).where(eq(servers.id, masterId)).get();
   if (!row) return;
   const want = sealed ? "healthy" : "degraded";
@@ -255,7 +255,7 @@ async function pinAndSeal(db: Db, creds: CredentialStore, masterId: string, m: M
 
   // ---- 3. Seal (or rotate) the self-SSH key so ctx.ssh(master) works.
   // excludeRotated ⇒ `current` is the newest ACTIVE key (a rotated-out key is never "current").
-  const existing = await creds.list({ serverId: master.id, kind: "ssh_key", excludeRotated: true });
+  const existing = await creds.list({ subject: { kind: "server", id: master.id }, purpose: "ssh-key", excludeRotated: true });
   const current = existing[existing.length - 1]; // newest active (createdAt order)
 
   if (!m.keyFile) {
@@ -319,7 +319,8 @@ async function pinAndSeal(db: Db, creds: CredentialStore, masterId: string, m: M
       label: MASTER_KEY_LABEL,
       plaintext: priv, // seal() memzeroes this buffer
       fingerprint: pub.fingerprint,
-      serverId: master.id,
+      subject: { kind: "server", id: master.id },
+      purpose: "ssh-key",
       publicKey: pub.publicLine,
     });
     logger.info({ id: master.id, fingerprint: pub.fingerprint }, "sealed the master self-SSH key — the Manager can now SSH to its own host for deploy-slave");

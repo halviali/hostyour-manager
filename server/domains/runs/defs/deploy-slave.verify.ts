@@ -333,8 +333,8 @@ export function registerStep(target: SlaveTarget): Step {
       // The durable credential IDs step 4 sealed — resolved from the credential store by
       // kind+label (sealTokenOnce guarantees the newest matching row IS step 4's).
       const labels = credLabels(name);
-      const clusterBearer = await newestCredId(ctx, { serverId: target.serverId, kind: "kubeconfig", label: labels.bearer });
-      const reviewerJwt = await newestCredId(ctx, { serverId: target.serverId, kind: "other", label: labels.reviewer });
+      const clusterBearer = await newestCredId(ctx, { serverId: target.serverId, purpose: "cluster-bearer", label: labels.bearer });
+      const reviewerJwt = await newestCredId(ctx, { serverId: target.serverId, purpose: "reviewer-jwt", label: labels.reviewer });
       if (!clusterBearer || !reviewerJwt) {
         throw errValidation(`the sealed ${name} credentials are missing from the store — create-mgmt must run first`);
       }

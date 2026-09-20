@@ -81,7 +81,7 @@ export async function openDoor(ctx: StepCtx, secretName: string): Promise<SshSes
   // excludeRotated, because this is the same question ctx.ssh() answers when it picks a key: a
   // rotated-out credential is one the machine has already stopped taking, and counting it would send
   // the door down the key path to be refused.
-  const held = await ctx.creds.list({ serverId: sid, kind: "ssh_key", excludeRotated: true });
+  const held = await ctx.creds.list({ subject: { kind: "server", id: sid }, purpose: "ssh-key", excludeRotated: true });
   if (held.length === 0) {
     ctx.log("meta", `This manager holds no key for ${server.name}, so the machine account's password opens the session.`);
     return ctx.openPasswordSession(secretName);
@@ -170,7 +170,7 @@ export function generateKeyStep(input: FirstContactInput): Step {
     title: "Hold a dedicated SSH key for this machine",
     run: async (ctx) => {
       const server = loadServer(ctx.db, input.serverId);
-      const held = await ctx.creds.list({ serverId: input.serverId, kind: "ssh_key", excludeRotated: true });
+      const held = await ctx.creds.list({ subject: { kind: "server", id: input.serverId }, purpose: "ssh-key", excludeRotated: true });
       const reuse = held[held.length - 1];
       if (reuse) {
         ctx.log("meta", `This manager already holds an unrotated key for ${server.name} (${reuse.fingerprint}), which is the one every session to it authenticates with, so no key is generated.`);
@@ -183,7 +183,8 @@ export function generateKeyStep(input: FirstContactInput): Step {
         label: `SSH key for ${server.name}`,
         plaintext: key.privateOpenSsh,
         fingerprint: key.fingerprint,
-        serverId: input.serverId,
+        subject: { kind: "server", id: input.serverId },
+        purpose: "ssh-key",
         publicKey: key.publicLine,
       });
       ctx.log("meta", `Generated a key for ${server.name} alone: ${key.fingerprint}.`);
@@ -231,7 +232,7 @@ export function installKeyStep(input: FirstContactInput, options: { arm: boolean
     title: "Install this manager's key on the machine",
     run: async (ctx) => {
       const server = loadServer(ctx.db, input.serverId);
-      const held = await ctx.creds.list({ serverId: input.serverId, kind: "ssh_key", excludeRotated: true });
+      const held = await ctx.creds.list({ subject: { kind: "server", id: input.serverId }, purpose: "ssh-key", excludeRotated: true });
       const pub = held[held.length - 1]?.publicKey;
       if (!pub) throw new AppError("INTERNAL", `no unrotated ssh_key credential for ${server.name} to install — generate-key runs before this step`);
       const session = await openDoor(ctx, input.secretName);

@@ -3,6 +3,7 @@
 // materialized them again — read off the ExternalSecrets' refreshTime — before the release is
 // dispatched. Kept apart from onboard.run.test.ts like the other per-step files; the step is built
 // against the shared fixture's port set with only the build plane's cluster reader varied.
+import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
@@ -12,8 +13,6 @@ import { BUILD_TARGET_SECRETS } from "./app-token-refresh.ts";
 import { ports, buildSecretRows, FakeBuildPlaneClusterReader, FakeSeeder, BUILD_SECRETS_MATERIALIZED_AT } from "./onboard.fixture.ts";
 import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
-import { organisationIdentities } from "../../db/schema/organisations.ts";
-import { eq } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
@@ -132,7 +131,7 @@ describe("onboard refresh-repo-pat step", () => {
 // a routed scope refuses naming the organisation and the scopes.
 describe("onboard seed-repo-pat step — the packages reader where a scope is routed", () => {
   it("seeds an empty packages value for a repository routing no scope, and refuses one routing a scope where the organisation records no reader", async () => {
-    db.db.delete(organisationIdentities).where(eq(organisationIdentities.org, "x")).run();
+    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
     const prt = ports();
     const logs: string[] = [];
     await seedRepoPatStep(prt, params()).run(ctx(logs, "ghs_repo"));

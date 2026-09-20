@@ -180,7 +180,7 @@ export const removeManagerKeyCleanup: Cleanup = {
     const r = await remoteScript(ctx, session, "leave-manager-key", removeManagerKeyScript(server.name), { timeoutMs: 60_000 });
     const after = await recordAuthorizedKeysReading(ctx, session, serverId);
     if (r.code !== 0) throw errValidation(`this manager's key could not be taken off ${server.name} (exit ${r.code}) — see the run log`);
-    const held = await ctx.creds.list({ serverId, kind: "ssh_key", excludeRotated: true });
+    const held = await ctx.creds.list({ subject: { kind: "server", id: serverId }, purpose: "ssh-key", excludeRotated: true });
     for (const key of held) await ctx.creds.purge(key.id);
     localTx(ctx, (tx) => tx.update(servers).set({ status: "bare", adoptedAt: null }).where(eq(servers.id, serverId)).run());
     ctx.checkpoint({ keysPurged: held.length, authorizedKeysState: after?.state ?? null });

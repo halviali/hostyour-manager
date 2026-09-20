@@ -88,7 +88,7 @@ export function requireGitHubApp(ports: TenantOnboardPorts): GitHubApp {
  *  The row carries the App identity's fingerprint, so an audit names which App acted. */
 async function sealAppCredential(ctx: StepCtx, app: GitHubApp, unit: string, runtime: TenantAppsRepoRuntime): Promise<string> {
   if (runtime.appsRepoCredentialId) return runtime.appsRepoCredentialId;
-  const ref = await ctx.creds.seal({ kind: "github-app", label: `GitHub App (${unit})`, plaintext: Buffer.alloc(0), fingerprint: app.identityFingerprint() });
+  const ref = await ctx.creds.seal({ kind: "github-app", label: `GitHub App (${unit})`, plaintext: Buffer.alloc(0), fingerprint: app.identityFingerprint(), subject: { kind: "unit", id: unit }, purpose: "repository-identity" });
   runtime.appsRepoCredentialId = ref.id;
   return ref.id;
 }

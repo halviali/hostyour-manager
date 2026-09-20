@@ -53,20 +53,68 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
     const standing = new Database(file);
     migrate(drizzle(standing), { migrationsFolder: baselineOnly });
     expect(standing.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]);
+    // The rows a standing installation carries, in every shape 0003 derives an owner and a purpose from.
+    standing.prepare("INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'digi1')").run();
+    const cred = standing.prepare("INSERT INTO credentials (id, kind, label, server_id, encrypted_blob, fingerprint) VALUES (?,?,?,?,'plain:v0:eA==',?)");
+    cred.run("cred_key", "ssh_key", "SSH key for s1", "srv_1", "SHA256:key");
+    cred.run("cred_pw", "other", "password for s1", "srv_1", "bootstrap-password");
+    cred.run("cred_jwt", "other", "s1 reviewer JWT", "srv_1", "sha256:jwt");
+    cred.run("cred_bearer", "kubeconfig", "s1 cluster bearer (argocd-manager)", "srv_1", "sha256:bearer");
+    cred.run("cred_pat_unit", "pat", "repository PAT (acme)", null, "sha256:unit");
+    cred.run("cred_app_unit", "github-app", "github-app (post)", null, "sha256:app");
     standing.close();
-    // Opened by the Manager: the migrator applies 0001 alone.
+    // Opened by the Manager: the migrator applies 0001 onward.
     const h = openDb(file);
     handles.push(h);
-    expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([{ name: "organisation_identities" }]);
+    expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]); // 0004 dropped it again
     expect(h.sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get()).toEqual({ n: journal.entries.length });
     expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('apps') WHERE name = 'updated_at'").all()).toEqual([{ name: "updated_at" }]); // 0002
+    expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('credentials') WHERE name = 'server_id'").all()).toEqual([]); // 0004
+    expect(h.sqlite.prepare("SELECT id, subject_kind, subject_id, purpose FROM credentials ORDER BY id").all()).toEqual([
+      { id: "cred_app_unit", subject_kind: "unit", subject_id: "post", purpose: "repository-identity" },
+      { id: "cred_bearer", subject_kind: "server", subject_id: "srv_1", purpose: "cluster-bearer" },
+      { id: "cred_jwt", subject_kind: "server", subject_id: "srv_1", purpose: "reviewer-jwt" },
+      { id: "cred_key", subject_kind: "server", subject_id: "srv_1", purpose: "ssh-key" },
+      { id: "cred_pat_unit", subject_kind: "unit", subject_id: "acme", purpose: "repository-identity" },
+      { id: "cred_pw", subject_kind: "server", subject_id: "srv_1", purpose: "bootstrap-password" },
+    ]);
+    expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+  });
+
+  // An installation that stood on 0001 recorded an organisation's identity as ids in a table of its
+  // own; 0003 turns those ids into the owner and purpose of the rows themselves (#225).
+  it("carries an organisation identity recorded under 0001 into the rows' own owner and purpose", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
+    dirs.push(dir);
+    const upTo0002 = join(dir, "up-to-0002");
+    mkdirSync(join(upTo0002, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
+    writeFileSync(join(upTo0002, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 3) }));
+    for (const e of journal.entries.slice(0, 3)) copyFileSync(join(MIGRATIONS_DIR, `${e.tag}.sql`), join(upTo0002, `${e.tag}.sql`));
+    const file = join(dir, "manager.db");
+    const standing = new Database(file);
+    migrate(drizzle(standing), { migrationsFolder: upTo0002 });
+    const cred = standing.prepare("INSERT INTO credentials (id, kind, label, encrypted_blob, fingerprint) VALUES (?,'pat',?,'plain:v0:eA==',?)");
+    cred.run("cred_pkg", "packages reader (digitaplatform)", "sha256:pkg");
+    cred.run("cred_pat", "repository PAT (digitaplatform)", "sha256:pat");
+    cred.run("cred_pkg_only", "packages reader (acme-org)", "sha256:pkg2");
+    standing.prepare("INSERT INTO organisation_identities (org, packages_credential_id, repo_credential_id) VALUES ('digitaplatform', 'cred_pkg', 'cred_pat'), ('acme-org', 'cred_pkg_only', NULL)").run();
+    standing.close();
+    const h = openDb(file);
+    handles.push(h);
+    expect(h.sqlite.prepare("SELECT id, subject_kind, subject_id, purpose FROM credentials ORDER BY id").all()).toEqual([
+      { id: "cred_pat", subject_kind: "organisation", subject_id: "digitaplatform", purpose: "repository-pat" },
+      { id: "cred_pkg", subject_kind: "organisation", subject_id: "digitaplatform", purpose: "packages-reader" },
+      { id: "cred_pkg_only", subject_kind: "organisation", subject_id: "acme-org", purpose: "packages-reader" },
+    ]);
+    expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]);
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });
 

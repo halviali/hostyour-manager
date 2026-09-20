@@ -564,7 +564,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   // from a stranger's (domains/runs/operator-keys-probe.ts classifies by fingerprint and never by the
   // marker comment). A credential sealed under a made-up fingerprint would make the run's own key read
   // as foreign on the machine it was just installed on.
-  await store.seal({ kind: "ssh_key", label: "slave key", plaintext: Buffer.from("fake-slave-key"), fingerprint: fingerprintPublicKey(SLAVE_PUBLIC_KEY), serverId: SLAVE_ID, publicKey: SLAVE_PUBLIC_KEY });
+  await store.seal({ kind: "ssh_key", label: "slave key", plaintext: Buffer.from("fake-slave-key"), fingerprint: fingerprintPublicKey(SLAVE_PUBLIC_KEY), subject: { kind: "server", id: SLAVE_ID }, purpose: "ssh-key", publicKey: SLAVE_PUBLIC_KEY });
   if (opts.master !== false) {
     db.db.insert(servers).values({
       id: MASTER_ID, name: "m1", host: "m1.example.com",
@@ -573,7 +573,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
       // master); the fake session reports "SHA256:fixture" as its host key.
       preflightJson: { hostKey: "SHA256:fixture" },
     }).run();
-    await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: fingerprintPublicKey(MASTER_PUBLIC_KEY), serverId: MASTER_ID, publicKey: MASTER_PUBLIC_KEY });
+    await store.seal({ kind: "ssh_key", label: "master key", plaintext: Buffer.from("fake-master-key"), fingerprint: fingerprintPublicKey(MASTER_PUBLIC_KEY), subject: { kind: "server", id: MASTER_ID }, purpose: "ssh-key", publicKey: MASTER_PUBLIC_KEY });
   }
   return { db, executor, store, hosts, platformRepo, releases, runPorts, argo, cluster, resolver, ...(metrics ? { metrics } : {}) };
 }

@@ -271,7 +271,7 @@ export function checkoutAnswers(ports: DeploySlavePorts): ExtraAnswers {
 
 export function operatorKeyAnswer(serverId: string): ExtraAnswers {
   return async (ctx) => {
-    const key = (await ctx.creds.list({ serverId, kind: "ssh_key" })).at(-1);
+    const key = (await ctx.creds.list({ subject: { kind: "server", id: serverId }, purpose: "ssh-key" })).at(-1);
     return key?.publicKey !== undefined ? { operator_public_key: key.publicKey } : {};
   };
 }

@@ -74,7 +74,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // shuts, and it has to stand here for its destruction below to be a measurement.
       await h.store.seal({
         kind: "other", label: "bootstrap password for s1", plaintext: Buffer.from(BOOTSTRAP_PASSWORD),
-        fingerprint: "bootstrap-password", serverId: SLAVE_ID,
+        fingerprint: "bootstrap-password", subject: { kind: "server", id: SLAVE_ID }, purpose: "bootstrap-password",
       });
 
       const r = await h.executor.plan("cluster-deploy-slave", PARAMS);
@@ -129,8 +129,8 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       // kube facts and the sealed credential ids; server healthy, with the join's own reading.
       const cluster = h.db.db.select().from(clusters).where(eq(clusters.domain, "s1.example.com")).get();
       expect(cluster?.status).toBe("active");
-      const bearer = await h.store.list({ serverId: SLAVE_ID, kind: "kubeconfig" });
-      const reviewer = await h.store.list({ serverId: SLAVE_ID, kind: "other" });
+      const bearer = await h.store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "cluster-bearer" });
+      const reviewer = await h.store.list({ subject: { kind: "server", id: SLAVE_ID }, purpose: "reviewer-jwt" });
       const plane = ClusterPlaneV0.parse(cluster?.planeJson);
       expect(plane.kube).toEqual({ server: "https://100.64.0.11:16443", caData: "TFMtQ0EtREFUQQ==" });
       expect(plane.credentialIds).toEqual({ clusterBearer: bearer[0]?.id, reviewerJwt: reviewer[0]?.id });

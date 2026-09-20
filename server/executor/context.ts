@@ -282,7 +282,7 @@ export class RunContext {
     }
     // excludeRotated + createdAt ordering ⇒ [length-1] is the newest ACTIVE key (a rotated-out
     // key must never be picked up).
-    const creds = await this.d.creds.list({ serverId: id, kind: "ssh_key", excludeRotated: true });
+    const creds = await this.d.creds.list({ subject: { kind: "server", id }, purpose: "ssh-key", excludeRotated: true });
     const cred = creds[creds.length - 1];
     if (!cred) throw new AppError("INTERNAL", `no ssh_key credential for server ${id}`);
     const pinned = (server.preflightJson as { hostKey?: string } | null)?.hostKey;

@@ -65,7 +65,7 @@ describe("boot/seed-master — master self-registration", () => {
     const { db, store } = setup();
     await seedMaster(db.db, store, cfg({}), logger);
     expect(db.db.select().from(servers).all()).toEqual([]);
-    expect(await store.list({ kind: "ssh_key" })).toEqual([]);
+    expect(await store.list({ purpose: "ssh-key" })).toEqual([]);
   });
 
   it("seeds the role=master row from MASTER_* + seals the self-SSH key", async () => {
@@ -88,7 +88,7 @@ describe("boot/seed-master — master self-registration", () => {
       sshUser: "m1", sshPort: 22, role: "master", status: "healthy",
     });
 
-    const keys = await store.list({ serverId: row!.id, kind: "ssh_key" });
+    const keys = await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" });
     expect(keys).toHaveLength(1);
     expect(keys[0]?.fingerprint).toBe(key.fingerprint); // derived == generated
     expect(keys[0]?.label).toBe("master SSH key (self)");
@@ -106,7 +106,7 @@ describe("boot/seed-master — master self-registration", () => {
 
     expect(db.db.select().from(servers).where(eq(servers.role, "master")).all()).toHaveLength(1);
     const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1);
   });
 
   it("finds the existing master row through MASTER_ROLES instead of inserting a second master", async () => {
@@ -131,7 +131,7 @@ describe("boot/seed-master — master self-registration", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: "srv_existing", role: "master" });
     expect((rows[0]?.preflightJson as { hostKey?: string } | null)?.hostKey).toBe(FP);
-    expect(await store.list({ serverId: "srv_existing", kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: "srv_existing" }, purpose: "ssh-key" })).toHaveLength(1);
   });
 
   it("seeds the master self-cluster row (status active, slaveId NULL, stage from config)", async () => {
@@ -188,14 +188,14 @@ describe("boot/seed-master — master self-registration", () => {
     await seedMaster(db.db, store, config, logger);
     const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
     expect(row?.host).toBe("m1.example.com");
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(0);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(0);
 
     // Later boot: the file is now present — the key seals without a duplicate row.
     const key = generateServerKeypair("m1-master");
     writeFileSync(keyFile, key.privateOpenSsh);
     await seedMaster(db.db, store, config, logger);
     expect(db.db.select().from(servers).where(eq(servers.role, "master")).all()).toHaveLength(1);
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1);
   });
 
   it("REFUSES to seal an unpinned master key (key file present, no host-key fp)", async () => {
@@ -212,14 +212,14 @@ describe("boot/seed-master — master self-registration", () => {
     expect(row?.host).toBe("m1.example.com"); // row still seeded
     expect((row?.preflightJson as { hostKey?: string } | null)?.hostKey).toBeUndefined(); // no pin
     // The invariant: no pin ⇒ NO sealed key (never an unpinned, MITM-able master key).
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(0);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(0);
 
     // Once the pin env arrives on a later boot, the key seals (pin + key together).
     await seedMaster(db.db, store, cfg({
       MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1",
       MASTER_SSH_KEY_FILE: keyFile, MASTER_SSH_HOST_KEY_FP: FP,
     }), logger);
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1);
   });
 
   it("pins the host-key fingerprint on the master row (same shape a deployment writes)", async () => {
@@ -257,7 +257,7 @@ describe("boot/seed-master — master self-registration", () => {
     writeFileSync(keyFile, key1.privateOpenSsh);
     await seedMaster(db.db, store, config, logger);
     const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
-    expect((await store.list({ serverId: row!.id, kind: "ssh_key" })).at(-1)?.fingerprint).toBe(key1.fingerprint);
+    expect((await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).at(-1)?.fingerprint).toBe(key1.fingerprint);
 
     // The host key was FORCE-rotated → the mounted file now holds a DIFFERENT private key.
     const key2 = generateServerKeypair("m1-master");
@@ -266,13 +266,13 @@ describe("boot/seed-master — master self-registration", () => {
     await seedMaster(db.db, store, config, logger);
 
     // ctx.ssh(master) uses the NEWEST ssh_key credential — it must now be key2.
-    const after = await store.list({ serverId: row!.id, kind: "ssh_key" });
+    const after = await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" });
     expect(after.at(-1)?.fingerprint).toBe(key2.fingerprint);
 
     // A re-run with the same (key2) file is a no-op — no further credential rows.
     const count = after.length;
     await seedMaster(db.db, store, config, logger);
-    expect((await store.list({ serverId: row!.id, kind: "ssh_key" })).length).toBe(count);
+    expect((await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).length).toBe(count);
   });
 
   it("degrades (no crash, no master row) when a stray server already holds the name", async () => {
@@ -315,7 +315,7 @@ describe("boot/seed-master — master self-registration", () => {
     await seedMaster(db.db, store, config, logger);
     const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
     expect((row?.preflightJson as { hostKey?: string } | null)?.hostKey).toBeUndefined();
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(0);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(0);
 
     // ESO materializes the secret while the "pod" keeps running (kubelet refreshes the volume).
     const key = generateServerKeypair("m1-master");
@@ -326,11 +326,11 @@ describe("boot/seed-master — master self-registration", () => {
 
     const after = db.db.select().from(servers).where(eq(servers.role, "master")).get();
     expect((after?.preflightJson as { hostKey?: string } | null)?.hostKey).toBe(FP); // pinned, TRIMMED
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1); // sealed
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1); // sealed
 
     // Converged ⇒ the timer stopped itself: more time changes nothing (no dup, no rotation).
     await vi.advanceTimersByTimeAsync(60 * 60_000);
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1);
   });
 
   it("does NOT stop at the twenty-minute window that used to close: material an hour late still seals", async () => {
@@ -347,7 +347,7 @@ describe("boot/seed-master — master self-registration", () => {
 
     // An hour with nothing to converge — three times the window the old bound closed after.
     await vi.advanceTimersByTimeAsync(60 * 60_000);
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(0);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(0);
     expect(statusOf(db, row!.id)).toBe("degraded"); // and the row says why, meanwhile
 
     // The certificate lands / the ESO secret lands, an hour after boot and with nobody restarting
@@ -357,7 +357,7 @@ describe("boot/seed-master — master self-registration", () => {
     writeFileSync(fpFile, FP);
     await vi.advanceTimersByTimeAsync(3 * 60_000); // one wait at the ceiling
 
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1);
     expect(statusOf(db, row!.id)).toBe("healthy");
   });
 
@@ -407,7 +407,7 @@ describe("boot/seed-master — master self-registration", () => {
 
     await seedMaster(db.db, store, config, capture); // the boot attempt fails
     const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(0);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(0);
     expect(statusOf(db, row!.id)).toBe("degraded");
     expect(written.filter((l) => l.includes(CAUSE))).toHaveLength(1);
 
@@ -417,7 +417,7 @@ describe("boot/seed-master — master self-registration", () => {
     expect(written.some((l) => l.includes("fetch failed") && !l.includes("certificate"))).toBe(false);
 
     await vi.advanceTimersByTimeAsync(80_000); // the fourth attempt: the store accepts
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1);
     expect(statusOf(db, row!.id)).toBe("healthy");
   });
 
@@ -453,7 +453,7 @@ describe("boot/seed-master — master self-registration", () => {
 
     const row = db.db.select().from(servers).where(eq(servers.role, "master")).get();
     expect((row?.preflightJson as { hostKey?: string } | null)?.hostKey).toBe(FP);
-    expect(await store.list({ serverId: row!.id, kind: "ssh_key" })).toHaveLength(1);
+    expect(await store.list({ subject: { kind: "server", id: row!.id }, purpose: "ssh-key" })).toHaveLength(1);
   });
 
   it("a transient fp-file miss never DOWNGRADES a file-written pin to the static env value", async () => {
