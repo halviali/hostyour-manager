@@ -317,6 +317,12 @@ describe("add-app streaming planner", () => {
     expect(result.params).toMatchObject({ appsImage: TEST_BUNDLE.appsImage, appsUnit: { org: ORG } });
     expect(result.plan.steps.map((s) => s.name).slice(0, 7)).toEqual(["attest-target", "create-repository", "write-tree", "onboard-build-only", "record-apps-repo", "refresh-images", "ensure-images"]);
     expect(result.plan.summary).toContain(`${ORG}/${TEST_BUNDLE.appsImage} gains "${NEW_APP}"`);
+    // A registration naming another bundle is stale (its repository was renamed or removed): the
+    // composer's name wins, the render mounts it at the placeholder, and the run creates it (#216).
+    const stale = ports({ helm, registrations: new TenantRegistrations(seededPlatformRepo({ appsRepo: "https://github.com/acme-org/acme-apps.git", appsImage: "acme-apps", appsImageTag: TEST_BUNDLE.appsImageTag })) });
+    const renamed = await makeAddAppDef(stale).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
+    expect(renamed.outcome === "planned" && renamed.params.appsImage).toBe(TEST_BUNDLE.appsImage);
+    expect(renamed.outcome === "planned" && renamed.plan.summary).toContain(`${ORG}/${TEST_BUNDLE.appsImage} is created from`);
   });
 
   // A tenant onboarded as its platform alone (#211) has no bundle: its first app is judged against

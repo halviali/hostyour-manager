@@ -365,16 +365,18 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       // none stood (a tenant onboarded as its platform alone), appending to it where one does. The
       // fan-out is rendered at the tag the bundle stands at (the placeholder where it is not built
       // yet), exactly as create-tenant renders a tenant born with apps; refresh-images re-renders at
-      // the built tag before the image gate.
+      // the built tag before the image gate. The bundle's NAME is the composer's (#216), never the
+      // registration's: a registration naming another bundle is stale, and record-apps-repo
+      // overwrites it with what this run created.
       const { appsImage: standingImage, appsImageTag: standingTag } = current.entry;
-      const hasBundle = Boolean(current.entry.appsRepo && standingImage && standingTag);
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
       const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
-      const appsImage = hasBundle ? standingImage! : tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
+      const appsImage = tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
+      const hasBundle = Boolean(current.entry.appsRepo && standingImage === appsImage && standingTag);
       const appsImageTag = hasBundle ? standingTag! : placeholderTagFromChain(clusterValueFiles);
       ctx.log(hasBundle
         ? `tenant ${tc.guid}'s bundle ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL}, is built and recorded before the member is fanned out`
