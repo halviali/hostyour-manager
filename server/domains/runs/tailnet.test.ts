@@ -17,8 +17,7 @@ import type { TailnetKind } from "./defs/tailnet.kit.ts";
 // demands at approve. The acts themselves are ansiwise programs now, and driving them takes a real
 // `ansiwise-rest serve`; the executed proofs — the program runs, the address every session actually
 // dialled, the membership write-back — live in redeploy.ansiwise.test.ts, the ONE file that starts
-// machine runs (the engine's run root is per-drive, so two serve fixtures in parallel would share
-// records and collide).
+// machine runs (one serve fixture serves everything that starts machine runs).
 //
 // The address property the whole family rests on is stated HERE, on the plan: a run kind whose purpose
 // is to repair the private network may not travel over it, and may not travel over the LAN address

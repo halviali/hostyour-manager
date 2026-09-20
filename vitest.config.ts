@@ -47,11 +47,11 @@ export default defineConfig({
           name: "real-serve",
           include: ["server/**/*.ansiwise.test.ts"],
           environment: "node",
-          // ALONE, AND ONE FILE AT A TIME. Two files that each start a serve fixture cannot run
-          // together: the engine's run root is per-drive and a fixture's close() removes the whole
-          // of it, so they would delete each other's records. This is what a file joining this
-          // project is given rather than what it has to remember. Across PROCESSES — two worktrees
-          // checking at once — the fixture's own lock keeps them apart (serve-lock.ts).
+          // ALONE, AND ONE FILE AT A TIME. A serve fixture starts the real engine, and every run
+          // it accepts is a detached child of it; two files' serves at once contend for the
+          // workstation and time out (measured 2026-09-20: three timeouts under load, 30/30 alone).
+          // Each fixture keeps its run records inside its own directory (serve-fixture.ts, #228),
+          // so this is about load, never about records.
           fileParallelism: false,
           sequence: { groupOrder: 1 },
         },

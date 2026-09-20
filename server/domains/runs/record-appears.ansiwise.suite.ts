@@ -28,8 +28,7 @@ import {
 // client's side — 404, for as long as anyone asks — so it needs nothing planted on the disk.
 //
 // It registers into the ONE file that starts the serve fixture, for the reason
-// orphaned-end.ansiwise.suite.ts states: the engine's run root is per-drive and a second fixture
-// would delete the first file's records mid-run.
+// redeploy.ansiwise.test.ts states: one serve fixture serves everything that starts machine runs.
 
 export function recordAppearsSuite(serve: () => ServeFixture, observer: () => AnsiwiseClient): void {
   describe("a run whose record has not appeared", () => {

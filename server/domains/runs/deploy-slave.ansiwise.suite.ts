@@ -39,11 +39,10 @@ import {
 // (manager-key.test.ts) and over the wire, against a real server and a real client
 // (executor/context.door.test.ts).
 //
-// IT IS NOT A TEST FILE OF ITS OWN, for the reason redeploy.ansiwise.test.ts states for itself: the
-// engine's run root is per-DRIVE and a serve fixture's close() removes the whole of it, so a second
-// file starting a second fixture would delete the first file's records mid-run. This registers into
-// the ONE file that starts the fixture, which is also why `serve` arrives as an accessor — that file
-// binds it in beforeAll, after this module's describe is registered.
+// IT IS NOT A TEST FILE OF ITS OWN, for the reason redeploy.ansiwise.test.ts states for itself:
+// one serve fixture serves everything that starts machine runs. This registers into the ONE file
+// that starts the fixture, which is also why `serve` arrives as an accessor — that file binds it in
+// beforeAll, after this module's describe is registered.
 
 /** The password sealed beside a server row before the machine account's password became a run
  *  secret. `purge-bootstrap-password` destroys it, and the redaction assertion looks for it in the
@@ -374,7 +373,7 @@ export function deploySlaveSuite(serve: () => ServeFixture, observer: () => Ansi
       await expect(expired).rejects.toThrow(/idempotent end to end/);
       // And it never reports a machine run it did not start — read off the MASTER, which is where
       // that is a fact: the clock ran out before the POST, so its own store gained nothing. The
-      // store is the whole file's (one run root per drive), so what is compared is what it held
+      // store is the whole file's (one serve fixture, one run root), so what is compared is what it held
       // before this test, never an emptiness no test in this file could have.
       await expect(expired).rejects.toThrow(/no machine run of it was started/);
       expect((await observer().runs()).map((r) => r.id)).toEqual(before);

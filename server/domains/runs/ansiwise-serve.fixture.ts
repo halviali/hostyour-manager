@@ -10,7 +10,7 @@ import type { AnyRunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
 import { AnsiwiseClient } from "../../adapters/ansiwise/ansiwise-http.ts";
 import { AnsiwiseRefused, type AnsiwiseRunRecord } from "../../adapters/ansiwise/port.ts";
-import { openChannel, programYaml, runRoot, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
+import { openChannel, programYaml, runRoot, serveArgv, type ServeFixture } from "../../adapters/ansiwise/testing/serve-fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET, RECORD_APPEARS_POLL_MS, RECORD_APPEARS_TIMEOUT_MS } from "./defs/ansiwise-run.kit.ts";
 import { ANSIWISE_REST_TOOL, ANSIWISE_SESSION_PROGRAM } from "./defs/place-ansiwise.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
@@ -211,7 +211,7 @@ export const isServe = (command: string): boolean =>
 
 export function serveConversation(serve: ServeFixture): Conversation {
   return (stream) => {
-    const child = spawn(serve.exe, ["serve", "--programs", "programs", "--config", "ansiwise.yaml"], { cwd: serve.dir });
+    const child = spawn(serve.exe, serveArgv(serve), { cwd: serve.dir });
     stream.pipe(child.stdin);
     child.stdout.pipe(stream);
     child.on("close", (code) => {

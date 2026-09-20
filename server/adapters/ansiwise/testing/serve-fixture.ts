@@ -25,13 +25,18 @@
 // THE PROGRAMS ARE PURE MEASUREMENTS: every step is require_answer_matches (ansiwise-host), a
 // step that reads the run's own answers and touches nothing — so a `run` mode run is safe on
 // the workstation and the record semantics are still the real engine's.
+//
+// NOTHING OUTSIDE THE FIXTURE DIRECTORY. The engine's default run root is `/var/lib/ansiwise/runs`
+// (RunDirectory.defaultRoot), which on Windows resolves to `<drive>\var\lib\ansiwise\runs` — a
+// directory outside every repository, and one every fixture on the drive would share. `serve` is
+// given `--runs` inside the fixture directory instead (hostyour-manager#228), the engine hands that
+// placement to every detached run child, and removing the fixture directory removes every record.
 
 import { Duplex } from "node:stream";
 import { spawn } from "node:child_process";
 import { copyFileSync, statSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, parse, resolve } from "node:path";
-import { acquireServeLock, serveLockPath } from "./serve-lock.ts";
+import { join, resolve } from "node:path";
 
 /** The variable a person sets to be let through WITHOUT the binaries — the one way past the refusal
  *  below, and deliberately the only one. Somebody who cannot build the sibling Dart checkout has to
@@ -175,11 +180,6 @@ export async function placeInstallation(
   programs: Record<string, string>,
 ): Promise<ServeFixture> {
   const dir = mkdtempSync(join(tmpdir(), "ansiwise-serve-"));
-  // ONE REAL SERVE PER DRIVE AT A TIME, across processes: the run root below is shared by every
-  // fixture on the drive, whichever vitest process it runs in (serve-lock.ts, #186). Held until
-  // close() has removed the root, so nothing of this fixture is left for the next holder to read.
-  const releaseLock = await acquireServeLock(serveLockPath(runRoot(dir)));
-  clearLeakedRunRecords(dir);
   const suffix = process.platform === "win32" ? ".exe" : "";
   // BESIDE EACH OTHER, under their own names. The serving binary looks for `ansiwise` in the
   // directory it was started from and exits 78 when it is not there, so a fixture that copied only
@@ -216,45 +216,22 @@ export async function placeInstallation(
           await new Promise((r) => setTimeout(r, 250));
         }
       }
-      // The engine's run root is fixed ('/var/lib/ansiwise/runs', RunDirectory.defaultRoot),
-      // which on Windows lands on the drive of the process's working directory — this fixture's
-      // temp dir. Removing it un-does everything the detached run children wrote.
-      rmSync(runRoot(dir), { recursive: true, force: true });
-      releaseLock();
     },
   };
 }
 
-/** WHERE the machine's run records land for an installation at [dir] (see close above). */
+/** WHERE the machine's run records land for an installation at [dir]: the `--runs` every `serve`
+ *  of it is given (serveArgv), inside the installation, so close() removing [dir] removes every
+ *  record with it. */
 export function runRoot(dir: string): string {
-  return process.platform === "win32" ? join(parse(resolve(dir)).root, "var", "lib", "ansiwise", "runs") : "/var/lib/ansiwise/runs";
+  return join(dir, "runs");
 }
 
-/** Has this process already swept the run root? Once is enough and more than once is wrong: a second
- *  sweep would delete the records of a fixture still running in the same process. */
-let sweptRunRoot = false;
-
-/**
- * SWEEP WHAT A PREVIOUS PROCESS LEAKED, once, before the first fixture of this one starts, so that
- * `close()`'s claim above — that removing the root un-does everything the detached run children
- * wrote — is TRUE of the directory rather than only attempted.
- *
- * The engine's run root is a compile-time constant of the machine's own code (`RunDirectory`'s
- * default root, `/var/lib/ansiwise/runs`), so it is ONE directory shared by every fixture on the
- * drive and no fixture can be given a root of its own. `close()` removes it, but a run's children are
- * DETACHED: one that writes its record after the removal leaves it standing, and nothing afterwards
- * owns it. Measured on a real machine: 36 records from two days earlier were standing in that
- * directory on a machine whose every fixture had closed.
- *
- * WHAT THIS IS NOT. It is not a fix for the intermittent failures of the suite that uses this
- * fixture. Those are measured on a swept root as well — three green runs and one red in a row of
- * four — so whatever produces them is not this leak, and a sweep sold as their cure would
- * be a green answer nobody could rely on.
- */
-function clearLeakedRunRecords(dir: string): void {
-  if (sweptRunRoot) return;
-  sweptRunRoot = true;
-  rmSync(runRoot(dir), { recursive: true, force: true });
+/** THE ONE COMMAND LINE a `serve` of [fixture] is started with, wherever it is spawned from — the
+ *  in-process channel below and the fake sshd's exec alike — so no serve is ever started without
+ *  the run root that keeps its records inside the fixture. */
+export function serveArgv(fixture: ServeFixture): string[] {
+  return ["serve", "--programs", "programs", "--config", "ansiwise.yaml", "--runs", runRoot(fixture.dir)];
 }
 
 /** THE SURFACE, as a duplex: spawn the SERVING binary and its own standard input and output are the
@@ -264,9 +241,7 @@ function clearLeakedRunRecords(dir: string): void {
  *  No credential rides here, and there is nowhere for one to ride: a session is authenticated by
  *  sshd before this process exists, and `serve` is the binary's only program. */
 export function openChannel(fixture: ServeFixture): Duplex {
-  const child = spawn(fixture.exe, ["serve", "--programs", "programs", "--config", "ansiwise.yaml"], {
-    cwd: fixture.dir,
-  });
+  const child = spawn(fixture.exe, serveArgv(fixture), { cwd: fixture.dir });
   const channel = Duplex.from({ readable: child.stdout, writable: child.stdin });
   channel.on("close", () => child.kill());
   return channel;

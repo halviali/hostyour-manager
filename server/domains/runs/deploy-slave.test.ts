@@ -29,8 +29,7 @@ import { stepColumn } from "../../executor/run-rows.fixture.ts";
 // gates under fake timers, register's idempotence). Everything that starts a machine run — the
 // journeys over the deployment programs, the credential handshake, the cleanups drill — lives in
 // deploy-slave.ansiwise.suite.ts, registered into the ONE file that talks to a real
-// `ansiwise-rest serve` (the engine's run root is per-drive, so two serve fixtures in parallel would
-// share records and collide).
+// `ansiwise-rest serve` (one serve fixture serves everything that starts machine runs).
 //
 // THE FAILURE MODES ARE ALSO WHERE THE ORDER OF FIRST CONTACT IS READ, and that is not a
 // coincidence: a run that dies at the preflight and a run that dies at mark-slave — the first step

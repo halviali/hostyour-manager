@@ -32,9 +32,9 @@ import { deploySlaveSuite } from "./deploy-slave.ansiwise.suite.ts";
 // (require_answer_matches), so the gate, the answers validation, the detached run records and the
 // ?from= resume are all the engine's own.
 //
-// ONE FILE ON PURPOSE: the engine's run root is per-drive ('/var/lib/ansiwise/runs'), so two
-// test files each running a serve fixture in parallel would share records and collide. Everything
-// that starts machine runs lives here, sequentially; the programs, the worlds and the plumbing
+// ONE FILE ON PURPOSE: a serve fixture is the real engine, and the real-serve project runs one
+// file at a time because two serves at once contend for the workstation (vitest.config.ts).
+// Everything that starts machine runs lives here, sequentially; the programs, the worlds and the plumbing
 // live in ansiwise-serve.fixture.ts; the orphaned-end and deploy-slave suites live in
 // orphaned-end.ansiwise.suite.ts and deploy-slave.ansiwise.suite.ts, registered INTO this file's
 // describe rather than collected as separate files, for that same reason.
