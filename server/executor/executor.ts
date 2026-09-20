@@ -10,6 +10,7 @@ import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { RunKind, RunStatus, StepStatus, TargetKind } from "../../shared/enums.ts";
 import { assertRecoverable, stepToResume } from "./recover.ts";
+import { assertApprovable } from "./approve.ts";
 import { runProbes } from "./probe.ts";
 import { assertRunTransition, isDeletableRun } from "./transitions.ts";
 import { acquireLocks, releaseLocks, deriveServerLocks } from "./locks.ts";
@@ -97,11 +98,7 @@ export class Executor {
   async approve(runId: string, secrets?: Record<string, Buffer>): Promise<void> {
     const run = this.loadRun(runId);
     assertRunTransition(run.status, "approved");
-    for (const name of run.plan.requiredSecrets) {
-      // A 0-length Buffer is truthy — reject it too, or an empty operator value would pass here and
-      // (for onboard) be seeded create-only into Vault as a PERMANENT empty secret (cas=0, no rotate).
-      if (!secrets?.[name] || secrets[name].length === 0) throw errValidation(`missing required secret: ${name}`);
-    }
+    await assertApprovable(run, this.deps.runDefinitions.get(run.kind), this.deps.db, secrets);
     const targets = run.plan.targets ?? this.defaultTargets(run.plan);
     acquireLocks(this.deps.db, runId, [...deriveServerLocks(targets), ...(run.plan.locks ?? [])]);
     const actor = this.deps.actor();

@@ -8,7 +8,7 @@ import { buildRepoPatSecret } from "../../../shared/approve.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
-import { resolveBuildUnits, buildUnitSecrets, buildUnitOptionalSecrets, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { resolveBuildUnits, buildUnitSecrets, buildUnitOptionalSecrets, assertBuildUnitPats, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -19,6 +19,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
+import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import type { StepCtx, PlanStreamCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -284,6 +285,30 @@ describe("create-tenant planStream — the build units and the PATs it asks for"
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/registered as deployable \(example-jobs\)/);
+  });
+});
+
+describe("assertBuildUnitPats — the approve measures every unit PAT handed in (#212)", () => {
+  const units = [
+    { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false, viaApp: true },
+    { unit: "example-platform", repoURL: PLATFORM_REPO, images: ["example-engine"], registered: false },
+  ];
+  it("passes a classic PAT with every scope, and a unit whose PAT was not handed in is not measured", async () => {
+    const github = new FakeGitHubConsumer();
+    await expect(assertBuildUnitPats(() => ({ ports: onboardPorts({ github }) }), units, { [buildRepoPatSecret("example-jobs")]: Buffer.from("ghp_full") })).resolves.toBeUndefined();
+    expect(github.tokensSeen).toEqual(["ghp_full"]);
+  });
+  it("refuses by name — every missing scope of every unit at once — and a fine-grained token", async () => {
+    const github = new FakeGitHubConsumer();
+    github.tokenScopes = { classic: true, scopes: ["repo", "workflow", "admin:repo_hook"] };
+    const secrets = { [buildRepoPatSecret("example-jobs")]: Buffer.from("ghp_three"), [buildRepoPatSecret("example-platform")]: Buffer.from("ghp_three") };
+    await expect(assertBuildUnitPats(() => ({ ports: onboardPorts({ github }) }), units, secrets))
+      .rejects.toThrow(/example-jobs: the PAT lacks read:packages \(granted: repo, workflow, admin:repo_hook\); example-platform: the PAT lacks read:packages.*mint a new token/);
+    github.tokenScopes = { classic: false, scopes: [] };
+    await expect(assertBuildUnitPats(() => ({ ports: onboardPorts({ github }) }), units, secrets)).rejects.toThrow(/fine-grained/);
+  });
+  it("measures nothing where the consumer client is not wired — the run's own step does", async () => {
+    await expect(assertBuildUnitPats(() => undefined, units, { [buildRepoPatSecret("example-jobs")]: Buffer.from("x") })).resolves.toBeUndefined();
   });
 });
 

@@ -101,6 +101,7 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   }
 
   async readTokenScopes(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<TokenScopes> {
+    this.tokensSeen.push(input.token);
     if (this.tokenInvalid) throw new WebhookScopeError(`fake: the PAT is invalid on ${input.owner}/${input.repo}`, 401);
     return this.tokenScopes;
   }

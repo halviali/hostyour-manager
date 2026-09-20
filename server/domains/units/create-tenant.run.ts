@@ -10,7 +10,7 @@ import { AppError, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
-import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit } from "./tenant-builds.ts";
+import { BuildUnitSchema, planBuildUnits, buildUnitStep, tenantImageSteps, provisionArgoSyncStep, type TenantBuildDeps, type TenantBuildRuntime, type RegisteredUnit, assertBuildUnitPats } from "./tenant-builds.ts";
 import { assertDeployState } from "./lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
@@ -728,6 +728,8 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
     // teardown under its abort flavour), and WHETHER they may run — a full un-deploy must never fire for
     // a run whose tenant has meanwhile gone live, which only the tenants row + the GitOps pointer can say.
     steps: (params) => createTenantSteps(ports, params),
+    // Every build unit PAT handed in at approve, measured before the run starts (#212).
+    assertApprovable: (params, deps) => assertBuildUnitPats(() => ports.onboard?.(), params.buildUnits ?? [], deps.secrets),
     cleanups: (params) => createTenantCleanups(ports, params),
     assertAbortable: (params, deps) => assertCreateTenantAbortable(ports, params, deps.db),
   };

@@ -34,6 +34,9 @@ import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, type ReleaseChannel } from "../../../shared/release.ts";
 import { buildRepoPatSecret } from "../../../shared/approve.ts";
+import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
+import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
+import { WebhookScopeError } from "../../adapters/github-consumer/port.ts";
 import { unitNameFromRepoURL, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { fingerprintSecret } from "../../security/fingerprint.ts";
@@ -133,6 +136,37 @@ export async function resolveBuildUnits(input: {
  *  that the App does not reach. */
 export function buildUnitSecrets(units: readonly BuildUnit[]): string[] {
   return units.filter((u) => u.repoCredentialId === undefined && !u.viaApp).map((u) => buildRepoPatSecret(u.unit));
+}
+
+/** The approve's measurement of every unit PAT handed in (#212): a classic token with every scope
+ *  the consumer onboarding demands, else the approve is refused naming every missing scope of
+ *  every unit at once — the same rule preflight-scopes applies inside the run, asked here BEFORE
+ *  the run exists so the person corrects the token instead of aborting a run. A unit without a
+ *  handed-in PAT is not measured here (the App is its identity, or the required one is missing and
+ *  the executor already refused). Measured with the consumer client where it is wired; where it is
+ *  not, the run's own step measures. */
+export async function assertBuildUnitPats(deps: () => TenantBuildDeps | undefined, units: readonly BuildUnit[], secrets: Readonly<Record<string, Buffer>>): Promise<void> {
+  const github = deps()?.ports.github;
+  if (!github) return;
+  const refusals: string[] = [];
+  for (const unit of units) {
+    const raw = secrets[buildRepoPatSecret(unit.unit)];
+    if (!raw || raw.length === 0 || unit.repoCredentialId !== undefined) continue;
+    const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
+    let scopes;
+    try {
+      scopes = await github.readTokenScopes({ owner, repo, token: raw.toString("utf8") });
+    } catch (err) {
+      if (err instanceof WebhookScopeError) { refusals.push(`${unit.unit}: the PAT is invalid or expired`); continue; }
+      throw err;
+    }
+    if (!scopes.classic) { refusals.push(`${unit.unit}: the token is fine-grained, which reports no scopes — a CLASSIC PAT is needed`); continue; }
+    const missing = missingConsumerPatScopes(scopes.scopes);
+    if (missing.length > 0) refusals.push(`${unit.unit}: the PAT lacks ${missing.join(", ")} (granted: ${scopes.scopes.join(", ")})`);
+  }
+  if (refusals.length > 0) {
+    throw errValidation(`the approve is refused — a build unit's PAT does not carry what its onboarding needs (${requiredConsumerPatScopesSummary()}): ${refusals.join("; ")}. A classic PAT's scopes cannot be edited after creation — mint a new token with every scope and approve again`);
+  }
 }
 
 /** The approve-time secrets the plan TAKES: one PAT per unit the App reaches and nothing has

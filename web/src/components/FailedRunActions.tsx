@@ -65,7 +65,7 @@ export function FailedRunActions(props: {
   return (
     <>
       <div className="actionbar">
-        {run.requiredSecrets.map((key) => (
+        {[...run.requiredSecrets, ...run.optionalSecrets].map((key) => (
           <input
             key={key}
             className="input"

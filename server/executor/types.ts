@@ -173,6 +173,12 @@ export interface RunDefinition<P = Record<string, unknown>> {
    *  refusal holds for EVERY caller of the abort rather than for one route. A def without this hook
    *  is always abortable, as before. */
   assertAbortable?(params: P, deps: { db: Db }): Promise<void>;
+  /** The approve's OWN precondition on what the person handed in: asked by Executor.approve after
+   *  the required secrets are present and BEFORE the run is started, with the secrets as given.
+   *  A definition measures here what only the handed-in values can answer — the scopes of a PAT a
+   *  build unit will be sealed under (hostyour-manager#212) — and refuses by name; the run stays
+   *  planned and the person corrects the value. Never stores or logs a value. */
+  assertApprovable?(params: P, deps: { db: Db; secrets: Readonly<Record<string, Buffer>> }): Promise<void>;
   /** Called once after the run commits a terminal status (succeeded/failed/cancelled), for
    *  status choreography — e.g. deploy-slave parks the server row on failure
    *. Sync, idempotent, fast; a throw is logged and swallowed. */
