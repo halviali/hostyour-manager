@@ -53,7 +53,8 @@ const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const fakeCreds = {
   open: async () => Buffer.from("x", "utf8"),
   seal: async (i: { kind: string; label: string; fingerprint: string }) => ({ id: "cred_app", kind: i.kind, label: i.label, fingerprint: i.fingerprint }),
-  list: async ({ kind }: { kind: string }) => (kind === "github-app" ? [{ id: "cred_app", kind, label: `GitHub App (${TEST_BUNDLE.appsImage})`, fingerprint: "fp" }] : []),
+  // The App's one row, the owner's (#226) — what every clone of the tenant's repository opens.
+  list: async ({ kind }: { kind: string }) => (kind === "github-app" ? [{ id: "cred_app", kind, label: "GitHub App (acme-org)", fingerprint: "fp", subject: { kind: "owner", id: "acme-org" }, purpose: "repository-identity" }] : []),
 } as unknown as CredentialStore;
 
 const MANIFEST_YAML = `

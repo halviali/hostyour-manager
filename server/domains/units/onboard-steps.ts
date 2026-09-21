@@ -440,7 +440,6 @@ export interface AppRowValues {
   host: string;
   repoUrl: string;
   chartPath: string;
-  repoCredentialId: string | null;
   provenance: AppProvenance;
   status: AppStatus;
   lastRunId: string;
@@ -501,7 +500,6 @@ export function recordProvisionalStep(_ports: OnboardPorts, p: DeployableOnboard
             host: p.host,
             repoUrl: p.repoURL,
             chartPath: p.chartPath,
-            repoCredentialId: p.repoCredentialId,
             provenance: "manager",
             lastRunId: ctx.runId,
             status: "provisioning",
@@ -534,7 +532,6 @@ export function recordInventoryStep(_ports: OnboardPorts, p: DeployableOnboardPa
           host: p.host,
           repoUrl: p.repoURL,
           chartPath: p.chartPath,
-          repoCredentialId: p.repoCredentialId,
           provenance: "manager",
           lastRunId: ctx.runId,
           status: "active",

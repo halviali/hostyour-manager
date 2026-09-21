@@ -19,7 +19,7 @@ import type { Logger } from "../../kernel/logger.ts";
 // or an unreadable cluster never blocks the adoption — it is RECORDED, not gated), and record-inventory
 // writes the row THROUGH the shared upsert with provenance "adopted", version null (the registration
 // states no revision — the consumer's pin is the consumer's own), and the registration's fields —
-// repoCredentialId above all — copied VERBATIM, never re-sealed.
+// a unit's identity is its owner's, resolved at every use (#226) — nothing is sealed, nothing copied.
 
 const PARAMS: AdoptConsumerParams = { consumerName: "acme", stage: "prod", clusterId: "cls_1" };
 
@@ -170,7 +170,6 @@ describe("adopt-consumer run definition", () => {
       stage: "prod",
       repoUrl: "https://github.com/x/acme.git",
       chartPath: "deploy/chart",
-      repoCredentialId: null, // the registration carried none — nothing invented, nothing re-sealed
       provenance: "adopted", // reconstructed from the registration — NEVER "manager" (gate-validated)
       status: "active",
       lastRunId: "run_adopt",
@@ -181,12 +180,15 @@ describe("adopt-consumer run definition", () => {
     expect(logs.some((l) => l.includes("provenance adopted"))).toBe(true);
   });
 
-  it("copies repoCredentialId VERBATIM when the registration carries one — the sealed id, never re-sealed", async () => {
+  it("strips the repoCredentialId a registration written before #226 still spells, and records none", async () => {
     seedCluster();
     const logs: string[] = [];
-    await runAll(ports(await deployedRegistrations({ repoCredentialId: "cred_ptr" })), logs);
+    // A registration written before #226 still spells a repoCredentialId; the schema strips it and
+    // the row records none — the repository is reached with the owner's identity, resolved at every use.
+    await runAll(ports(await deployedRegistrations({ repoCredentialId: "cred_ptr" } as never)), logs);
     const row = db.db.select().from(apps).where(and(eq(apps.clusterId, "cls_1"), eq(apps.name, "acme"))).get();
-    expect(row?.repoCredentialId).toBe("cred_ptr");
+    expect(row).toBeDefined();
+    expect(Object.keys(row!)).not.toContain("repoCredentialId");
   });
 
   it("a registration with suspended:true is adopted with status SUSPENDED — the row repeats the record of intent", async () => {

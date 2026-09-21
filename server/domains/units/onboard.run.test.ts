@@ -227,7 +227,7 @@ describe("onboard run definition", () => {
     const row = () => db.db.select({ status: apps.status }).from(apps).where(eq(apps.name, "acme")).get();
     for (const [before, after] of [["offboarded", "provisioning"], ["active", "active"]] as const) {
       db.db.delete(apps).run();
-      db.db.insert(apps).values({ id: `app_${before}`, clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: p.repoURL, chartPath: "deploy/chart", repoCredentialId: "cred_x", provenance: "manager", status: before }).run();
+      db.db.insert(apps).values({ id: `app_${before}`, clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: p.repoURL, chartPath: "deploy/chart", provenance: "manager", status: before }).run();
       await step.run(ctx(p, step.name, []));
       expect(row()?.status).toBe(after);
     }

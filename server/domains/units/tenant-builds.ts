@@ -36,7 +36,7 @@ import { RELEASE_CHANNEL, type ReleaseChannel } from "../../../shared/release.ts
 import { unitNameFromRepoURL, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import { judgeRepoIdentity, resolveRepoIdentity, sealRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
+import { judgeRepoIdentity, resolveRepoCredentialId, type OwnerIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
@@ -69,14 +69,12 @@ export const BuildUnitSchema = z.object({
   images: z.array(z.string().min(1)).min(1), // the image names this unit builds among the missing ones
   registered: z.boolean(),
   form: z.enum(["build-only", "deployable"]).optional(), // known for a registered unit only
-  repoCredentialId: z.string().min(1).optional(),
 });
 export type BuildUnit = z.infer<typeof BuildUnitSchema>;
 
 /** What the plan reads about a unit already registered on the installation. */
 export interface RegisteredUnit {
   form: "build-only" | "deployable";
-  repoCredentialId?: string;
 }
 
 export interface BuildUnitResolution {
@@ -115,7 +113,6 @@ export async function resolveBuildUnits(input: {
       images: [...images].sort(),
       registered: found !== null,
       ...(found ? { form: found.form } : {}),
-      ...(found?.repoCredentialId ? { repoCredentialId: found.repoCredentialId } : {}),
     });
   }
   units.sort((a, b) => a.unit.localeCompare(b.unit));
@@ -178,14 +175,13 @@ export async function planBuildUnits(input: {
       summary: `Tenant "${input.subdomain}" was rejected — the image(s) ${deployable.flatMap((u) => u.images).join(", ")} are missing from ${input.registryHost} and belong to unit(s) registered as deployable (${deployable.map((u) => u.unit).join(", ")}); release each from its Consumers page, then plan again`,
     };
   }
+  // Registered or not, the unit's identity is the owner's, judged now (#226): a registered unit
+  // whose owner lost its identity is refused the same way a new one is.
   for (const u of units) {
-    if (u.repoCredentialId !== undefined) {
-      input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — registered, its release is re-run`);
-      continue;
-    }
     const judged = await judgeRepoIdentity({ repoURL: u.repoURL, githubApp: input.githubApp, owners: input.owners, signal: input.signal });
     if ("refused" in judged) return { outcome: "rejected", summary: `Tenant "${input.subdomain}" was rejected — build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} and has no identity: ${judged.refused}` };
-    input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — not registered, onboarded build-only by this run as ${judged.kind === "github-app" ? "the platform's GitHub App" : "its owner's repository PAT"}, its packages read with the owner's packages reader`);
+    const as = judged.kind === "github-app" ? "the platform's GitHub App" : "its owner's repository PAT";
+    input.log(`build unit ${u.unit} (${u.repoURL}) builds ${u.images.join(", ")} — ${u.registered ? "registered, its release is re-run" : "not registered, onboarded build-only by this run"} as ${as}`);
   }
   const warnings = units.length > 0
     ? [`${units.length} build unit(s) are onboarded by this run before the tenant is deployed (${units.map((u) => `${u.unit}: ${u.images.join(", ")}`).join("; ")}) — each releases its next version onto ${input.stage} and pins it on the books branch`]
@@ -226,12 +222,11 @@ export function buildUnitStepName(unit: string): string {
   return `build-unit:${unit}`;
 }
 
-/** The identity of a unit not registered yet, sealed by this step: the owner's, resolved the
- *  way the plan judged it (repo-identity.ts) — a `github-app` row storing no token where the App
- *  reaches the repository, else the owner's repository PAT sealed under the unit's name. */
-async function sealUnitIdentity(ctx: StepCtx, d: TenantBuildDeps, unit: BuildUnit): Promise<string> {
-  const identity = await resolveRepoIdentity({ repoURL: unit.repoURL, githubApp: d.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
-  return sealRepoIdentity(ctx.creds, identity, unit.unit, d.githubApp);
+/** The credential the unit's repository is reached with, resolved now the way the plan judged it
+ *  (repo-identity.ts): the App's one row where the App reaches the repository, else the owner's
+ *  repository PAT row — never a row of the unit's (#226). */
+async function unitCredentialId(ctx: StepCtx, d: TenantBuildDeps, unit: BuildUnit): Promise<string> {
+  return resolveRepoCredentialId({ repoURL: unit.repoURL, githubApp: d.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
 }
 
 async function nextVersion(ctx: StepCtx, deps: TenantBuildDeps, unit: BuildUnit, repoCredentialId: string): Promise<string> {
@@ -267,7 +262,7 @@ export function buildUnitStep(
         throw errValidation(`tenant ${p.guid} needs the build unit "${unit.unit}" (${unit.repoURL}) onboarded, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
       }
       const { ports } = d;
-      const repoCredentialId = unit.repoCredentialId ?? (await sealUnitIdentity(ctx, d, unit));
+      const repoCredentialId = await unitCredentialId(ctx, d, unit);
       const master = resolveMasterCluster(ctx.db);
       const version = await nextVersion(ctx, d, unit, repoCredentialId);
       const channel = channelReaching(await ports.channelStages(), p.stage);

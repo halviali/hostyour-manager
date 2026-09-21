@@ -91,7 +91,7 @@ function threeClassFixture(opts: { withDeployCarrier?: boolean } = {}): {
     "library/redis": { "7.0": "sha256:redis-old" },
   });
 
-  return { deps: { cloud, deploy, unit, registry }, registry };
+  return { deps: { cloud, deploy, unit, unitCredential: async () => "cred_owner", registry }, registry };
 }
 
 describe("reap — the floor IS the pin search, over all three carrier classes", () => {
@@ -193,7 +193,7 @@ describe("reap — an empty floor can never reach a delete plan", () => {
     const logger = makeLogger();
 
     await expect(
-      reap({ cloud: cloudCarryingNoPins(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), registry, logger, dryRun: false }),
+      reap({ cloud: cloudCarryingNoPins(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), unitCredential: async () => "cred_owner", registry, logger, dryRun: false }),
     ).rejects.toThrow(/referenced floor is EMPTY/);
 
     expect(registry.deleted).toEqual([]);
@@ -205,7 +205,7 @@ describe("reap — an empty floor can never reach a delete plan", () => {
     const registry = new FakeRegistryMaintenance({ manager: catalogRepo("manager", 12, []) });
 
     await expect(
-      reap({ cloud: cloudCarryingNoPins(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), registry, logger: makeLogger(), dryRun: true }),
+      reap({ cloud: cloudCarryingNoPins(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), unitCredential: async () => "cred_owner", registry, logger: makeLogger(), dryRun: true }),
     ).rejects.toThrow(/referenced floor is EMPTY/);
   });
 });

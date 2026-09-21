@@ -491,8 +491,9 @@ export const ConsumerRegistrationSchema = z
   .object({
     name: consumerName,
     repoURL: z.string().regex(/^https:\/\/[^ ]+\.git$/),
-    // the credential-store id of the private repo's read credential; omitted = public.
-    repoCredentialId: z.string().optional(),
+    // No credential id: the repository is reached with the owner's identity, resolved from the URL
+    // at every use (server repo-identity.ts, hostyour-manager#226). A registration written before
+    // that carries a `repoCredentialId` this schema strips.
     owner: z.string().optional(),
     onboardedAt: z.string().optional(),
     suspended: z.boolean().default(false), // the off state the chart renders: replicas 0, no Ingress

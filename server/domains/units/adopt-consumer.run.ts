@@ -151,12 +151,10 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         ctx.checkpoint({
           suspended: current.suspended,
           chartPath: current.chartPath,
-          hasRepoCredential: current.repoCredentialId !== undefined,
         });
         ctx.log(
           "meta",
           `registration registrations/${t.name}/${t.stage}.yaml read — chart ${current.chartPath} on cluster ${current.cluster}, ${current.suspended ? "suspended" : "running"}` +
-            (current.repoCredentialId ? `, sealed repo credential ${current.repoCredentialId}` : ", no repo credential recorded") +
             ". This is what the REGISTRATION says — the live cluster is attested next.",
         );
       },
@@ -222,9 +220,9 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         // The run's ONE mutation, through the SAME writer onboard's record-inventory uses
         // (upsertAppRow — one upsert shape however a row comes to exist). The pointer is RE-READ here
         // rather than trusted from the earlier step: steps are independently resumable, and the row
-        // must be written from what the pointer says NOW. Every pointer field is copied VERBATIM —
-        // above all repoCredentialId, which is the sealed credential-store id the offboard/purge
-        // teardown will open; it is never re-sealed or re-minted here.
+        // must be written from what the pointer says NOW. Every pointer field is copied VERBATIM; no
+        // credential is among them — the repository is reached with the owner's identity, resolved at
+        // every use (#226), so nothing is sealed or minted here.
         const t = loadAdoptTarget(ctx.db, p);
         const current = await readStageRegistration(ports, t);
         // The row's status mirrors the registration's own `suspended` field, not a blanket "active":
@@ -239,7 +237,6 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
             host: current.host,
             repoUrl: current.repoURL,
             chartPath: current.chartPath,
-            repoCredentialId: current.repoCredentialId ?? null,
             provenance: "adopted", // reconstructed from the registration — NEVER "manager" (gate-validated)
             status,
             lastRunId: ctx.runId,
@@ -249,7 +246,7 @@ function adoptSteps(ports: AdoptConsumerPorts, params: AdoptConsumerParams): Ste
         ctx.log(
           "meta",
           `consumer ${t.name} recorded on cluster ${t.clusterId} (${t.stage}, provenance adopted, status ${status}) — ` +
-            `row reconstructed from the registration${current.repoCredentialId ? `, sealed repo credential ${current.repoCredentialId} copied verbatim` : ", no repo credential recorded on the registration"}. ` +
+            "row reconstructed from the registration; the repository is reached with its owner's identity, resolved at every use. " +
             "The consumer now appears under Consumers and every row-keyed run kind (offboard/suspend/resume) can reach it.",
         );
       },

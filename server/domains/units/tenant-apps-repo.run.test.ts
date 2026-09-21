@@ -102,9 +102,12 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
 /** A credential store shaped like the real one for the kind under test: a `github-app` credential
  *  opens to the token the App answers at THAT moment (security/store.ts mints it), every other kind
  *  to what was sealed. Records every seal and every open. */
+/** A credential store standing on the App's ONE row (#226): `cred_app`, the owner's, which opens
+ *  to a token minted by the App now — no row is sealed per unit any more. */
 function fakeCreds(app: FakeGitHubApp): { store: CredentialStore; seals: { id: string; kind: string; label: string; fingerprint: string; plaintext: string }[]; opened: string[] } {
   const seals: { id: string; kind: string; label: string; fingerprint: string; plaintext: string }[] = [];
   const opened: string[] = [];
+  const appRow = { id: "cred_app", kind: "github-app", label: `GitHub App (${app.org})`, fingerprint: app.identityFingerprint(), subject: { kind: "owner", id: app.org }, purpose: "repository-identity" };
   const store = {
     seal: async (i: { kind: string; label: string; plaintext: Buffer; fingerprint: string }) => {
       const id = `cred_${seals.length + 1}`;
@@ -114,12 +117,13 @@ function fakeCreds(app: FakeGitHubApp): { store: CredentialStore; seals: { id: s
     open: async (id: string) => {
       opened.push(id);
       if (id === "cred_pkg_org") return Buffer.from("ghp_packages_org", "utf8"); // the owner's packages reader (recordTestOwners)
+      if (id === appRow.id) return Buffer.from(await app.installationToken(), "utf8");
       const s = seals.find((x) => x.id === id);
       if (!s) throw new Error(`unknown credential ${id}`);
       return Buffer.from(s.kind === "github-app" ? await app.installationToken() : s.plaintext, "utf8");
     },
     // The scope preflight asks the store which rows are the App's, and skips itself for one of them.
-    list: async ({ kind }: { kind: string }) => seals.filter((x) => x.kind === kind).map(({ id, kind: k, label, fingerprint }) => ({ id, kind: k, label, fingerprint })),
+    list: async ({ kind }: { kind: string }) => [appRow, ...seals.map(({ id, kind: k, label, fingerprint }) => ({ id, kind: k, label, fingerprint, subject: { kind: "unit", id: "?" }, purpose: "repository-identity" }))].filter((x) => x.kind === kind),
   };
   return { store: store as unknown as CredentialStore, seals, opened };
 }
@@ -252,10 +256,10 @@ describe("write-tree — the tree from the template into the tenant's repository
     expect(h.consumerRepo.commits).toHaveLength(1);
     expect(h.consumerRepo.commits[0]).toMatchObject({ repoURL: TENANT_URL, branch: "main", message: `Create ${UNIT} from the catalog` });
     expect(h.consumerRepo.commits[0]!.remove).toBeUndefined();
-    // The writer opened the repository under the unit's github-app credential: a row that stores no
+    // The writer opened the repository under the App's one row: the owner's, a row that stores no
     // token and carries the App identity's fingerprint.
-    expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, fingerprint: h.githubApp.identityFingerprint(), plaintext: "" }]);
-    expect(h.consumerRepo.opened).toEqual([{ repoURL: TENANT_URL, credentialId: "cred_1" }]);
+    expect(creds.seals).toEqual([]); // no row per unit (#226)
+    expect(h.consumerRepo.opened).toEqual([{ repoURL: TENANT_URL, credentialId: "cred_app" }]);
     expect(logs.some((l) => l.includes(`8 file(s) committed to ${TENANT_URL}`))).toBe(true);
   });
   it("a second run adds the missing app folder and entry, deletes nothing, overwrites nothing, and commits nothing when nothing changed", async () => {
@@ -325,7 +329,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     await run("onboard-build-only").run(ctx(p, logs, creds.store));
     const onboard = h.ports.onboard!()!.ports;
     const registration = await onboard.registrations.readBuildRegistration(UNIT);
-    expect(registration?.entry).toMatchObject({ name: UNIT, repoURL: TENANT_URL, repoCredentialId: "cred_1", owner: SUBDOMAIN, builds: [UNIT] });
+    expect(registration?.entry).toMatchObject({ name: UNIT, repoURL: TENANT_URL, owner: SUBDOMAIN, builds: [UNIT] });
     expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_hour_two", packages: "ghp_packages_org" }]);
     expect(h.seeder.refreshedRepoPats).toEqual([]);
     expect(h.buildCluster.secretWrites).toEqual([]);
@@ -334,8 +338,8 @@ describe("create-repository and onboard-build-only — a github-app credential a
     expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
     // ONE credential for the whole pass, of the kind that stores nothing; every open went to it, and
     // the PAT scope preflight read no scopes off it — the step itself stood aside for the App's row.
-    expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, fingerprint: h.githubApp.identityFingerprint(), plaintext: "" }]);
-    expect(new Set(creds.opened)).toEqual(new Set(["cred_1", "cred_pkg_org"])); // the App row and the owner's packages reader
+    expect(creds.seals).toEqual([]); // no row per unit (#226)
+    expect(new Set(creds.opened)).toEqual(new Set(["cred_app", "cred_pkg_org"])); // the App's one row and the owner's packages reader
     expect(logs.some((l) => l.includes("installation permissions stand in for PAT scopes"))).toBe(true);
     expect(logs.some((l) => l.includes("PAT scopes OK"))).toBe(false);
     expect(logs.at(-1)).toContain(`${UNIT} built as ${UNIT}:${IMAGE_TAG} for prod`);

@@ -28,6 +28,13 @@ export function seedCredentialRow(db: Db, row: {
   }).run();
 }
 
+/** The App's one row as boot seeds it (repo-identity.ts ensureAppIdentityRow), for a test that
+ *  resolves a repository's identity: subject the owner the App is installed with. */
+export function seedAppIdentityRow(db: Db, owner: string, id = "cred_app"): string {
+  seedCredentialRow(db, { id, kind: "github-app", label: `GitHub App (${owner})`, subject: { kind: "owner", id: owner }, purpose: "repository-identity", plaintext: "", fingerprint: "sha256:app" });
+  return id;
+}
+
 /** Takes every row of one subject away — what a test does to say "this owner records
  *  nothing" or "this server holds no key". */
 export function dropCredentialRows(db: Db, subject: { kind: CredentialSubjectKind; id: string }): void {

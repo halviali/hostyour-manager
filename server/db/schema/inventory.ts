@@ -159,9 +159,6 @@ export const apps = sqliteTable("apps", {
   host: text("host").notNull(),
   repoUrl: text("repo_url"),                                       // the consumer repo URL
   chartPath: text("chart_path"),                                   // path to the Helm chart inside the repo
-  // the credential-store id of a private repo's read credential; NULL = public. A loose ref
-  // (not a Drizzle FK) to avoid an inventory<->credentials import cycle — same convention as audit.run_id.
-  repoCredentialId: text("repo_credential_id"),
   provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("manager"),
   // The last onboarding lifecycle run for this app (its step checkpoint holds the SmokeVerdict).
   // Loose ref to runs(id), same convention as above.

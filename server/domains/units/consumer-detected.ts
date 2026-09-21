@@ -134,7 +134,6 @@ export async function scanDetectedConsumers(deps: { db: Db; registrations: Regis
             cluster: e.cluster ?? "",
             suspended: e.suspended,
             quiesced: e.quiesced,
-            ...(e.repoCredentialId !== undefined ? { repoCredentialId: e.repoCredentialId } : {}),
             ...(e.onboardedAt !== undefined ? { onboardedAt: e.onboardedAt } : {}),
             ...(e.owner !== undefined ? { owner: e.owner } : {}),
           },

@@ -10,6 +10,8 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { consumerArgoAppName, consumerNamespace, ConsumerRegistrationSchema, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
+import { unitRepoCredentialId } from "./repo-identity.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { serializePointer, parseRegistration, type Registrations } from "./registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
@@ -119,8 +121,9 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         const { clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
         // The repository credential must exist in the TARGET's ArgoCD namespace or a private repo
         // can never sync there. A public repo (no sealed credential) simply has none to carry over.
-        const row = ctx.db.select({ repoCredentialId: apps.repoCredentialId }).from(apps).where(eq(apps.id, appId)).get();
-        if (row?.repoCredentialId) {
+        const repoURLOfRow = ctx.db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get()?.repoUrl;
+        const credentialId = await unitRepoCredentialId({ repoURL: repoURLOfRow, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
+        if (credentialId) {
           if (!ports.repoCredential) throw errValidation(`provision-target for "${ac.name}" requires the repository-credential writer but none is wired — ArgoCD on the target could never fetch the private consumer repo`);
           // ABSENT is a state here — a migrate may run this step after the source registration was
           // released, which is why the repoURL has the apps-row fallback. A FAILED read is not:
@@ -133,7 +136,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
             : (await ports.registrations.readRegistration(ac.stage, ac.name))?.entry ?? null;
           const repoURL = reg?.repoURL ?? ctx.db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get()?.repoUrl;
           if (repoURL === undefined || repoURL === null) throw errValidation(`consumer "${ac.name}" has no repo URL on record — the credential would be sealed against a repository nobody can name`);
-          const pat = await c.creds.open(row.repoCredentialId, { purpose: "relocation:provision-target", runId: c.runId });
+          const pat = await c.creds.open(credentialId, { purpose: "relocation:provision-target", runId: c.runId });
           try {
             await ports.repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: ac.name, stage: ac.stage, argoNamespace, repoURL, pat: pat.toString("utf8") }));
           } finally {
@@ -149,7 +152,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         if ((await clusterReader.smoke(namespace)).namespaceExists) {
           await clusterReader.annotateNamespace(namespace, { [CLAIM_RELOCATING_ANNOTATION]: null });
         }
-        c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${row?.repoCredentialId ? `repository credential in ${argoNamespace}; ` : ""}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
+        c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${credentialId ? `repository credential in ${argoNamespace}; ` : ""}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
       },
       repoint: async (c, target) => {
         // The mark FIRST, on the SOURCE namespace, because the flip below IS a delete on the source:
@@ -173,7 +176,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // The dumped registration is re-committed AT THE TARGET, closed: the unit deploys quiesced,
         // its claims provision empty stores, and only after the data is restored does open-access lift it.
         await ports.registrations.commitRegistration({
-          unit: { name: entry.name, repoURL: entry.repoURL, ...(entry.repoCredentialId ? { repoCredentialId: entry.repoCredentialId } : {}), ...(entry.owner ? { owner: entry.owner } : {}), ...(entry.onboardedAt ? { onboardedAt: entry.onboardedAt } : {}), suspended: entry.suspended, quiesced: true },
+          unit: { name: entry.name, repoURL: entry.repoURL, ...(entry.owner ? { owner: entry.owner } : {}), ...(entry.onboardedAt ? { onboardedAt: entry.onboardedAt } : {}), suspended: entry.suspended, quiesced: true },
           builds: [],
           // The unit's OWN stage: the dump is re-committed at the path it was dumped from, on the
           // target cluster, whatever stage that cluster's map carries.

@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { loadConfig } from "../kernel/config.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { openDb } from "../db/client.ts";
+import { resolveRepoCredentialId } from "../domains/units/repo-identity.ts";
+import { readOwnerIdentity } from "../domains/units/owners.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
 import { CredentialStore } from "../security/store.ts";
 import { storeBackend } from "../boot/store-backend.ts";
@@ -101,10 +103,14 @@ async function main(): Promise<void> {
   const deployToken = await new HttpGitHubApp(config.githubApp).installationToken();
   const deploy = carrierRepo({ owner: deployOwner, repo: deployRepo, token: deployToken }, config.dataDir, "reaper-deploy", books);
   const unit = new GitRepoReader({ openCredential: (id) => store.open(id, { purpose: "registry-reaper:read-unit-chart" }) });
+  // A unit's repository is reached with its owner's identity, resolved from the URL now (#226).
+  const githubApp = new HttpGitHubApp(config.githubApp);
+  const unitCredential = (repoURL: string, signal?: AbortSignal): Promise<string> =>
+    resolveRepoCredentialId({ repoURL, githubApp, owners: (org) => readOwnerIdentity(db.db, org), store, ...(signal ? { signal } : {}) });
   const registry = new HttpRegistryMaintenance({ registryHost, dockerConfigPath });
 
   logger.info({ registryHost, dockerConfigPath, dryRun }, "registry-reaper: starting");
-  const result = await reap({ cloud, deploy, unit, registry, logger, dryRun });
+  const result = await reap({ cloud, deploy, unit, unitCredential, registry, logger, dryRun });
   logger.info(
     {
       dryRun: result.dryRun,

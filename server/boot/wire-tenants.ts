@@ -184,13 +184,12 @@ export function buildTenantOnboarding(
   const registrations = new Registrations(platformRepo);
 
   // A unit the installation registered: build-only under registrations/<unit>/build.yaml, deployable
-  // under a stage file; the stored credential rides the entry either way.
+  // under a stage file. Its identity is not on the entry: it is the owner's, resolved from the URL
+  // at every use (#226).
   const buildUnitRegistration = async (unit: string): Promise<RegisteredUnit | null> => {
-    const build = await registrations.readBuildRegistration(unit);
-    if (build) return { form: "build-only", ...(build.entry.repoCredentialId ? { repoCredentialId: build.entry.repoCredentialId } : {}) };
+    if (await registrations.readBuildRegistration(unit)) return { form: "build-only" };
     for (const stage of STAGE) {
-      const deployed = await registrations.readRegistration(stage, unit);
-      if (deployed) return { form: "deployable", ...(deployed.entry.repoCredentialId ? { repoCredentialId: deployed.entry.repoCredentialId } : {}) };
+      if (await registrations.readRegistration(stage, unit)) return { form: "deployable" };
     }
     return null;
   };

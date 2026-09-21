@@ -4,6 +4,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { apps, clusters, servers, tenants } from "../../db/schema/inventory.ts";
 import { checkUnitsStep } from "./check-units.ts";
 import { ports as onboardPorts, seededDns } from "./onboard.fixture.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -21,10 +22,17 @@ beforeEach(() => {
 });
 afterEach(() => { db.sqlite.close(); });
 
+/** The App installed with `owner`, reaching every repository of it — what a unit is checked with (#226). */
+function appWith(owner: string): FakeGitHubApp {
+  const a = new FakeGitHubApp();
+  a.org = owner;
+  return a;
+}
+
 function ctx(logs: string[]): StepCtx {
   return {
     runId: "run_chk", stepName: "check-units", db: db.db, params: {},
-    creds: { open: async () => Buffer.from("ghp_stored"), list: async () => [] } as unknown as CredentialStore,
+    creds: { open: async () => Buffer.from("ghp_stored"), list: async () => [{ id: "cred_app", kind: "github-app", subject: { kind: "owner", id: "x" }, purpose: "repository-identity" }] } as unknown as CredentialStore,
     secrets: { get: () => undefined, wipe: () => undefined },
     signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
@@ -35,8 +43,8 @@ function ctx(logs: string[]): StepCtx {
 
 describe("check-units", () => {
   it("records every active consumer's and tenant's findings on its row, and the drift among them", async () => {
-    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", repoCredentialId: "cred_pat", provenance: "manager", status: "active" }).run();
-    db.db.insert(apps).values({ id: "app_off", clusterId: "cls_1", name: "gone", stage: "prod", host: "gone", repoUrl: "https://github.com/x/gone.git", repoCredentialId: "cred_pat", provenance: "manager", status: "offboarded" }).run();
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", provenance: "manager", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_off", clusterId: "cls_1", name: "gone", stage: "prod", host: "gone", repoUrl: "https://github.com/x/gone.git", provenance: "manager", status: "offboarded" }).run();
     db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const dns = seededDns();
     dns.seed("*.acme.example.com", "A", "198.51.100.7"); // the tenant's wildcard moved to an address nobody here carries
@@ -44,7 +52,7 @@ describe("check-units", () => {
     github.scopeError = true; // the consumer's stored PAT lost admin:repo_hook
     const o = onboardPorts({ github, dns });
     const logs: string[] = [];
-    await checkUnitsStep({ onboard: () => ({ ports: o }), tenant: { dns, resolveUnitApex: async () => "example.com" } }).run(ctx(logs));
+    await checkUnitsStep({ onboard: () => ({ ports: o }), tenant: { dns, resolveUnitApex: async () => "example.com", githubApp: appWith("x") } }).run(ctx(logs));
 
     const consumer = db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_1")).get()?.check;
     expect(consumer?.findings.map((f) => [f.id, f.status])).toEqual([["identity", "pass"], ["webhook", "fail"], ["dns.record", "pass"]]);
@@ -58,10 +66,10 @@ describe("check-units", () => {
     expect(checkBadge(tenant ?? null, Date.now())).toMatchObject({ label: "1 probe(s) worth a look", modifier: null });
   });
 
-  it("says not measured on a unit it cannot probe — no onboarding wired, or a row without repository or credential", async () => {
+  it("says not measured on a unit it cannot probe — no onboarding wired, or a row without a repository", async () => {
     db.db.insert(apps).values({ id: "app_adopted", clusterId: "cls_1", name: "found", stage: "prod", host: "found", provenance: "adopted", status: "active" }).run();
     await checkUnitsStep({ onboard: () => ({ ports: onboardPorts() }), tenant: { dns: seededDns(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
-    expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ status: "warn", detail: "not measured: the row records no repository or no credential (an adopted unit)" }]);
+    expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ status: "warn", detail: "not measured: the row records no repository (an adopted unit)" }]);
     await checkUnitsStep({ tenant: { dns: seededDns(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
     expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ detail: "not measured: the consumer onboarding is not wired on this manager" }]);
   });

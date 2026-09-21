@@ -17,15 +17,15 @@ import type { OwnerIdentityReader } from "./repo-identity.ts";
 /** The three deletes one unit's refresh issues, in the order the names are declared. */
 const deletesOf = (unit: string) => BUILD_TARGET_SECRETS.map((name) => ({ op: "delete" as const, namespace: `${unit}-build`, name }));
 
-/** A store of two credentials: the App's (kind github-app), which opens to whatever `minted` says
- *  at the moment of the open, and a consumer's PAT. */
+/** A store of two credentials, both the OWNER acme's (#226): the App's one row (kind github-app),
+ *  which opens to whatever `minted` says at the moment of the open, and the owner's repository PAT. */
 function fakeStore(minted: { value: string }): { store: Pick<CredentialStore, "list" | "open">; opened: string[] } {
   const opened: string[] = [];
   const store: Pick<CredentialStore, "list" | "open"> = {
     list: async (filter) => {
       const all = [
-        { id: "cred_app", kind: "github-app" as const, label: "GitHub App (acme-apps)", fingerprint: "sha256:app", subject: { kind: "unit" as const, id: "acme-apps" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" },
-        { id: "cred_pat", kind: "pat" as const, label: "consumer repo PAT (shop)", fingerprint: "sha256:pat", subject: { kind: "unit" as const, id: "shop" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "cred_app", kind: "github-app" as const, label: "GitHub App (acme)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "acme" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "cred_pat", kind: "pat" as const, label: "repository PAT (acme)", fingerprint: "sha256:pat", subject: { kind: "owner" as const, id: "acme" }, purpose: "repository-pat" as const, recordedAt: "2026-01-01T00:00:00.000Z" },
       ];
       return all.filter((c) => !filter?.kind || c.kind === filter.kind);
     },
@@ -53,8 +53,17 @@ function fakeSeeder(failFor: string[] = []): { seeder: { refreshBuildRepoPat: (i
   };
 }
 
-/** The owner identities: acme records its packages reader; any other owner none. */
-const owners: OwnerIdentityReader = (org) => (org === "acme" ? { packagesCredentialId: "cred_pkg", repoCredentialId: null } : null);
+/** The owner identities: acme records its packages reader and its repository PAT; any other owner none. */
+const owners: OwnerIdentityReader = (org) => (org === "acme" ? { packagesCredentialId: "cred_pkg", repoCredentialId: "cred_pat" } : null);
+
+/** The App installed with acme, reaching every repository of it but shop — which is therefore
+ *  reached with the owner's repository PAT. */
+function app(): FakeGitHubApp {
+  const a = new FakeGitHubApp();
+  a.org = "acme";
+  a.reachable.set("acme/shop", false);
+  return a;
+}
 
 function fakeLogger(): { logger: Logger; errors: string[]; warns: string[]; infos: string[] } {
   const errors: string[] = [];
@@ -69,13 +78,13 @@ function fakeLogger(): { logger: Logger; errors: string[]; warns: string[]; info
   return { logger, errors, warns, infos };
 }
 
-/** Three build registrations: two units on the App's credential, one consumer on its own PAT. */
+/** Three build registrations of the owner acme: two the App reaches, one (shop) it does not. */
 async function registrations(): Promise<Registrations> {
   const reg = new Registrations(new FakePlatformRepo());
-  const unit = (name: string, repoCredentialId: string) => ({ name, repoURL: `https://github.com/acme/${name}.git`, repoCredentialId, owner: "acme", onboardedAt: "2026-01-01T00:00:00Z", suspended: false, quiesced: false });
-  await reg.commitRegistration({ unit: unit("acme-apps", "cred_app"), builds: ["acme-apps"], runId: "run_1" });
-  await reg.commitRegistration({ unit: unit("shop", "cred_pat"), builds: ["shop-api"], runId: "run_2" });
-  await reg.commitRegistration({ unit: unit("beta-apps", "cred_app"), builds: ["beta-apps"], runId: "run_3" });
+  const unit = (name: string) => ({ name, repoURL: `https://github.com/acme/${name}.git`, owner: "acme", onboardedAt: "2026-01-01T00:00:00Z", suspended: false, quiesced: false });
+  await reg.commitRegistration({ unit: unit("acme-apps"), builds: ["acme-apps"], runId: "run_1" });
+  await reg.commitRegistration({ unit: unit("shop"), builds: ["shop-api"], runId: "run_2" });
+  await reg.commitRegistration({ unit: unit("beta-apps"), builds: ["beta-apps"], runId: "run_3" });
   return reg;
 }
 
@@ -90,9 +99,9 @@ describe("refreshAppTokens — the catalog bump credential from the App", () => 
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
     const kube = new FakeClusterReader();
-    const githubApp = new FakeGitHubApp();
+    const githubApp = app();
     githubApp.token = "ghs_catalog_now";
-    const r = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, catalog: catalogOf(githubApp.org), githubApp });
+    const r = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, catalog: catalogOf("acme"), githubApp });
     expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", CATALOG_BUMP_UNIT]);
     expect(written.at(-1)).toEqual({ consumerName: "catalog", pat: "ghs_catalog_now", packages: "" }); // the bump entry installs nothing
     const bumpDeletes = kube.secretWrites.filter((w) => w.name === "bump-git-https").map((w) => w.namespace);
@@ -104,7 +113,7 @@ describe("refreshAppTokens — the catalog bump credential from the App", () => 
     const { store } = fakeStore({ value: "ghs_unit" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
-    const githubApp = new FakeGitHubApp();
+    const githubApp = app();
     const unreached = await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube: new FakeClusterReader(), logger, catalog: catalogOf("other-org"), githubApp });
     expect(unreached.failed).toEqual([CATALOG_BUMP_UNIT]);
     expect(written.some((w) => w.consumerName === "catalog")).toBe(false);
@@ -120,7 +129,7 @@ describe("refreshAppTokens", () => {
     const { logger, errors, warns, infos } = fakeLogger();
     const kube = new FakeClusterReader();
     const reg = await registrations();
-    expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: new FakeGitHubApp() })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
+    expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
     expect(written).toEqual([
       { consumerName: "acme-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" },
       { consumerName: "shop", pat: "github_pat_shop", packages: "ghp_packages_acme" }, // the PAT itself, and the reader of its owner (#230)
@@ -136,7 +145,7 @@ describe("refreshAppTokens", () => {
     // The next tick writes the token of that hour — the value is never remembered between ticks —
     // and deletes the Secrets again, because ESO reads Vault at no other moment.
     minted.value = "ghs_minted_at_tick_2";
-    await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: new FakeGitHubApp() });
+    await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() });
     expect(written.at(-1)).toEqual({ consumerName: "beta-apps", pat: "ghs_minted_at_tick_2", packages: "ghp_packages_acme" });
     expect(kube.secretWrites).toHaveLength(18);
   });
@@ -146,7 +155,7 @@ describe("refreshAppTokens", () => {
     const { seeder, written } = fakeSeeder(["acme-apps"]);
     const { logger, errors } = fakeLogger();
     const kube = new FakeClusterReader();
-    expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, githubApp: new FakeGitHubApp() })).toEqual({ refreshed: ["shop", "beta-apps"], failed: ["acme-apps"] });
+    expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: ["shop", "beta-apps"], failed: ["acme-apps"] });
     expect(written.map((w) => w.consumerName)).toEqual(["shop", "beta-apps"]);
     // A Secret deleted behind a write that did not happen would make ESO materialize the DEAD value
     // again — nothing is gained, so nothing is deleted.
@@ -162,7 +171,7 @@ describe("refreshAppTokens", () => {
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
     const kube = new FakeClusterReader({ throwOnDeleteSecret: new Error("delete Secret acme-apps-build/build-git-https: secrets is forbidden (403)") });
-    expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, githubApp: new FakeGitHubApp() })).toEqual({ refreshed: [], failed: ["acme-apps", "shop", "beta-apps"] });
+    expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: [], failed: ["acme-apps", "shop", "beta-apps"] });
     // Every Vault write happened: the failure is behind the write, and the next unit was reached.
     expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps"]);
     expect(errors).toHaveLength(3);
@@ -178,7 +187,7 @@ describe("refreshAppTokens", () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors, warns } = fakeLogger();
-    expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, logger, githubApp: new FakeGitHubApp() })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
+    expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, logger, githubApp: app() })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
     expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps"]);
     expect(errors).toEqual([]);
     expect(warns).toHaveLength(1);
@@ -192,7 +201,7 @@ describe("refreshAppTokens", () => {
     const { logger, errors } = fakeLogger();
     const kube = new FakeClusterReader();
     const broken = { listBuildRegistrations: async () => { throw new Error("registrations/broken/build.yaml is not a readable build registration"); } };
-    expect(await refreshAppTokens({ store, owners, registrations: broken, seeder, kube, logger, githubApp: new FakeGitHubApp() })).toEqual({ refreshed: [], failed: [] });
+    expect(await refreshAppTokens({ store, owners, registrations: broken, seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: [], failed: [] });
     expect(written).toEqual([]);
     expect(kube.secretWrites).toEqual([]);
     expect(errors).toHaveLength(1);
@@ -205,7 +214,7 @@ describe("refreshAppTokens", () => {
     const { logger, errors, warns, infos } = fakeLogger();
     const kube = new FakeClusterReader();
     const reg = new Registrations(new FakePlatformRepo()); // no build registration at all
-    expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: new FakeGitHubApp() })).toEqual({ refreshed: [], failed: [] });
+    expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: [], failed: [] });
     expect(written).toEqual([]);
     expect(kube.secretWrites).toEqual([]);
     expect(errors).toEqual([]);

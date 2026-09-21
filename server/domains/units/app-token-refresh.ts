@@ -17,16 +17,16 @@
 // on a timer). So every successful rewrite is followed by the deletion of the unit's three target
 // Secrets, which is the one act that makes ESO fetch the new value.
 //
-// WHICH units: every build registration that names a repoCredentialId. The registration is the one
-// holder of the id (registrations/<unit>/build.yaml); what the id opens to is the store's business,
-// and nothing here reads a label, a name or a kind.
+// WHICH units: every build registration. The credential each unit's repository is reached with is
+// the owner's, resolved from the URL at every tick (repo-identity.ts resolveRepoCredentialId, #226):
+// the App's one row, or the owner's repository PAT row; what the id opens to is the store's business.
 import type { Logger } from "../../kernel/logger.ts";
 import type { CredentialStore, UseContext } from "../../security/store.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { ClusterReader } from "../../adapters/kube/port.ts";
 import type { Registrations } from "./registrations.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
-import { packagesReaderFor, type OwnerIdentityReader } from "./repo-identity.ts";
+import { packagesReaderFor, resolveRepoCredentialId, type OwnerIdentityReader } from "./repo-identity.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import { appReachesRepoURL } from "./repo-identity.ts";
 
@@ -53,7 +53,7 @@ export interface AppTokenRefreshDeps {
    *  App on every tick (#197). Absent ⇒ no tenant family. */
   catalog?: { repoURL: string } | undefined;
   /** The platform's GitHub App — measured against the catalog and minting the bump token. */
-  githubApp: Pick<GitHubApp, "reachesRepository" | "installationToken">;
+  githubApp: Pick<GitHubApp, "reachesRepository" | "installationToken" | "installationOrg">;
   /** The build plane's cluster reader — the master's own, the cluster this Manager runs on. Absent
    *  on a Manager whose kube is not wired: the entries are still rewritten, and the deletion that
    *  would carry them into the Secrets is logged as skipped, per unit. */
@@ -109,7 +109,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   try {
     for (const { unit, entry } of await deps.registrations.listBuildRegistrations()) {
       buildUnits.push(unit);
-      if (entry.repoCredentialId) units.push({ unit, credentialId: entry.repoCredentialId, repoURL: entry.repoURL });
+      units.push({ unit, credentialId: await resolveRepoCredentialId({ repoURL: entry.repoURL, githubApp: deps.githubApp, owners: deps.owners, store: deps.store }), repoURL: entry.repoURL });
     }
   } catch (err) {
     deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the repo-pat refresh could not read which units carry a credential — no repo-pat was rewritten this time");

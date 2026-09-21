@@ -148,8 +148,10 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
 /** A credential store shaped like the real one for the kind the apps-repo steps seal: a `github-app`
  *  credential opens to the token the App answers at THAT moment (security/store.ts mints it), every
  *  other kind to what was sealed. Records what it sealed. */
+/** A credential store standing on the App's ONE row (#226), `cred_app`, which opens through the App. */
 function fakeCreds(app?: FakeGitHubApp): { store: CredentialStore; seals: { id: string; kind: string; label: string; plaintext: string }[] } {
   const seals: { id: string; kind: string; label: string; plaintext: string }[] = [];
+  const appRow = { id: "cred_app", kind: "github-app", label: `GitHub App (${app?.org ?? "acme-org"})`, fingerprint: "sha256:app", subject: { kind: "owner", id: app?.org ?? "acme-org" }, purpose: "repository-identity" };
   const store = {
     seal: async (i: { kind: string; label: string; plaintext: Buffer; fingerprint: string }) => {
       const id = `cred_${seals.length + 1}`;
@@ -157,6 +159,10 @@ function fakeCreds(app?: FakeGitHubApp): { store: CredentialStore; seals: { id: 
       return { id, kind: i.kind, label: i.label, fingerprint: i.fingerprint };
     },
     open: async (id: string) => {
+      if (id === appRow.id) {
+        if (!app) throw new Error("the App's row opens through the App, and this store holds none");
+        return Buffer.from(await app.installationToken(), "utf8");
+      }
       const sealed = seals.find((x) => x.id === id);
       if (sealed?.kind === "github-app") {
         if (!app) throw new Error("a github-app credential opens through the App, and this store holds none");
@@ -164,7 +170,7 @@ function fakeCreds(app?: FakeGitHubApp): { store: CredentialStore; seals: { id: 
       }
       return Buffer.from(sealed?.plaintext ?? "ghp_test", "utf8");
     },
-    list: async ({ kind }: { kind: string }) => seals.filter((x) => x.kind === kind).map(({ id, kind: k, label }) => ({ id, kind: k, label, fingerprint: "sha256:app" })),
+    list: async ({ kind }: { kind: string }) => [appRow, ...seals.map(({ id, kind: k, label }) => ({ id, kind: k, label, fingerprint: "sha256:app", subject: { kind: "unit", id: "?" }, purpose: "repository-identity" }))].filter((x) => x.kind === kind),
   } as unknown as CredentialStore;
   return { store, seals };
 }
@@ -289,8 +295,8 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     expect(Object.keys(consumerRepo.filesFor(TENANT_URL))).toContain("erp/package.json");
     // ONE github-app credential for the bundle, its id on the build registration; the seed, the
     // webhook and the dispatch each opened it to the token the App mints — nothing stored.
-    expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, plaintext: "" }]);
-    expect((await onboard.registrations.readBuildRegistration(UNIT))?.entry).toMatchObject({ repoCredentialId: "cred_1", repoURL: TENANT_URL });
+    expect(creds.seals).toEqual([]); // no row per unit (#226)
+    expect((await onboard.registrations.readBuildRegistration(UNIT))?.entry).toMatchObject({ repoURL: TENANT_URL, builds: [UNIT] }); // no credential id on the entry (#226)
     expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass", packages: "ghp_test" }]); // the owner's packages reader opens to the store's fallback
     expect((onboard.github as FakeGitHubConsumer).created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect((onboard.github as FakeGitHubConsumer).dispatches.map((d) => ({ repo: d.repo, token: d.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);

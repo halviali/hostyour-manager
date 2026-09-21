@@ -10,6 +10,7 @@ import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { AppError } from "../../kernel/errors.ts";
@@ -77,11 +78,26 @@ function ports(reg: Registrations, over: Partial<PurgePorts> & FakeKube = {}): P
     argoWatchTimeoutMs: 1000,
     seeder: new FakeSeeder(),
     dns: new FakeDnsProvider(),
+    githubApp: appWith("x"),
     ...portOver,
   };
 }
 
-function ctx(stepName: string, logs: string[], creds: CredentialStore = {} as unknown as CredentialStore): StepCtx {
+/** The App installed with `owner`, reaching every repository of it — the identity every unit of the
+ *  owner is reached with (#226). */
+function appWith(owner: string): FakeGitHubApp {
+  const a = new FakeGitHubApp();
+  a.org = owner;
+  return a;
+}
+
+/** A credential store for a cleanup: the App's one row listed (repo-identity.ts appIdentityRowId), the
+ *  test's own open/revoke fakes over it. */
+function credsWith(over: Partial<CredentialStore> = {}): CredentialStore {
+  return { list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }], ...over } as unknown as CredentialStore;
+}
+
+function ctx(stepName: string, logs: string[], creds: CredentialStore = credsWith()): StepCtx {
   return {
     runId: "run_purge", stepName, db: db.db, creds, params: { ...PARAMS },
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
@@ -99,9 +115,9 @@ function seedCluster(): void {
 }
 
 /** The cluster PLUS the consumer's inventory row (a healthy, fully-onboarded consumer). */
-function seedApp(over: { repoCredentialId?: string } = {}): void {
+function seedApp(): void {
   seedCluster();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 }
 
 async function runAll(prt: PurgePorts, logs: string[], creds?: CredentialStore): Promise<void> {
@@ -168,7 +184,7 @@ describe("purge run definition", () => {
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]); // ceremony secrets
     // record-purge is a clean no-op: there is no row to mark, and no row was invented.
     expect(db.db.select().from(apps).all()).toHaveLength(0);
-    expect(logs.some((l) => l.includes("no inventory row"))).toBe(true);
+    expect(logs.some((l) => l.includes("repo-pat"))).toBe(true);
   });
 
   it("refuses to record the row while a fail-soft delete left an object standing — the backstop settles nothing offboard would not", async () => {
@@ -242,26 +258,26 @@ describe("purge run definition", () => {
     await step.run(ctx("delete-namespace", logs)); // re-run stays a no-op (already-absent → deleted:false)
   });
 
-  it("remove-repo-pat deletes the local build-tier entry by NAME and revokes the sealed credential when a row carries one", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+  it("remove-repo-pat deletes the local build-tier entry by NAME and revokes NO credential — the unit never had a row of its own (#226)", async () => {
+    seedApp();
     const seeder = new FakeSeeder();
     const revoked: Array<{ id: string; reason: string }> = [];
-    const creds = { revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as CredentialStore;
+    const creds = credsWith({ revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as Partial<CredentialStore>);
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
     await step.run(ctx("remove-repo-pat", [], creds));
     // The stage-free BUILD tier on the LOCAL Vault — the one place seed-repo-pat wrote.
     expect(seeder.deleted).toEqual([{ consumerName: "acme" }]);
-    expect(revoked).toEqual([{ id: "cred_pat", reason: "consumer acme purged" }]);
+    expect(revoked).toEqual([]);
   });
 
-  it("remove-repo-pat still deletes the build-tier entry when there is NO row (nothing to revoke)", async () => {
+  it("remove-repo-pat still deletes the build-tier entry when there is NO row", async () => {
     seedCluster(); // no app row → no sealed credential id recorded
     const seeder = new FakeSeeder();
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
     const logs: string[] = [];
     await step.run(ctx("remove-repo-pat", logs)); // must not need creds.revoke
     expect(seeder.deleted).toEqual([{ consumerName: "acme" }]);
-    expect(logs.some((l) => l.includes("no inventory row"))).toBe(true);
+    expect(logs.some((l) => l.includes("repo-pat"))).toBe(true);
   });
 
   it("remove-dns removes the unit's record and STILL fails the run on a DNS API failure (purge's one fail-closed teardown step)", async () => {
@@ -279,15 +295,15 @@ describe("purge run definition", () => {
   });
 
   it("remove-webhook deletes the build webhook by NAME when a row carries the repo URL + PAT", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL);
     const opened: string[] = [];
-    const creds = { open: (id: string) => { opened.push(id); return Promise.resolve(Buffer.from("github_pat_test", "utf8")); } } as unknown as CredentialStore;
+    const creds = credsWith({ open: (id: string) => { opened.push(id); return Promise.resolve(Buffer.from("github_pat_test", "utf8")); } } as unknown as Partial<CredentialStore>);
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { github })).steps(PARAMS).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await step.run(ctx("remove-webhook", logs, creds));
-    expect(opened).toEqual(["cred_pat"]);
+    expect(opened).toEqual(["cred_app"]); // the App's one row — the owner x's identity, no row of the unit's (#226)
     expect(github.deletedCalls[0]?.ids).toEqual([1]);
     expect(github.hooksFor("x", "acme")).toEqual([]);
     expect(logs.every((l) => !l.includes("github_pat_test"))).toBe(true);
@@ -304,14 +320,14 @@ describe("purge run definition", () => {
   });
 
   it("remove-release-kit git-rm's the release-kit BY NAME when a row carries the repo URL + PAT", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const consumerRepo = new FakeConsumerRepo();
     // The release-kit is present (committed at onboard) so the git-rm actually reaps it.
     for (const path of ["release/release.ps1", "release/release.sh", ".github/workflows/release.yml"]) consumerRepo.seed("https://github.com/x/acme.git", path, "kit");
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await step.run(ctx("remove-release-kit", logs));
-    expect(consumerRepo.opened).toEqual([{ repoURL: "https://github.com/x/acme.git", credentialId: "cred_pat" }]);
+    expect(consumerRepo.opened).toEqual([{ repoURL: "https://github.com/x/acme.git", credentialId: "cred_app" }]);
     expect(consumerRepo.commits).toHaveLength(1);
     // The whole kit directory (stale files of older kits included) + the one owned workflow file.
     expect(consumerRepo.commits[0]!.remove).toEqual(["release", ".github/workflows/release.yml"]);
@@ -330,7 +346,7 @@ describe("purge run definition", () => {
   });
 
   it("remove-release-kit is FAIL-SOFT: a push refusal never blocks the purge", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const consumerRepo = new FakeConsumerRepo();
     consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: 403"));
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
@@ -383,7 +399,7 @@ describe("purge run definition", () => {
   // secret/build/acme/repo-pat — and through the one object that is NOT shared: the mail-ops grant
   // is per stage, so dev's stays and prod's goes.
   it("purging ONE stage of a two-stage unit keeps everything the other stage needs", async () => {
-    seedApp({ repoCredentialId: "cred_prod" });
+    seedApp();
     const platform = new FakePlatformRepo();
     // The unit's second stage stands on s2 at dev — any active cluster would do, the stage is the unit's.
     const reg = new Registrations(platform);

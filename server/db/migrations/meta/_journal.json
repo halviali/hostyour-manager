@@ -43,6 +43,13 @@
       "when": 1790014405062,
       "tag": "0005_credential-subject-owner",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790016220600,
+      "tag": "0006_apps-no-repo-credential",
+      "breakpoints": true
     }
   ]
 }

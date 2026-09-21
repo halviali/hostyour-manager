@@ -43,6 +43,7 @@ import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
+import { ensureAppIdentityRow } from "../domains/units/repo-identity.ts";
 import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
 import { readOwnerIdentity } from "../domains/units/owners.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
@@ -131,6 +132,8 @@ export async function wire(): Promise<Wired> {
   // store (dev). Either way the store API is identical to every caller, and one of the two is
   // always supplied (boot/store-backend.ts).
   const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config), githubApp });
+  // THE APP'S ONE ROW (#226): every clone and hook call of a repository the App reaches opens it.
+  await ensureAppIdentityRow(store, githubApp);
   phase("credential store");
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the

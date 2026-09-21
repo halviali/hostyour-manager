@@ -71,8 +71,11 @@ export interface SearchDeps {
   cloud: CarrierRepo;
   /** catalog: charts/* (class b) and registrations/* (class d) on every branch. */
   deploy: CarrierRepo;
-  /** A unit's OWN repo, opened per unit under that unit's own read credential (class a). */
+  /** A unit's OWN repo, opened per unit under its owner's identity (class a). */
   unit: Pick<RepoReader, "cloneAtRef" | "readFile" | "dispose">;
+  /** The credential a unit's repository is reached with, resolved from its URL now (repo-identity.ts
+   *  resolveRepoCredentialId, #226): the App's row or the owner's PAT row. */
+  unitCredential: (repoURL: string, signal?: AbortSignal) => Promise<string>;
 }
 
 /** The directory of hostyour-cloud that holds one registration per unit. */
@@ -173,7 +176,7 @@ async function searchUnitCharts(deps: SearchDeps, signal?: AbortSignal): Promise
       // registered, so its pins are not optional to know.
       const entry = ConsumerRegistrationSchema.parse(parseYaml(raw));
       if (entry.chartPath === undefined) continue; // build-only: its images are pinned in (b) or (c)
-      hits.push(...(await readUnitChart(deps, entry.name, entry.repoURL, entry.repoCredentialId, entry.chartPath, stage, signal)));
+      hits.push(...(await readUnitChart(deps, entry.name, entry.repoURL, await deps.unitCredential(entry.repoURL, signal), entry.chartPath, stage, signal)));
     }
   }
   return hits;
@@ -187,7 +190,7 @@ async function readUnitChart(
   deps: SearchDeps,
   name: string,
   repoURL: string,
-  credentialId: string | undefined,
+  credentialId: string,
   chartPath: string,
   stage: Stage,
   signal?: AbortSignal,
@@ -199,7 +202,7 @@ async function readUnitChart(
     ({ workdir } = await deps.unit.cloneAtRef({
       repoURL,
       ref: branch,
-      ...(credentialId ? { credentialId } : {}),
+      credentialId,
       ...(signal ? { signal } : {}),
     }));
   } catch (e) {

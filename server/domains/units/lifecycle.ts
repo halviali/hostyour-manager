@@ -29,6 +29,9 @@ export interface LifecyclePorts {
   registrations: Registrations;
   resolver: ClusterKubeResolver;
   argoWatchTimeoutMs: number;
+  /** The platform's GitHub App: a cleanup reaching a unit's repository resolves the owner's identity
+   *  with it (repo-identity.ts unitRepoCredentialId, #226). */
+  githubApp?: GitHubApp;
 }
 
 export interface AppCluster {

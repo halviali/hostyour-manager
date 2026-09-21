@@ -252,7 +252,7 @@ export const schemaWhy = (err: z.ZodError): string => err.issues.map((i) => i.pa
  *  convention the caller has to remember. */
 export interface RegistrationCommit {
   /** The fields both files share — the unit's identity and its two pause flags. */
-  unit: Pick<ConsumerRegistration, "name" | "repoURL" | "repoCredentialId" | "owner" | "onboardedAt" | "suspended" | "quiesced">;
+  unit: Pick<ConsumerRegistration, "name" | "repoURL" | "owner" | "onboardedAt" | "suspended" | "quiesced">;
   /** The ATTESTED build names of the unit — build.yaml's own field. Empty ⇒ the unit builds nothing. */
   builds: string[];
   /** The deploy group of ONE stage, plus the OPTIONAL attested fqdn — the manifest's declared extra

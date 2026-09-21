@@ -17,7 +17,7 @@ const AUTH_REPO = "https://github.com/example/example-auth.git";
 /** hostyour-cloud with ONE deployable registration (example-auth at prod) plus a build-only unit. */
 function cloudWithRegistrations(): FakeCarrierRepo {
   const cloud = cloudCarryingPlatformApps();
-  cloud.seed(cloud.booksBranch, "registrations/example-auth/prod.yaml", stageRegistration({ name: "example-auth", repoURL: AUTH_REPO, repoCredentialId: "cred_auth", chartPath: "deploy/chart", cluster: "m1" }));
+  cloud.seed(cloud.booksBranch, "registrations/example-auth/prod.yaml", stageRegistration({ name: "example-auth", repoURL: AUTH_REPO, chartPath: "deploy/chart", cluster: "m1" }));
   cloud.seed(cloud.booksBranch, "registrations/hostyour-manager/build.yaml", buildRegistration({ name: "hostyour-manager", repoURL: "https://github.com/example/hostyour-manager.git", builds: ["manager"] }));
   return cloud;
 }
@@ -34,7 +34,7 @@ function cloudCarryingPlatformApps(): FakeCarrierRepo {
 }
 
 function deps(over: Partial<SearchDeps> = {}): SearchDeps {
-  return { cloud: cloudCarryingPlatformApps(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), ...over };
+  return { cloud: cloudCarryingPlatformApps(), deploy: new FakeCarrierRepo(), unit: new FakeUnitRepo(), unitCredential: async () => "cred_owner", ...over };
 }
 
 /** A tenant registration as the Manager writes it, with or without its own apps bundle. */
@@ -55,7 +55,7 @@ describe("searchCarriers — the four carrier classes", () => {
     const hits = await searchCarriers(deps({ cloud, unit }));
 
     expect(hits.map((h) => pinKey(h.pin))).toEqual(["example-auth-backend:0.4.0"]);
-    expect(unit.clones).toEqual([{ repoURL: AUTH_REPO, ref: "deploy/prod", credentialId: "cred_auth" }]);
+    expect(unit.clones).toEqual([{ repoURL: AUTH_REPO, ref: "deploy/prod", credentialId: "cred_owner" }]); // the owner's identity, resolved now (#226)
     expect(hits[0]!.carrier).toBe(`${AUTH_REPO}@deploy/prod:deploy/chart/values-prod.yaml`);
     expect(unit.open.size).toBe(0); // every clone disposed
   });

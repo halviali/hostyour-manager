@@ -75,9 +75,9 @@ describe("ConsumerRegistrationSchema", () => {
 
 describe("serializePointer (generic over the registration schemas)", () => {
   it("round-trips a validated registration as injection-safe flat YAML", () => {
-    const y = serializePointer(ConsumerRegistrationSchema, ConsumerRegistrationSchema.parse({ ...unit({ repoCredentialId: "cred_1" }), builds: ["acme-backend"] }));
+    const y = serializePointer(ConsumerRegistrationSchema, ConsumerRegistrationSchema.parse({ ...unit({ owner: "team-acme" }), builds: ["acme-backend"] }));
     expect(y).toContain('name: "acme"');
-    expect(y).toContain('repoCredentialId: "cred_1"');
+    expect(y).toContain('owner: "team-acme"');
     expect(y).toContain('builds: ["acme-backend"]');
     expect(y).toContain("suspended: false");
     expect(y).toContain("quiesced: false");
@@ -260,11 +260,11 @@ describe("Registrations.commitRegistration", () => {
   it("reads back the stage registration it wrote", async () => {
     const repo = new FakePlatformRepo();
     const reg = new Registrations(repo);
-    await reg.commitRegistration({ unit: unit({ repoCredentialId: "cred_1", owner: "team-acme" }), builds: [], deploy: deploy(), runId: "run_1" });
+    await reg.commitRegistration({ unit: unit({ owner: "team-acme" }), builds: [], deploy: deploy(), runId: "run_1" });
     const read = await reg.readRegistration("prod", "acme");
     expect(read?.entry.name).toBe("acme");
     expect(read?.entry.cluster).toBe("s1");
-    expect(read?.entry.repoCredentialId).toBe("cred_1");
+    expect(read?.entry.owner).toBe("team-acme");
     expect(read?.entry.suspended).toBe(false);
   });
 });
@@ -351,12 +351,12 @@ describe("Registrations.listAttestedBuildNames", () => {
     const repo = new FakePlatformRepo();
     const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme-backend"], deploy: deploy(), runId: "run_1" });
-    await reg.commitRegistration({ unit: unit({ name: "other", repoURL: "https://github.com/x/other.git", repoCredentialId: "cred_app" }), builds: ["other-api"], runId: "run_2" });
+    await reg.commitRegistration({ unit: unit({ name: "other", repoURL: "https://github.com/x/other.git" }), builds: ["other-api"], runId: "run_2" });
     repo.seed(repo.booksBranch, "registrations/deploy-only/prod.yaml", "name: deploy-only\n");
     const listed = await reg.listBuildRegistrations();
-    expect(listed.map((r) => [r.unit, r.entry.repoCredentialId, r.entry.builds])).toEqual([
-      ["acme", unit().repoCredentialId, ["acme-backend"]],
-      ["other", "cred_app", ["other-api"]],
+    expect(listed.map((r) => [r.unit, r.entry.repoURL, r.entry.builds])).toEqual([
+      ["acme", unit().repoURL, ["acme-backend"]],
+      ["other", "https://github.com/x/other.git", ["other-api"]],
     ]);
   });
 

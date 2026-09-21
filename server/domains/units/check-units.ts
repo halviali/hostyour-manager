@@ -22,12 +22,14 @@ import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import { probeIdentity, probeWebhook, probeDns } from "./onboard-probes.ts";
 import { probeTenantDns } from "./tenant-probes.ts";
+import { resolveRepoCredentialId } from "./repo-identity.ts";
+import { readOwnerIdentity } from "./owners.ts";
 
 export interface CheckUnitsPorts {
   /** The consumer onboarding's ports, handed late (the consumer family is wired after the tenant's). */
   onboard?: () => { ports: OnboardPorts } | undefined;
   /** The tenant onboarding's DNS provider and apex resolver, for the tenants' wildcard records. */
-  tenant: Pick<TenantOnboardPorts, "dns" | "resolveUnitApex">;
+  tenant: Pick<TenantOnboardPorts, "dns" | "resolveUnitApex" | "githubApp">;
 }
 
 function probeCtx(ctx: StepCtx, prefix: string): ProbeCtx {
@@ -64,19 +66,31 @@ export function checkUnitsStep(ports: CheckUnitsPorts): Step {
       const tally = { consumers: 0, tenants: 0, attention: 0 };
       const onboard = ports.onboard?.();
       const consumers = ctx.db
-        .select({ id: apps.id, name: apps.name, stage: apps.stage, host: apps.host, repoUrl: apps.repoUrl, repoCredentialId: apps.repoCredentialId, clusterId: apps.clusterId, domain: clusters.domain })
+        .select({ id: apps.id, name: apps.name, stage: apps.stage, host: apps.host, repoUrl: apps.repoUrl, clusterId: apps.clusterId, domain: clusters.domain })
         .from(apps).innerJoin(clusters, eq(apps.clusterId, clusters.id)).where(eq(apps.status, "active")).all();
       for (const c of consumers) {
         if (ctx.signal.aborted) break;
         let findings: PreflightCheck[];
         if (!onboard) {
           findings = [{ id: "check", title: `The unit ${c.name}`, severity: "soft", status: "warn", detail: "not measured: the consumer onboarding is not wired on this manager" }];
-        } else if (!c.repoUrl || !c.repoCredentialId) {
-          findings = [{ id: "check", title: `The unit ${c.name}`, severity: "soft", status: "warn", detail: "not measured: the row records no repository or no credential (an adopted unit)" }];
+        } else if (!c.repoUrl) {
+          findings = [{ id: "check", title: `The unit ${c.name}`, severity: "soft", status: "warn", detail: "not measured: the row records no repository (an adopted unit)" }];
         } else {
           const unitApex = await ports.tenant.resolveUnitApex(c.domain, c.stage as Stage);
+          // The credential the probes open: the owner's, resolved from the URL now (#226) — a unit
+          // whose owner lost its identity is a finding, not a crash of the whole check.
+          let repoCredentialId: string;
+          try {
+            repoCredentialId = await resolveRepoCredentialId({ repoURL: c.repoUrl, githubApp: ports.tenant.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
+          } catch (e) {
+            findings = [{ id: "identity", title: `The unit ${c.name}`, severity: "hard", status: "fail", detail: e instanceof Error ? e.message : String(e) }];
+            ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings }, updatedAt: now }).where(eq(apps.id, c.id)).run();
+            tally.consumers += 1;
+            tally.attention += 1;
+            continue;
+          }
           // The slice of the onboarding's params the three probes read, off the row and the cluster.
-          const p = { consumerName: c.name, repoURL: c.repoUrl, repoCredentialId: c.repoCredentialId, host: c.host, stage: c.stage, unitApex, domain: c.domain, clusterId: c.clusterId } as DeployableOnboardParams;
+          const p = { consumerName: c.name, repoURL: c.repoUrl, repoCredentialId, host: c.host, stage: c.stage, unitApex, domain: c.domain, clusterId: c.clusterId } as DeployableOnboardParams;
           findings = await consumerFindings(onboard.ports, p, probeCtx(ctx, c.name));
         }
         ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings }, updatedAt: now }).where(eq(apps.id, c.id)).run();

@@ -10,6 +10,7 @@ import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FakeConsumerRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { AppError } from "../../kernel/errors.ts";
 import type { StepCtx } from "../../executor/types.ts";
@@ -88,14 +89,28 @@ function ports(reg: Registrations, over: Partial<OffboardPorts> & FakeKube = {})
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    argoWatchTimeoutMs: 1000, seeder: new FakeSeeder(), dns: new FakeDnsProvider(),
+    argoWatchTimeoutMs: 1000, seeder: new FakeSeeder(), dns: new FakeDnsProvider(), githubApp: appWith("x"),
     // The offboard target s1.example is BUILT BY another cluster, so the hook this teardown looks
     // for stands at that cluster's host — never at the one being torn down.
     ...portOver,
   };
 }
 
-function ctx(stepName: string, logs: string[], creds: CredentialStore = {} as unknown as CredentialStore): StepCtx {
+/** The App installed with `owner`, reaching every repository of it — the identity every unit of the
+ *  owner is reached with (#226). */
+function appWith(owner: string): FakeGitHubApp {
+  const a = new FakeGitHubApp();
+  a.org = owner;
+  return a;
+}
+
+/** A credential store for a cleanup: the App's one row listed (repo-identity.ts appIdentityRowId), the
+ *  test's own open/revoke fakes over it. */
+function credsWith(over: Partial<CredentialStore> = {}): CredentialStore {
+  return { list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }], ...over } as unknown as CredentialStore;
+}
+
+function ctx(stepName: string, logs: string[], creds: CredentialStore = credsWith()): StepCtx {
   return {
     runId: "run_off", stepName, db: db.db, creds, params: { appId: "app_1" },
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
@@ -105,10 +120,10 @@ function ctx(stepName: string, logs: string[], creds: CredentialStore = {} as un
   };
 }
 
-function seedApp(over: { repoCredentialId?: string } = {}): void {
+function seedApp(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: over.repoCredentialId ?? null }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 }
 
 describe("offboard run definition", () => {
@@ -259,11 +274,11 @@ describe("offboard run definition", () => {
     expect(del).toBeGreaterThan(steps.findIndex((s) => s.name === "watch-removal"));
   });
 
-  it("remove-repo-pat deletes the local build-tier entry and revokes the sealed clone credential", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+  it("remove-repo-pat deletes the local build-tier entry and revokes NO credential — the unit never had a row of its own (#226)", async () => {
+    seedApp();
     const seeder = new FakeSeeder();
     const revoked: Array<{ id: string; reason: string }> = [];
-    const creds = { revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as CredentialStore;
+    const creds = credsWith({ revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as Partial<CredentialStore>);
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-repo-pat")!;
     const logs: string[] = [];
     await step.run(ctx("remove-repo-pat", logs, creds));
@@ -271,7 +286,7 @@ describe("offboard run definition", () => {
     // The stage-free BUILD tier on the LOCAL Vault — the one place seed-repo-pat wrote: the
     // manager runs on the build-plane cluster, so there is no target-cluster address to resolve.
     expect(seeder.deleted).toEqual([{ consumerName: "acme" }]);
-    expect(revoked).toEqual([{ id: "cred_pat", reason: "consumer acme offboarded" }]);
+    expect(revoked).toEqual([]); // the owner's identity outlives the unit
     expect(logs.some((l) => l.includes("secret/build/acme/repo-pat"))).toBe(true);
   });
 
@@ -396,16 +411,16 @@ describe("offboard run definition", () => {
   });
 
   it("remove-webhook deletes the consumer's build webhook with the consumer PAT, at the build plane its cluster map names", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL); // where the onboard put it: s1's build plane
     const opened: string[] = [];
-    const creds = { open: (id: string) => { opened.push(id); return Promise.resolve(Buffer.from("github_pat_test", "utf8")); } } as unknown as CredentialStore;
+    const creds = credsWith({ open: (id: string) => { opened.push(id); return Promise.resolve(Buffer.from("github_pat_test", "utf8")); } } as unknown as Partial<CredentialStore>);
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { github })).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await step.run(ctx("remove-webhook", logs, creds));
     // The GitHub org/repo comes from the apps row's repo_url path (x/acme), NOT the human owner.
-    expect(opened).toEqual(["cred_pat"]);
+    expect(opened).toEqual(["cred_app"]); // the App's one row — the owner x's identity, no row of the unit's (#226)
     expect(github.deletedCalls).toEqual([{ owner: "x", repo: "acme", token: "github_pat_test", ids: [1] }]);
     expect(github.hooksFor("x", "acme")).toEqual([]); // gone
     expect(logs.some((l) => l.includes("build webhook removed on x/acme"))).toBe(true);
@@ -413,10 +428,10 @@ describe("offboard run definition", () => {
   });
 
   it("remove-webhook is FAIL-SOFT: a delete refusal logs a warning and never blocks offboard", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const github = new FakeGitHubConsumer();
     github.scopeError = true; // the PAT lost admin:repo_hook — must NOT crash the teardown
-    const creds = { open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")) } as unknown as CredentialStore;
+    const creds = credsWith({ open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")) } as unknown as Partial<CredentialStore>);
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { github })).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-webhook", logs, creds))).resolves.toBeUndefined();
@@ -424,7 +439,7 @@ describe("offboard run definition", () => {
   });
 
   it("remove-webhook fail-soft skips when no webhook adapter is wired (never blocks offboard)", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" }).find((s) => s.name === "remove-webhook")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-webhook", logs))).resolves.toBeUndefined();
@@ -432,7 +447,7 @@ describe("offboard run definition", () => {
   });
 
   it("remove-webhook runs BEFORE remove-repo-pat so the sealed clone PAT is still openable", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" });
     const w = steps.findIndex((s) => s.name === "remove-webhook");
     const r = steps.findIndex((s) => s.name === "remove-repo-pat");
@@ -441,7 +456,7 @@ describe("offboard run definition", () => {
   });
 
   it("remove-release-kit git-rm's the release-kit's three paths from the consumer repo with the sealed PAT", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const consumerRepo = new FakeConsumerRepo();
     // The release-kit is present (committed at onboard) so the git-rm actually reaps it.
     for (const path of ["release/release.ps1", "release/release.sh", ".github/workflows/release.yml"]) consumerRepo.seed("https://github.com/x/acme.git", path, "kit");
@@ -450,7 +465,7 @@ describe("offboard run definition", () => {
     await step.run(ctx("remove-release-kit", logs));
     // Opened the consumer repo (repo URL from the apps row, sealed PAT from repoCredentialId) and
     // recorded a remove of exactly the three release-kit paths — no writes.
-    expect(consumerRepo.opened).toEqual([{ repoURL: "https://github.com/x/acme.git", credentialId: "cred_pat" }]);
+    expect(consumerRepo.opened).toEqual([{ repoURL: "https://github.com/x/acme.git", credentialId: "cred_app" }]);
     expect(consumerRepo.commits).toHaveLength(1);
     // The whole kit directory (stale files of older kits included) + the one owned workflow file.
     expect(consumerRepo.commits[0]!.remove).toEqual(["release", ".github/workflows/release.yml"]);
@@ -459,7 +474,7 @@ describe("offboard run definition", () => {
   });
 
   it("remove-release-kit is FAIL-SOFT: a push refusal logs a warning and never blocks offboard", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const consumerRepo = new FakeConsumerRepo();
     consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: remote: Permission denied (403)"));
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
@@ -469,12 +484,12 @@ describe("offboard run definition", () => {
   });
 
   it("a release-kit removal failure never blocks the rest of offboard (later steps still run, row offboarded)", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
     const consumerRepo = new FakeConsumerRepo();
     consumerRepo.failOpen(new AppError("UPSTREAM", "clone failed: 403")); // the release-kit removal cannot even open the repo
-    const creds = { revoke: () => Promise.resolve() } as unknown as CredentialStore;
+    const creds = credsWith({ revoke: () => Promise.resolve() } as unknown as Partial<CredentialStore>);
     const logs: string[] = [];
     for (const step of makeOffboardDef(ports(reg, { consumerRepo })).steps({ appId: "app_1" })) await step.run(ctx(step.name, logs, creds));
     // The teardown completed despite the release-kit failure: the row is offboarded (record-offboard ran).
@@ -483,7 +498,7 @@ describe("offboard run definition", () => {
   });
 
   it("remove-release-kit runs BEFORE remove-repo-pat so the sealed clone PAT is still openable", async () => {
-    seedApp({ repoCredentialId: "cred_pat" });
+    seedApp();
     const steps = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()))).steps({ appId: "app_1" });
     const rk = steps.findIndex((s) => s.name === "remove-release-kit");
     const rp = steps.findIndex((s) => s.name === "remove-repo-pat");

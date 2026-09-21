@@ -3,7 +3,7 @@ import { eq, and } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters } from "../../db/schema/inventory.ts";
-import { AppError, errNotFound } from "../../kernel/errors.ts";
+import { errNotFound } from "../../kernel/errors.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
@@ -15,6 +15,8 @@ import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { ConsumerRepo } from "../../adapters/git/port.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { removeConsumerWebhook } from "./onboard-webhook.ts";
+import { unitRepoCredentialId } from "./repo-identity.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { removeUnitDns, consumerUnitHost } from "./unit-dns.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -338,7 +340,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
           github: ports.github,
           consumerName: t.name,
           repoURL: row?.repoUrl,
-          repoCredentialId: row?.repoCredentialId,
+          repoCredentialId: await unitRepoCredentialId({ repoURL: row?.repoUrl, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal }),
         });
       },
     },
@@ -376,7 +378,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
           consumerRepo: ports.consumerRepo,
           consumerName: t.name,
           repoURL: row?.repoUrl,
-          repoCredentialId: row?.repoCredentialId,
+          repoCredentialId: await unitRepoCredentialId({ repoURL: row?.repoUrl, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal }),
         });
       },
     },
@@ -395,18 +397,6 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
         if (!(await unitStaysRegistered(ctx, ports.registrations, t, "the repo PAT"))) {
           await ports.seeder.deleteBuildRepoPat({ consumerName: t.name });
           ctx.log("meta", `repo PAT removed — ${KV_MOUNT}/build/${t.name}/repo-pat deleted`);
-        }
-        const row = findAppRow(ctx.db, t);
-        if (row?.repoCredentialId) {
-          try {
-            await ctx.creds.revoke(row.repoCredentialId, `consumer ${t.name} purged`);
-          } catch (err) {
-            // Idempotent: a re-run (or a prior offboard) finds the credential already revoked/purged.
-            if (!(err instanceof AppError && err.code === "NOT_FOUND")) throw err;
-          }
-          ctx.log("meta", `the sealed clone credential of ${t.name} at ${t.stage} revoked`);
-        } else {
-          ctx.log("meta", `no inventory row for ${t.name} on this cluster → no sealed clone credential to revoke`);
         }
       },
     },

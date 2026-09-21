@@ -10,6 +10,7 @@ import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
 import { FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -73,14 +74,14 @@ async function seedTwoStages(reg: Registrations): Promise<void> {
 function seedProdApp(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_prod" }).run();
+  db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 }
 
 /** dev: its OWN server, cluster and row (app_2) on s2. The row the "last stage" offboard is driven from. */
 function seedDevApp(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "dev", domain: "s2.example", status: "active" }).run();
-  db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active", repoCredentialId: "cred_dev" }).run();
+  db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 }
 
 /** The one grant the Manager still writes, as the two onboards left it: one mail-ops pair PER STAGE,
@@ -108,6 +109,13 @@ function twoClusterResolver(projects: FakeMasterProjectWriter): FakeClusterKubeR
     argoNamespace: "s2",
   });
   return resolver;
+}
+
+/** The App installed with `owner`, reaching every repository of it (#226). */
+function appWith(owner: string): FakeGitHubApp {
+  const a = new FakeGitHubApp();
+  a.org = owner;
+  return a;
 }
 
 function ctx(stepName: string, logs: string[], creds: CredentialStore): StepCtx {
@@ -139,6 +147,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     dns.seed("acme.dev.s2.example", "A", "203.0.113.20"); // dev's — under the OTHER cluster's apex
     const revoked: string[] = [];
     const creds = {
+      list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
       revoke: (id: string) => { revoked.push(id); return Promise.resolve(); },
     } as unknown as CredentialStore;
@@ -146,7 +155,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     const logs: string[] = [];
     const prt: OffboardPorts = {
       registrations: reg, resolver: twoClusterResolver(projects), argoWatchTimeoutMs: 1000,
-      seeder, dns, github, consumerRepo, buildRbac,
+      seeder, dns, github, consumerRepo, buildRbac, githubApp: appWith("x"),
     };
     for (const step of makeOffboardDef(prt).steps({ appId: "app_1" })) await step.run(ctx(step.name, logs, creds));
 
@@ -155,9 +164,9 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     expect(dns.record("acme.s1.example", "A")).toBeUndefined();
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("offboarded");
-    // The sealed clone credential is the ROW's own — every stage's onboard seals its own — so revoking
-    // prod's leaves dev holding cred_dev.
-    expect(revoked).toEqual(["cred_prod"]);
+    // No credential is the row's own (#226): the unit is reached with the owner x's identity, which
+    // outlives every stage, so nothing is revoked.
+    expect(revoked).toEqual([]);
 
     // PER UNIT — everything dev still releases and deploys through is untouched.
     expect(await reg.readRegistration("dev", "acme")).not.toBeNull();
@@ -190,13 +199,14 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
     const seeder = new FakeSeeder();
     const creds = {
+      list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
       revoke: () => Promise.resolve(),
     } as unknown as CredentialStore;
 
     const prt: OffboardPorts = {
       registrations: reg, resolver: twoClusterResolver(new FakeMasterProjectWriter()), argoWatchTimeoutMs: 1000,
-      seeder, dns: new FakeDnsProvider(), github, consumerRepo, buildRbac,
+      seeder, dns: new FakeDnsProvider(), github, consumerRepo, buildRbac, githubApp: appWith("x"),
     };
     const logs: string[] = [];
     // prod first (the unit survives at dev), then dev — the run that IS the unit's last stage.

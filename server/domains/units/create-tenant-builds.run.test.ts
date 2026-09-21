@@ -147,11 +147,13 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     ...over,
   });
 }
-function ctx(p: Record<string, unknown>, logs: string[], sealed: { kind: string; label: string }[] = []): StepCtx {
+/** A credential store standing on the App's ONE row (#226) — `cred_app`, the owner acme's — and
+ *  every open recorded, so a test reads which credential a unit was reached with. */
+function ctx(p: Record<string, unknown>, logs: string[], opened: string[] = []): StepCtx {
   const creds = {
-    seal: async (i: { kind: string; label: string; fingerprint: string }) => { sealed.push({ kind: i.kind, label: i.label }); return { id: "cred_sealed", kind: i.kind, label: i.label, fingerprint: i.fingerprint }; },
-    open: async () => Buffer.from("ghp_test"),
-    list: async () => [],
+    seal: async () => { throw new Error("no row is sealed per unit (#226)"); },
+    open: async (id: string) => { opened.push(id); return Buffer.from("ghp_test"); },
+    list: async ({ kind }: { kind?: string } = {}) => [{ id: "cred_app", kind: "github-app", label: "GitHub App (acme)", fingerprint: "sha256:app", subject: { kind: "owner", id: "acme" }, purpose: "repository-identity" }].filter((r) => !kind || r.kind === kind),
   };
   return {
     runId: "run_bld", stepName: "build", db: db.db, creds: creds as unknown as CredentialStore, params: p,
@@ -178,11 +180,11 @@ describe("resolveBuildUnits — the missing images grouped by the repository tha
     const r = await resolveBuildUnits({
       missing: [{ repo: "example-jobs", tag: "0.2.0" }, { repo: "example-engine", tag: "0.4.0" }, { repo: "example-nobody", tag: "1" }],
       buildRepos: BUILD_REPOS,
-      registration: async (unit) => (unit === "example-platform" ? { form: "build-only", repoCredentialId: "cred_platform" } : null),
+      registration: async (unit) => (unit === "example-platform" ? { form: "build-only" } : null),
     });
     expect(r.units).toEqual([
       { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false },
-      { unit: "example-platform", repoURL: PLATFORM_REPO, images: ["example-engine"], registered: true, form: "build-only", repoCredentialId: "cred_platform" },
+      { unit: "example-platform", repoURL: PLATFORM_REPO, images: ["example-engine"], registered: true, form: "build-only" },
     ]);
     expect(r.unmapped).toEqual([{ repo: "example-nobody", tag: "1" }]);
   });
@@ -226,12 +228,12 @@ describe("create-tenant planStream — the build units and their owner's identit
     seedClusters();
     const prt = withAppsTemplate(ports({
       registryProbe: new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] }),
-      buildUnitRegistration: async (unit) => (unit === "example-platform" ? { form: "build-only", repoCredentialId: "cred_platform" } : null),
+      buildUnitRegistration: async (unit) => (unit === "example-platform" ? { form: "build-only" } : null),
     }));
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
-    expect(result.params.buildUnits[0]).toMatchObject({ unit: "example-platform", registered: true, repoCredentialId: "cred_platform" });
+    expect(result.params.buildUnits[0]).toMatchObject({ unit: "example-platform", registered: true });
     expect(result.plan.requiredSecrets).toEqual([]);
   });
   it("refuses a render that pulls the apps TEMPLATE (tenant.appsBundle), by name, before the registry is asked — a stale chart is named, never built", async () => {
@@ -268,7 +270,7 @@ describe("create-tenant planStream — the build units and their owner's identit
     seedClusters();
     const prt = withAppsTemplate(ports({
       registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }),
-      buildUnitRegistration: async (unit) => (unit === "example-jobs" ? { form: "deployable", repoCredentialId: "cred_jobs" } : null),
+      buildUnitRegistration: async (unit) => (unit === "example-jobs" ? { form: "deployable" } : null),
     }));
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
@@ -278,7 +280,7 @@ describe("create-tenant planStream — the build units and their owner's identit
 });
 
 describe("buildUnitStep — the consumer's build-only chain, run for one unit inside the tenant run", () => {
-  it("seals the owner's repository PAT under the unit's name, resolves version and channel, registers the unit and watches its release", async () => {
+  it("reaches the unit with the owner's repository PAT row, resolves version and channel, registers the unit and watches its release", async () => {
     seedClusters();
     const buildPlane = new FakeBuildPlane();
     buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-1", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
@@ -289,18 +291,18 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false };
     const step = buildUnitStep(() => ({ ports: onboard }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit);
     const logs: string[] = [];
-    const sealed: { kind: string; label: string }[] = [];
-    await step.run(ctx(params(), logs, sealed));
-    expect(sealed).toEqual([{ kind: "pat", label: "repository PAT (example-jobs)" }]); // acme records a repository PAT; the App does not reach it
+    const opened: string[] = [];
+    await step.run(ctx(params(), logs, opened));
+    expect(opened).toContain("cred_pat_acme"); // acme's repository PAT row (recordTestOwners); the App does not reach it — no row of the unit's (#226)
     // The unit stands registered build-only on the books branch, its release watched at the version
     // read off the repository's tags (none ⇒ 0.1.0) on the channel that reaches prod.
     expect(await onboard.registrations.readBuildRegistration("example-jobs")).not.toBeNull();
     expect(buildPlane.releaseWatches).toEqual([{ unit: "example-jobs", version: "0.1.0", channel: "stable" }]);
     expect(logs.some((l) => l.includes("build unit example-jobs done"))).toBe(true);
   });
-  // The rule of #220 on the tenant path: a unit the App reaches is sealed under the App, one it does
-  // not under its owner's repository PAT, and one whose owner records nothing refuses.
-  it("seals a unit the App reaches under the App, one it does not under the owner's repository PAT, and refuses one of an unrecorded owner", async () => {
+  // The rule of #220 on the tenant path: a unit the App reaches is reached with the App's one row, one
+  // it does not with its owner's repository PAT row, and one whose owner records nothing refuses.
+  it("reaches a unit the App reaches with the App's row, one it does not with the owner's repository PAT row, and refuses one of an unrecorded owner", async () => {
     seedClusters();
     const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false };
     const make = () => {
@@ -310,13 +312,15 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     };
     const reaching = new FakeGitHubApp();
     reaching.org = "acme"; // the App is installed in the owner of JOBS_REPO
-    const viaApp: { kind: string; label: string }[] = [];
+    const viaApp: string[] = [];
     await buildUnitStep(() => ({ ports: make(), githubApp: reaching }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit).run(ctx(params(), [], viaApp));
-    expect(viaApp).toEqual([{ kind: "github-app", label: "GitHub App (example-jobs)" }]);
+    expect(viaApp).toContain("cred_app");
+    expect(viaApp).not.toContain("cred_pat_acme");
     const elsewhere = new FakeGitHubApp(); // installed in example-org: acme's repository PAT is the identity
-    const viaPat: { kind: string; label: string }[] = [];
+    const viaPat: string[] = [];
     await buildUnitStep(() => ({ ports: make(), githubApp: elsewhere }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit).run(ctx(params(), [], viaPat));
-    expect(viaPat).toEqual([{ kind: "pat", label: "repository PAT (example-jobs)" }]);
+    expect(viaPat).toContain("cred_pat_acme");
+    expect(viaPat).not.toContain("cred_app");
     const nobody = { unit: "x", repoURL: "https://github.com/nobody/x.git", images: ["x"], registered: false };
     await expect(buildUnitStep(() => ({ ports: make(), githubApp: elsewhere }), { guid: GUID, owner: "team-acme", stage: "prod" }, nobody).run(ctx(params(), [])))
       .rejects.toThrow(/owner nobody records no repository PAT/);

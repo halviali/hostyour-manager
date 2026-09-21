@@ -83,10 +83,14 @@ describe("probeBuildUnit", () => {
   it("a registered unit's stored credential reads the hooks; without admin:repo_hook it fails by name", async () => {
     const github = new FakeGitHubConsumer();
     const deps = (): TenantBuildDeps => ({ ports: { github, resolveBuildPlaneFqdn: async () => "m1.example", webhookSubdomain: "build" } } as unknown as TenantBuildDeps);
-    const registered = { ...base, registered: true, repoCredentialId: "cred_jobs" } as BuildUnit;
-    expect(await probeBuildUnit(deps, ports({}), p(), registered, ctx())).toMatchObject([{ status: "pass", detail: "its stored credential reads the hooks; the re-release sets the build hook" }]);
+    const registered = { ...base, registered: true } as BuildUnit;
+    // A registered unit is reached with its owner's identity, resolved now (#226): the App installed
+    // with example-org, its one row in the store.
+    const app = new FakeGitHubApp();
+    const withApp = (): ProbeCtx => ({ ...ctx(), creds: { open: async () => Buffer.from("ghp_stored"), list: async () => [{ id: "cred_app", kind: "github-app", subject: { kind: "owner", id: app.org }, purpose: "repository-identity" }] } as unknown as ProbeCtx["creds"] });
+    expect(await probeBuildUnit(deps, ports({ githubApp: app }), p(), registered, withApp())).toMatchObject([{ status: "pass", detail: "its stored credential reads the hooks; the re-release sets the build hook" }]);
     github.scopeError = true;
-    expect(await probeBuildUnit(deps, ports({}), p(), registered, ctx())).toMatchObject([{ status: "fail", severity: "hard", hint: "re-onboard the unit with a PAT holding admin:repo_hook" }]);
+    expect(await probeBuildUnit(deps, ports({ githubApp: app }), p(), registered, withApp())).toMatchObject([{ status: "fail", severity: "hard", hint: "re-onboard the unit with a PAT holding admin:repo_hook" }]);
   });
 });
 

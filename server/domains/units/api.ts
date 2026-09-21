@@ -4,7 +4,7 @@ import type { Db } from "../../db/client.ts";
 import type { Executor } from "../../executor/executor.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
-import { resolveRepoIdentity, sealRepoIdentity } from "./repo-identity.ts";
+import { resolveRepoCredentialId, resolveRepoIdentity } from "./repo-identity.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
@@ -283,7 +283,9 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     // identity's token before it is sealed. Nobody types it, so no onboarding can name a release that
     // already stands at another commit (hostyour-manager#139).
     const { version } = await resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: identity.token, signal: c.req.raw.signal });
-    const repoCredentialId = await sealRepoIdentity(store, identity, req.consumerName, githubApp);
+    // The credential the run opens the repository with: the App's one row or the owner's PAT row,
+    // resolved now — no row of the unit's (#226).
+    const repoCredentialId = await resolveRepoCredentialId({ repoURL: req.repoURL, githubApp, owners: (org) => readOwnerIdentity(db, org), store, signal: c.req.raw.signal });
     return c.json(await executor.planStreamed("consumer-onboard", { ...req, version, repoCredentialId }), 201);
   });
 

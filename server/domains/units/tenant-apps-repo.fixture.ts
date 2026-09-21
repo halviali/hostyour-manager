@@ -5,7 +5,7 @@
 import { PLATFORM_VALUES_COMMON } from "../../../shared/cluster-values.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import type { Db } from "../../db/client.ts";
-import { seedCredentialRow } from "../../security/store.fixture.ts";
+import { seedAppIdentityRow, seedCredentialRow } from "../../security/store.fixture.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
@@ -115,4 +115,6 @@ export function recordTestOwners(db: Db): void {
   pat("cred_pat_acme", "acme", "repository-pat");
   pat("cred_pkg_x", "x", "packages-reader");
   pat("cred_pat_x", "x", "repository-pat");
+  // The App's one row, as boot seeds it: the identity of every repository the App reaches (#226).
+  seedAppIdentityRow(db, ORG);
 }

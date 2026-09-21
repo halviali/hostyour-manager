@@ -17,7 +17,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
-import { judgeRepoIdentity } from "./repo-identity.ts";
+import { judgeRepoIdentity, resolveRepoCredentialId } from "./repo-identity.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import { tenantWildcardHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
@@ -74,19 +74,19 @@ export async function probeAppsRepository(ports: TenantOnboardPorts, unit: { org
 export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, ports: TenantOnboardPorts, p: Pick<CreateTenantParams, "domain">, unit: BuildUnit, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
   const title = `The build unit ${unit.unit} (${owner}/${repo})`;
-  if (unit.repoCredentialId === undefined) {
-    // The owner's identity, judged again now (repo-identity.ts): what the step will seal.
-    const judged = await judgeRepoIdentity({ repoURL: unit.repoURL, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal });
-    return ["refused" in judged
-      ? check(`unit.${unit.unit}`, title, "hard", "fail", judged.refused)
-      : check(`unit.${unit.unit}`, title, "hard", "pass", judged.kind === "github-app" ? "reached by the platform's GitHub App; its packages read with the owner's packages reader" : "its owner's repository PAT; its packages read with the owner's packages reader")];
+  // The owner's identity, judged now (repo-identity.ts, #226): what the step resolves and opens.
+  const judged = await judgeRepoIdentity({ repoURL: unit.repoURL, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal });
+  if ("refused" in judged) return [check(`unit.${unit.unit}`, title, "hard", "fail", judged.refused)];
+  if (!unit.registered) {
+    return [check(`unit.${unit.unit}`, title, "hard", "pass", judged.kind === "github-app" ? "reached by the platform's GitHub App; its packages read with the owner's packages reader" : "its owner's repository PAT; its packages read with the owner's packages reader")];
   }
   const d = deps();
   const github = d?.ports.github;
   if (!github) return [unmeasured(`unit.${unit.unit}`, title, "no GitHub client is wired on this manager")];
   const buildPlaneFqdn = await d!.ports.resolveBuildPlaneFqdn(p.domain);
   const targetUrl = webhookTargetUrl(buildPlaneFqdn, d!.ports.webhookSubdomain);
-  const token = await ctx.creds.open(unit.repoCredentialId, { purpose: "tenant-create:probe-build-unit" });
+  const credentialId = await resolveRepoCredentialId({ repoURL: unit.repoURL, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
+  const token = await ctx.creds.open(credentialId, { purpose: "tenant-create:probe-build-unit" });
   try {
     const stands = await github.hookStandsAt({ owner, repo, token: token.toString("utf8"), targetUrl, signal: ctx.signal });
     return [check(`unit.${unit.unit}`, title, "hard", "pass", stands ? "its stored credential reads the hooks; the build hook stands" : "its stored credential reads the hooks; the re-release sets the build hook")];

@@ -33,13 +33,12 @@ afterEach(() => db.sqlite.close());
 async function seedRegistration(
   registrations: Registrations,
   name: string,
-  opts: { cluster: string; stage?: Stage; suspended?: boolean; repoCredentialId?: string; owner?: string; onboardedAt?: string },
+  opts: { cluster: string; stage?: Stage; suspended?: boolean; owner?: string; onboardedAt?: string },
 ): Promise<void> {
   await registrations.commitRegistration({
     unit: {
       name, repoURL: `https://github.com/x/${name}.git`,
       suspended: opts.suspended ?? false, quiesced: false,
-      ...(opts.repoCredentialId ? { repoCredentialId: opts.repoCredentialId } : {}),
       ...(opts.owner ? { owner: opts.owner } : {}),
       ...(opts.onboardedAt ? { onboardedAt: opts.onboardedAt } : {}),
     },
@@ -73,13 +72,13 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
     });
   });
 
-  it("carries the registration's optional fields verbatim when present (repoCredentialId/owner/onboardedAt)", async () => {
+  it("carries the registration's optional fields verbatim when present (owner/onboardedAt)", async () => {
     const registrations = new Registrations(new FakePlatformRepo());
-    await seedRegistration(registrations, "ghost", { cluster: "s1", repoCredentialId: "cred_ptr", owner: "team-x", onboardedAt: "2026-01-01T00:00:00Z" });
+    await seedRegistration(registrations, "ghost", { cluster: "s1", owner: "team-x", onboardedAt: "2026-01-01T00:00:00Z" });
     const scan = await scanDetectedConsumers({ db: db.db, registrations });
     expect(scan.detected[0]?.pointer).toEqual({
       repoURL: "https://github.com/x/ghost.git", chartPath: "deploy/chart", cluster: "s1", suspended: false, quiesced: false,
-      repoCredentialId: "cred_ptr", owner: "team-x", onboardedAt: "2026-01-01T00:00:00Z",
+      owner: "team-x", onboardedAt: "2026-01-01T00:00:00Z",
     });
   });
 

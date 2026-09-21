@@ -53,7 +53,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -83,12 +83,12 @@ describe("openDb — migration phase + append-only invariants", () => {
     expect(h.sqlite.prepare("SELECT id, created_at, updated_at FROM apps").all()).toEqual([{ id: "app_1", created_at: 1700000000000, updated_at: 1700000000000 }]); // 0002: carried, updated_at = created_at
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'apps' AND name NOT LIKE 'sqlite_%'").all()).toEqual([{ name: "apps_name_stage_uq" }]);
     expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('credentials') WHERE name = 'server_id'").all()).toEqual([]); // 0004
+    expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('apps') WHERE name = 'repo_credential_id'").all()).toEqual([]); // 0006
+    // 0006 took the two unit rows (a unit has no row of its own); the server's four stay.
     expect(h.sqlite.prepare("SELECT id, subject_kind, subject_id, purpose FROM credentials ORDER BY id").all()).toEqual([
-      { id: "cred_app_unit", subject_kind: "unit", subject_id: "post", purpose: "repository-identity" },
       { id: "cred_bearer", subject_kind: "server", subject_id: "srv_1", purpose: "cluster-bearer" },
       { id: "cred_jwt", subject_kind: "server", subject_id: "srv_1", purpose: "reviewer-jwt" },
       { id: "cred_key", subject_kind: "server", subject_id: "srv_1", purpose: "ssh-key" },
-      { id: "cred_pat_unit", subject_kind: "unit", subject_id: "acme", purpose: "repository-identity" },
       { id: "cred_pw", subject_kind: "server", subject_id: "srv_1", purpose: "bootstrap-password" },
     ]);
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");

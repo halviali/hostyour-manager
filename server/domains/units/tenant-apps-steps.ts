@@ -33,7 +33,7 @@ import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } f
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
-import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "./repo-identity.ts";
+import { ADD_APP_FORM, appIdentityRowId, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "./repo-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
 
 const repoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
@@ -80,17 +80,16 @@ export function requireGitHubApp(ports: TenantOnboardPorts): GitHubApp {
   return ports.githubApp;
 }
 
-/** ONE `github-app` credential of the unit's own, sealed once per pass — the id the build-only
- *  chain opens the way it opens a consumer's PAT (tenant-builds.ts seals an approve-time PAT the
- *  same way), and the id the build registration and the catalog read carry from then on. The row
- *  stores no token: the store mints a fresh installation token from the App at every open
- *  (security/store.ts), so nothing here expires and no token reaches params, a log or a checkpoint.
- *  The row carries the App identity's fingerprint, so an audit names which App acted. */
-async function sealAppCredential(ctx: StepCtx, app: GitHubApp, unit: string, runtime: TenantAppsRepoRuntime): Promise<string> {
+/** The credential the tenant's own repository is reached with: the App's one row (repo-identity.ts
+ *  appIdentityRowId, #226) — the repository is created under the App and the App reaches it by
+ *  construction, so nothing is judged and nothing is sealed per unit. The store mints a fresh
+ *  installation token from the App at every open, so nothing expires and no token reaches params. */
+async function appCredentialId(ctx: StepCtx, runtime: TenantAppsRepoRuntime): Promise<string> {
   if (runtime.appsRepoCredentialId) return runtime.appsRepoCredentialId;
-  const ref = await ctx.creds.seal({ kind: "github-app", label: `GitHub App (${unit})`, plaintext: Buffer.alloc(0), fingerprint: app.identityFingerprint(), subject: { kind: "unit", id: unit }, purpose: "repository-identity" });
-  runtime.appsRepoCredentialId = ref.id;
-  return ref.id;
+  const id = await appIdentityRowId(ctx.creds);
+  if (!id) throw errValidation("this Manager holds no row for the platform's GitHub App — boot seeds it (ensureAppIdentityRow)");
+  runtime.appsRepoCredentialId = id;
+  return id;
 }
 
 /** The template's two files these steps read: its apps.yaml (which apps it offers) and its manifest
@@ -185,7 +184,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
       run: async (ctx) => {
         const writer = ports.onboard?.()?.ports.consumerRepo;
         if (!writer) throw errValidation(`${unit} needs the consumer repository writer to commit its tree, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
-        const credentialId = await sealAppCredential(ctx, requireGitHubApp(ports), unit, runtime);
+        const credentialId = await appCredentialId(ctx, runtime);
         const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
         let files: { path: string; content: string }[];
         try {
@@ -229,7 +228,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         if (!d) throw errValidation(`${unit} needs the consumer onboarding's build-only chain, and it is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
         const onboard = d.ports;
         if (!onboard.github) throw errValidation(`${unit} needs the GitHub consumer client to read its release tags, and none is wired on this manager`);
-        const credentialId = await sealAppCredential(ctx, requireGitHubApp(ports), unit, runtime);
+        const credentialId = await appCredentialId(ctx, runtime);
         const master = resolveMasterCluster(ctx.db);
         const token = await ctx.creds.open(credentialId, { purpose: "tenant-apps-repo:release-version", runId: ctx.runId });
         let version: string;

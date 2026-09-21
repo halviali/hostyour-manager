@@ -27,7 +27,6 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
         unit: {
           name: p.consumerName,
           repoURL: p.repoURL,
-          repoCredentialId: p.repoCredentialId,
           owner: p.owner,
           onboardedAt: new Date().toISOString(),
           suspended: false,
@@ -86,7 +85,6 @@ export function writeBuildRegistrationStep(ports: OnboardPorts, p: BuildOnlyOnbo
         unit: {
           name: p.consumerName,
           repoURL: p.repoURL,
-          repoCredentialId: p.repoCredentialId,
           owner: p.owner,
           onboardedAt: new Date().toISOString(),
           suspended: false,

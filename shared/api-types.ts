@@ -746,15 +746,15 @@ export interface OrphanScanView extends OrphanScan {
 /** What ONE detected consumer's REGISTRATION claims — copied VERBATIM from the ConsumerRegistration
  *  the scan parsed, and labeled as the registration's claim everywhere it is rendered: the bulk scan
  *  probes nothing live, so none of this may be presented as "running" (the live truth is the separate
- *  per-row probe, GET /api/consumers/live). repoCredentialId is a credential-store id (never a token);
- *  the adopt run re-reads the registration in-run rather than trusting any of these fields off the
+ *  per-row probe, GET /api/consumers/live). No credential rides here: a unit's repository is reached
+ *  with its owner's identity, resolved at every use (#226); the adopt run re-reads the registration
+ *  in-run rather than trusting any of these fields off the
  *  wire. There is no revision here at all — the registration carries none, because the consumer's pin
  *  is the consumer's own. */
 export interface DetectedConsumerPointerView {
   repoURL: string;
   chartPath: string;
   cluster: string;
-  repoCredentialId?: string;
   onboardedAt?: string;
   owner?: string;
   suspended: boolean;

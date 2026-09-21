@@ -290,7 +290,7 @@ export function buildUnits(
   // through a holder filled once both stand. The tenant defs read it at run time, never at wiring.
   const lateBuild: { deps?: TenantBuildDeps } = {};
   const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, githubApp);
-  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube);
+  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube, githubApp);
   if (consumer.onboardPorts) {
     lateBuild.deps = {
       ports: consumer.onboardPorts,
@@ -344,6 +344,8 @@ function buildConsumerOnboarding(
   seeder: VaultSeeder,
   /** The master-local clients and the one resolver over them, built in the composition root. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
+  /** The platform's GitHub App, for the cleanups that reach a unit's repository (#226). */
+  githubApp: GitHubApp,
 ): Family {
   if (!config.onboarding || !config.github || !platformRepo) return { defs: [], enabled: false };
 
@@ -501,7 +503,7 @@ function buildConsumerOnboarding(
     buildRbac,
     buildArgo,
   };
-  const lifecyclePorts: LifecyclePorts = { registrations, resolver, argoWatchTimeoutMs: ARGO_WATCH_TIMEOUT_MS };
+  const lifecyclePorts: LifecyclePorts = { registrations, resolver, argoWatchTimeoutMs: ARGO_WATCH_TIMEOUT_MS, githubApp };
   const consumerRelocationPorts: ConsumerRelocationPorts = {
     ...lifecyclePorts,
     ...relocation,

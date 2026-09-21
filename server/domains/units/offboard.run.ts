@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import { apps } from "../../db/schema/inventory.ts";
-import { AppError, errNotFound } from "../../kernel/errors.ts";
+import { errNotFound } from "../../kernel/errors.ts";
 import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
 import { localTx } from "../../executor/stepkit.ts";
@@ -13,6 +13,8 @@ import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { ConsumerRepo } from "../../adapters/git/port.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { removeConsumerWebhook } from "./onboard-webhook.ts";
+import { unitRepoCredentialId } from "./repo-identity.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { removeUnitDns, consumerUnitHost } from "./unit-dns.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
@@ -279,7 +281,7 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
           github: ports.github,
           consumerName: ac.name,
           repoURL: app?.repoUrl,
-          repoCredentialId: app?.repoCredentialId,
+          repoCredentialId: await unitRepoCredentialId({ repoURL: app?.repoUrl, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal }),
         });
       },
     },
@@ -301,38 +303,26 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
           consumerRepo: ports.consumerRepo,
           consumerName: ac.name,
           repoURL: app?.repoUrl,
-          repoCredentialId: app?.repoCredentialId,
+          repoCredentialId: await unitRepoCredentialId({ repoURL: app?.repoUrl, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal }),
         });
       },
     },
     {
       name: "remove-repo-pat",
-      title: "Remove the unit's repo PAT (local build Vault + sealed credential)",
+      title: "Remove the unit's repo PAT (local build Vault)",
       run: async (ctx) => {
-        // The inverse of onboard's seed-repo-pat ("one PAT per consumer"), and the two halves have
-        // different scopes. The Vault entry secret/build/<name>/repo-pat is stage-free — one build plane,
-        // one PAT per unit — and the unit's build namespace clones, reads packages and pushes its bump
-        // through it, so it goes only with the unit's last stage. The sealed clone credential is THIS
-        // row's own (every stage's onboard seals its own PAT into the store), so it is revoked either
-        // way and the surviving stage keeps the credential it was onboarded with. Runs AFTER the prune
-        // (the build namespace's ExternalSecrets may still hold the PAT while the unit's last release
-        // settles). Fail-closed on the Vault delete — a lingering PAT is a security residue, not a warn —
-        // but idempotent: an already-absent entry (404) and an already-revoked/absent credential are the
-        // retry no-ops.
+        // The inverse of onboard's seed-repo-pat. The Vault entry secret/build/<name>/repo-pat is
+        // stage-free — one build plane, one entry per unit — and the unit's build namespace clones,
+        // reads packages and pushes its bump through it, so it goes only with the unit's last stage.
+        // No credential row is revoked: the unit never had one — its repository is reached with the
+        // owner's identity, which outlives the unit (#226). Runs AFTER the prune (the build
+        // namespace's ExternalSecrets may still hold the entry while the unit's last release settles).
+        // Fail-closed on the Vault delete — a lingering entry is a security residue, not a warn — but
+        // idempotent: an already-absent entry (404) is the retry no-op.
         const ac = loadAppCluster(ctx.db, appId);
         if (!(await unitStaysRegistered(ctx, ports.registrations, ac, "the repo PAT"))) {
           await ports.seeder.deleteBuildRepoPat({ consumerName: ac.name });
           ctx.log("meta", `repo PAT removed — ${KV_MOUNT}/build/${ac.name}/repo-pat deleted`);
-        }
-        const app = ctx.db.select().from(apps).where(eq(apps.id, appId)).get();
-        if (app?.repoCredentialId) {
-          try {
-            await ctx.creds.revoke(app.repoCredentialId, `consumer ${ac.name} offboarded`);
-          } catch (err) {
-            // Idempotent: a re-run after a crash finds the credential already revoked/purged.
-            if (!(err instanceof AppError && err.code === "NOT_FOUND")) throw err;
-          }
-          ctx.log("meta", `the sealed clone credential of ${ac.name} at ${ac.stage} revoked`);
         }
       },
     },

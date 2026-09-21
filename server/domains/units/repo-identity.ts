@@ -7,9 +7,9 @@
 //  - the REPOSITORY identity: the platform's GitHub App where its installation reaches the
 //    repository (measured: GET /repos/{owner}/{repo}/installation, never inferred from the owner
 //    string) — the credential row stores no token and the store mints an installation token at
-//    every open; else the owner's REPOSITORY PAT where one is recorded, sealed again under
-//    the unit's own name so the unit's offboard takes its row and never the owner's; else a
-//    refusal naming both halves;
+//    every open, ONE row per installation (#226); else the owner's REPOSITORY PAT where one is
+//    recorded, its own row; else a refusal naming both halves. No unit has a row: the id is
+//    resolved from the URL at every use (resolveRepoCredentialId);
 //  - the PACKAGES identity: the owner's PACKAGES READER, required for a unit whose
 //    repository routes a scope to GitHub Packages (its `.npmrc`, npmrcPackageScopes) and for no
 //    other (#221). An App installation token reads no private npm package whatever the App's
@@ -19,7 +19,6 @@
 // units (tenant-builds.ts) and the tenant's own apps repository (tenant-apps-steps.ts).
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import { fingerprintSecret } from "../../security/fingerprint.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 
@@ -79,17 +78,47 @@ export async function resolveRepoIdentity(input: { repoURL: string; githubApp?: 
   }
 }
 
-/** The credential row the run opens from then on: a `github-app` row storing nothing (the App's
- *  fingerprint, so an audit names which App acted), or the owner's PAT sealed again under
- *  the unit's name. The PAT's buffer is zeroed by seal(). */
-export async function sealRepoIdentity(store: Pick<CredentialStore, "seal">, identity: RepoIdentity, label: string, githubApp?: Pick<GitHubApp, "identityFingerprint">): Promise<string> {
-  if (identity.kind === "github-app") {
-    if (!githubApp) throw errValidation("a github-app identity was chosen with no GitHub App to seal it under");
-    return (await store.seal({ kind: "github-app", label: `GitHub App (${label})`, plaintext: Buffer.alloc(0), fingerprint: githubApp.identityFingerprint(), subject: { kind: "unit", id: label }, purpose: "repository-identity" })).id;
+/** THE APP'S ONE ROW (#226): a `github-app` credential storing nothing — the store mints an
+ *  installation token from the App at every open (security/store.ts) — whose subject is the owner
+ *  the App is installed with. ONE per installation, seeded at boot (ensureAppIdentityRow); no unit
+ *  has a row of its own any more, and the id every clone and every hook call is handed is this row's
+ *  where the App reaches the repository, the owner's PAT row's where it does not. */
+export async function ensureAppIdentityRow(store: Pick<CredentialStore, "list" | "seal">, githubApp: Pick<GitHubApp, "installationOrg" | "identityFingerprint">): Promise<string> {
+  const owner = await githubApp.installationOrg();
+  const standing = await appIdentityRowId(store);
+  if (standing) return standing;
+  return (await store.seal({ kind: "github-app", label: `GitHub App (${owner})`, plaintext: Buffer.alloc(0), fingerprint: githubApp.identityFingerprint(), subject: { kind: "owner", id: owner }, purpose: "repository-identity" })).id;
+}
+
+/** The App's one row, or null where boot has not seeded it. */
+export async function appIdentityRowId(store: Pick<CredentialStore, "list">): Promise<string | null> {
+  return (await store.list({ kind: "github-app", purpose: "repository-identity", excludeRotated: true })).find((r) => r.subject.kind === "owner")?.id ?? null;
+}
+
+/** THE CREDENTIAL ID A REPOSITORY IS REACHED WITH, RESOLVED NOW (#226): the App's one row where its
+ *  installation reaches the repository, the owner's repository PAT row where it does not — never
+ *  a row of the unit's. Throws the identity rule's refusal. What a run plans with, what the refresh
+ *  writes, what an offboard's cleanup opens: every reader resolves it here, from the URL. */
+export async function resolveRepoCredentialId(input: { repoURL: string; githubApp?: Pick<GitHubApp, "reachesRepository" | "installationOrg"> | undefined; owners: OwnerIdentityReader; store: Pick<CredentialStore, "list">; signal?: AbortSignal }): Promise<string> {
+  const judged = await judgeRepoIdentity(input);
+  if ("refused" in judged) throw errValidation(judged.refused);
+  if (judged.kind === "pat") return judged.repoCredentialId!;
+  const id = await appIdentityRowId(input.store);
+  if (!id) throw errValidation("the platform's GitHub App reaches the repository, and this Manager holds no row for the App — boot seeds it (ensureAppIdentityRow)");
+  return id;
+}
+
+/** The credential a STANDING unit's repository is reached with, for a cleanup that may find the
+ *  unit without one (an adopted row with no URL, an owner whose identity was forgotten): undefined
+ *  where none resolves, and the cleanup logs and skips the way it does for a row that never had a
+ *  repository. Every other caller resolves through resolveRepoCredentialId and takes the refusal. */
+export async function unitRepoCredentialId(input: { repoURL: string | null | undefined; githubApp?: Pick<GitHubApp, "reachesRepository" | "installationOrg"> | undefined; owners: OwnerIdentityReader; store: Pick<CredentialStore, "list">; signal?: AbortSignal }): Promise<string | undefined> {
+  if (!input.repoURL) return undefined;
+  try {
+    return await resolveRepoCredentialId({ ...input, repoURL: input.repoURL });
+  } catch {
+    return undefined;
   }
-  const plaintext = Buffer.from(identity.token, "utf8");
-  const fingerprint = fingerprintSecret(plaintext); // before seal() zeroes the buffer
-  return (await store.seal({ kind: "pat", label: `repository PAT (${label})`, plaintext, fingerprint, subject: { kind: "unit", id: label }, purpose: "repository-identity" })).id;
 }
 
 /** The packages reader of a unit's owner, by the owner of its repository URL — what the

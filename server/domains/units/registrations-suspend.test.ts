@@ -98,7 +98,7 @@ describe("Registrations suspend / quiesce", () => {
     const repo = new FakePlatformRepo();
     const reg = new Registrations(repo);
     await reg.commitRegistration({
-      unit: unit({ repoCredentialId: "cred_1", owner: "team-acme", onboardedAt: "2026-01-01T00:00:00Z" }),
+      unit: unit({ owner: "team-acme", onboardedAt: "2026-01-01T00:00:00Z" }),
       builds: [],
       deploy: deploy({ databases: ["example_auth"], services: ["postgresql"] }),
       runId: "run_1",
@@ -106,7 +106,7 @@ describe("Registrations suspend / quiesce", () => {
     await reg.setSuspended("prod", "acme", true, "run_2");
     const e = (await reg.readRegistration("prod", "acme"))!.entry;
     expect(e).toMatchObject({
-      name: "acme", repoURL: REPO, repoCredentialId: "cred_1", owner: "team-acme", onboardedAt: "2026-01-01T00:00:00Z",
+      name: "acme", repoURL: REPO, owner: "team-acme", onboardedAt: "2026-01-01T00:00:00Z",
       chartPath: "deploy/chart", cluster: "s1", databases: ["example_auth"], services: ["postgresql"],
     });
   });
