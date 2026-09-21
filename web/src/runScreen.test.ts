@@ -22,6 +22,8 @@ const run = (id: string, kind: RunView["kind"], status: RunView["status"]): RunV
   startedAt: null,
   endedAt: null,
   deletedAt: null,
+  cleanupsRegistered: false,
+  aborted: false,
 });
 
 const target: PurgeTenantTarget = { guid: "zsfk0m57xp87", subdomain: "simetrix", stage: "prod", clusterId: "cls_1" };
@@ -94,20 +96,20 @@ describe("abortOffer", () => {
   // failed, and an abort would git-rm the live pointer and let ArgoCD prune the whole fan-out.
   it("refuses the abort when the run's tenant is LIVE", () => {
     const live: RunTenantStateView = { state: "live", target, row: { ...row, status: "active" } };
-    const offer = abortOffer("tenant-create", live, null);
+    const offer = abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, live, null);
     expect(offer.offered).toBe(false);
-    expect(offer.offered === false && offer.why).toContain(target.guid);
+    expect(offer.offered === false && ("why" in offer ? offer.why : "")).toContain(target.guid);
   });
 
   // Fail-closed: no answer yet is not "the tenant is not live".
   it("refuses the abort while the tenant state is still being resolved", () => {
-    expect(abortOffer("tenant-create", null, null).offered).toBe(false);
+    expect(abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, null, null).offered).toBe(false);
   });
 
   it("refuses the abort when the tenant state could not be read at all", () => {
-    const offer = abortOffer("tenant-create", null, "run rn_1 not found");
+    const offer = abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, null, "run rn_1 not found");
     expect(offer.offered).toBe(false);
-    expect(offer.offered === false && offer.why).toContain("run rn_1 not found");
+    expect(offer.offered === false && ("why" in offer ? offer.why : "")).toContain("run rn_1 not found");
   });
 
   // The two states where the compensation is genuinely the remedy — and the confirmation must be able to
@@ -115,8 +117,8 @@ describe("abortOffer", () => {
   it("offers the abort for an orphan and for an unfinished tenant, naming the tenant it un-deploys", () => {
     const orphan: RunTenantStateView = { state: "orphan", target };
     const unfinished: RunTenantStateView = { state: "unfinished", target, row: { ...row, status: "provisioning" } };
-    expect(abortOffer("tenant-create", orphan, null)).toEqual({ offered: true, tenant: target });
-    expect(abortOffer("tenant-create", unfinished, null)).toEqual({ offered: true, tenant: target });
+    expect(abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, orphan, null)).toEqual({ offered: true, tenant: target });
+    expect(abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, unfinished, null)).toEqual({ offered: true, tenant: target });
   });
 
   // Refused before it deployed, or no guid was ever frozen: nothing was created, so the abort is pure run
@@ -126,8 +128,8 @@ describe("abortOffer", () => {
   it("offers the abort with no tenant named for the two states that never deployed anything", () => {
     const notDeployed: RunTenantStateView = { state: "not-deployed", target };
     const none: RunTenantStateView = { state: "none", reason: "it created nothing to purge" };
-    expect(abortOffer("tenant-create", notDeployed, null)).toEqual({ offered: true, tenant: null });
-    expect(abortOffer("tenant-create", none, null)).toEqual({ offered: true, tenant: null });
+    expect(abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, notDeployed, null)).toEqual({ offered: true, tenant: null });
+    expect(abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, none, null)).toEqual({ offered: true, tenant: null });
   });
 
   // THE defect an operator meets end to end on this screen: a
@@ -150,18 +152,18 @@ describe("abortOffer", () => {
     const offboarded: RunTenantStateView = { state: "offboarded", target, row: { ...row, status: "offboarded" } };
     const purged: RunTenantStateView = { state: "purged", target, row: { ...row, status: "purged" } };
 
-    const afterPurge = abortOffer("tenant-create", purged, null);
+    const afterPurge = abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, purged, null);
     expect(afterPurge.offered).toBe(false);
-    expect(afterPurge.offered === false && afterPurge.why).toContain(target.guid);
-    expect(afterPurge.offered === false && afterPurge.why).toContain("already been purged");
+    expect(afterPurge.offered === false && "why" in afterPurge && afterPurge.why).toContain(target.guid);
+    expect(afterPurge.offered === false && "why" in afterPurge && afterPurge.why).toContain("already been purged");
 
-    const afterOffboard = abortOffer("tenant-create", offboarded, null);
+    const afterOffboard = abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, offboarded, null);
     expect(afterOffboard.offered).toBe(false);
-    expect(afterOffboard.offered === false && afterOffboard.why).toContain("already been offboarded");
+    expect(afterOffboard.offered === false && "why" in afterOffboard && afterOffboard.why).toContain("already been offboarded");
     // ...and it points at the run kind that DOES still have work on such a tenant, on the page that offers it
     // (tenantRows.ts calls an offboarded row purgeable) — a refusal that named no way forward would just
     // read as a broken button.
-    expect(afterOffboard.offered === false && afterOffboard.why).toMatch(/purge/i);
+    expect(afterOffboard.offered === false && "why" in afterOffboard && afterOffboard.why).toMatch(/purge/i);
   });
 
   // The two functions answer the same question — "is there a tenant standing here?" — and a screen that
@@ -175,21 +177,29 @@ describe("abortOffer", () => {
     ];
     for (const tenant of settled) {
       expect(runTenantPurgeTarget(tenant)).toBeNull();
-      expect(abortOffer("tenant-create", tenant, null).offered).toBe(false);
+      expect(abortOffer({ kind: "tenant-create", cleanupsRegistered: true }, tenant, null).offered).toBe(false);
     }
   });
 
   // Only create-tenant mints a tenant of its own; the tenant-state route refuses every other kind (400),
   // so no state is ever fetched for them and the gate must not stall on the absence of one.
-  it("offers the abort unconditionally for every other run kind", () => {
+  it("offers the abort for every other run kind once something is registered", () => {
     for (const kind of ["consumer-onboard", "tenant-offboard", "tenant-purge", "tenant-add-app", "cluster-deploy-slave", "cluster-redeploy"] as const) {
-      expect(abortOffer(kind, null, null)).toEqual({ offered: true, tenant: null });
+      expect(abortOffer({ kind, cleanupsRegistered: true }, null, null)).toEqual({ offered: true, tenant: null });
     }
   });
 });
 
 describe("recoverable — which runs get the retry / skip / abort bar", () => {
-  it("a failed run, and a run cancelled after it started; not a plan discarded before its approve, not a deleted run", () => {
+  // NOTHING REGISTERED, NO BUTTON (#236): an abort with nothing to run is not offered at all — hidden,
+  // not greyed — and a run that ended by an abort offers Delete alone, never Resume.
+  it("hides the abort where no completed step registered a compensation, whatever the kind", () => {
+    expect(abortOffer({ kind: "tenant-create", cleanupsRegistered: false }, null, null)).toEqual({ offered: false, hidden: true });
+    expect(abortOffer({ kind: "noop", cleanupsRegistered: false }, null, null)).toEqual({ offered: false, hidden: true });
+  });
+
+  it("a failed run, and a run cancelled after it started; not one that ended by an abort, not a plan discarded before its approve, not a deleted run", () => {
+    expect(recoverable({ ...run("run_1", "noop", "cancelled"), startedAt: 1, aborted: true })).toBe(false);
     expect(recoverable(run("run_1", "noop", "failed"))).toBe(true);
     expect(recoverable({ ...run("run_1", "noop", "cancelled"), startedAt: 1 })).toBe(true);
     expect(recoverable({ ...run("run_1", "noop", "cancelled"), startedAt: null })).toBe(false);

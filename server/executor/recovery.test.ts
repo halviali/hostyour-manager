@@ -358,5 +358,22 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
     const run = getRun(db.db, runId);
     expect(run?.status).toBe("cancelled");
     expect(run?.steps.some((s) => s.name.startsWith("cleanup:"))).toBe(false);
+    // NEVER SILENT (#236): the run says so on its own log, and the view says the run ended by an abort —
+    // nothing left to resume — with nothing an abort could run.
+    const lines = db.sqlite.prepare("SELECT text FROM events WHERE run_id = ? ORDER BY seq").all(runId) as { text: string }[];
+    expect(lines.at(-1)?.text).toBe("✕ cancelled — nothing to clean up: no completed step registered a compensation");
+    expect(run).toMatchObject({ aborted: true, cleanupsRegistered: false });
+  });
+
+  it("the view says which runs an abort has something to run for, and which ended by one", async () => {
+    const { db, executor } = make();
+    const { runId } = await executor.plan("noop", {});
+    await executor.approve(runId);
+    await executor.settle(runId);
+    // act failed after prep-x/prep-y registered cleanups: something to run, and not aborted yet.
+    expect(getRun(db.db, runId)).toMatchObject({ status: "failed", cleanupsRegistered: true, aborted: false });
+    await executor.abortWithCleanup(runId);
+    await executor.settle(runId);
+    expect(getRun(db.db, runId)).toMatchObject({ status: "cancelled", aborted: true });
   });
 });

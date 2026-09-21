@@ -280,7 +280,7 @@ export function RunDetail() {
       {recoverable(run) && (
         <FailedRunActions
           run={run}
-          abort={abortOffer(run.kind, tenant, tenantError)}
+          abort={abortOffer(run, tenant, tenantError)}
           onRetry={(secrets) => act(() => retryRun(runId, undefined, secrets))}
           onAbort={(secrets) => act(() => abortRun(runId, secrets))}
           onSkip={() => setShowSkip(true)}
@@ -297,7 +297,16 @@ export function RunDetail() {
           dialog standing. */}
       {asksTenantState && <FailedCreateTenantCallout key={runId} tenant={tenant} error={tenantError} />}
 
-      {run.deletedAt === null && run.status === "cancelled" && !recoverable(run) && (
+      {run.deletedAt === null && run.aborted && (
+        <div className="actionbar">
+          <span className="actionbar__text">This run was aborted — its compensations ran, or none were registered; nothing is left to resume.</span>
+          <button type="button" className="btn btn--danger" onClick={() => setConfirmDelete(true)}>
+            Delete run
+          </button>
+        </div>
+      )}
+
+      {run.deletedAt === null && run.status === "cancelled" && !run.aborted && !recoverable(run) && (
         <div className="actionbar">
           <span className="actionbar__text">This plan was discarded before it started — nothing ran, and nothing is left to resume; plan it again if you still want it.</span>
           <button type="button" className="btn btn--danger" onClick={() => setConfirmDelete(true)}>

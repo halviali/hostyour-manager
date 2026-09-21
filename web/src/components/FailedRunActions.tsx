@@ -97,7 +97,7 @@ export function FailedRunActions(props: {
           <button type="button" className="btn btn--danger" onClick={() => setConfirmAbort(true)}>
             Abort (cleanup)
           </button>
-        ) : (
+        ) : "hidden" in abort ? null : (
           // Refused, not hidden: a control that vanished would read as "this run cannot be cleaned up",
           // while the truth is that cleaning it up is the one thing that must not happen here. Same shape
           // the two undeletable-run cases in RunDetail use — a disabled button whose title says why.

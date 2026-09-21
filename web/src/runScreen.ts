@@ -1,4 +1,3 @@
-import type { RunKind } from "../../shared/enums.ts";
 import type { PurgeTenantTarget, RunTenantStateView, RunView } from "../../shared/api-types.ts";
 
 // The honesty rules of the Run screen, kept OUT of the components (the same factoring runKinds.ts
@@ -62,7 +61,9 @@ export function runTenantPurgeTarget(tenant: RunTenantStateView): PurgeTenantTar
  *  that abort takes down, so the confirmation can name it. */
 export type AbortOffer =
   | { offered: true; tenant: PurgeTenantTarget | null }
-  | { offered: false; why: string };
+  | { offered: false; why: string }
+  /** No button at all: nothing registered a compensation, so there is nothing an abort would run (#236). */
+  | { offered: false; hidden: true };
 
 /** The gate on abort-with-cleanup. Abort is not "stop this run": it appends the run's
  *  registered compensations as visible cleanup steps and RUNS them, so on a create-tenant it performs the
@@ -101,7 +102,10 @@ export type AbortOffer =
  *  the compensations were never even armed (record-provisional is where they are registered), so the abort
  *  is pure run bookkeeping. WHICH tenant the confirmation names is runTenantPurgeTarget's answer, never a
  *  second list of states here. */
-export function abortOffer(kind: RunKind, tenant: RunTenantStateView | null, tenantError: string | null): AbortOffer {
+export function abortOffer(run: Pick<RunView, "kind" | "cleanupsRegistered">, tenant: RunTenantStateView | null, tenantError: string | null): AbortOffer {
+  // Nothing registered ⇒ nothing to run: the button goes, not merely grey (#236).
+  if (!run.cleanupsRegistered) return { offered: false, hidden: true };
+  const kind = run.kind;
   // Only create-tenant mints a tenant of its own — every other kind's compensations undo that run's own
   // work, and the tenant-state route refuses them (400), so there is nothing to gate on.
   if (kind !== "tenant-create") return { offered: true, tenant: null };
@@ -156,7 +160,7 @@ export function abortOffer(kind: RunKind, tenant: RunTenantStateView | null, ten
  *  interrupted (hostyour-manager#203). A plan discarded before its approve ran nothing; it offers
  *  Delete alone, and is planned again rather than resumed. */
 export function recoverable(run: RunView): boolean {
-  return run.deletedAt === null && (run.status === "failed" || (run.status === "cancelled" && run.startedAt !== null));
+  return run.deletedAt === null && (run.status === "failed" || (run.status === "cancelled" && run.startedAt !== null && !run.aborted));
 }
 
 export function secretsToSupply(run: RunView): string[] {

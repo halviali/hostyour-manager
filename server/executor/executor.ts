@@ -343,6 +343,9 @@ export class Executor {
     const names = registeredCleanupNames(all);
     if (names.length === 0) {
       settleAbortWithoutCleanup(this.deps.db, runId);
+      // Said on the run itself: an abort that settles without a cleanup step to show would otherwise
+      // leave the log exactly as it was, and the operator guessing whether anything happened (#236).
+      this.appendMeta(runId, "\u2715 cancelled \u2014 nothing to clean up: no completed step registered a compensation");
       writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { cleanedUp: false } });
       return;
     }

@@ -3,7 +3,7 @@ import type { PreflightCheck } from "../../shared/preflight.ts";
 import type { Db } from "../db/client.ts";
 import { runs, steps, events } from "../db/schema/runs.ts";
 import type { RunKind, StepStatus } from "../../shared/enums.ts";
-import type { RunView, StepView, RunEventView } from "../../shared/api-types.ts";
+import type { RunView, RunEventView } from "../../shared/api-types.ts";
 
 // The sanctioned read path for runs/steps/events. Routes read runs
 // ONLY through here — the dep-cruiser rule `only-executor-touches-runs-schema` makes any
@@ -16,17 +16,13 @@ function summaryOf(r: typeof runs.$inferSelect): string {
   return plan?.summary ?? `${r.kind} ${r.targetId}`;
 }
 
-function stepsFor(db: Db, runId: string): StepView[] {
-  return db
-    .select()
-    .from(steps)
-    .where(eq(steps.runId, runId))
-    .orderBy(steps.ordinal)
-    .all()
-    .map((s) => ({ name: s.name, title: s.title, status: s.status, startedAt: ms(s.startedAt), endedAt: ms(s.finishedAt) }));
-}
-
 function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
+  const rows = db.select().from(steps).where(eq(steps.runId, r.id)).orderBy(steps.ordinal).all();
+  // What "Abort (cleanup)" would run: the compensations completed steps registered (executor/cleanup.ts
+  // registeredCleanupNames reads the same field). A run that ended by an abort has nothing left to
+  // resume — every step is ok or skipped — which is what tells it from a run interrupted mid-flight (#236).
+  const cleanupsRegistered = rows.some((s) => ((s.checkpointJson as { __cleanups?: string[] } | null)?.__cleanups?.length ?? 0) > 0);
+  const aborted = r.status === "cancelled" && r.startedAt !== null && rows.every((s) => s.status === "ok" || s.status === "skipped");
   return {
     id: r.id,
     kind: r.kind,
@@ -34,7 +30,7 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
     targetId: r.targetId,
     status: r.status,
     summary: summaryOf(r),
-    steps: stepsFor(db, r.id),
+    steps: rows.map((s) => ({ name: s.name, title: s.title, status: s.status, startedAt: ms(s.startedAt), endedAt: ms(s.finishedAt) })),
     requiredSecrets: (r.planJson as { requiredSecrets?: string[] } | null)?.requiredSecrets ?? [],
     optionalSecrets: (r.planJson as { optionalSecrets?: string[] } | null)?.optionalSecrets ?? [],
     findings: (r.planJson as { findings?: PreflightCheck[] } | null)?.findings ?? [],
@@ -43,6 +39,8 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
     startedAt: ms(r.startedAt),
     endedAt: ms(r.finishedAt),
     deletedAt: ms(r.deletedAt),
+    cleanupsRegistered,
+    aborted,
   };
 }
 
