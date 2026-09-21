@@ -53,9 +53,13 @@ async function registered(reg: Registrations, name: string, opts: { stage?: bool
   });
 }
 
+/** The catalog's own build units — what tenant.buildRepos names on the books branch. */
+const CATALOG_UNITS = ["digita-auth", "digita-platform"];
+
 function ports(over: Partial<TenantLifecyclePorts> = {}): TenantLifecyclePorts {
   return {
     registrations: new TenantRegistrations(new FakePlatformRepo()),
+    catalogBuildUnits: async () => CATALOG_UNITS,
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } }),
       argoReader: new FakeMasterArgoReader(),
@@ -84,40 +88,48 @@ async function runAll(steps: Step[], logs: string[]): Promise<void> {
 }
 
 describe("scanOrphanBuilds", () => {
-  it("lists a build registration no stage file and no tenant names, and nothing else", async () => {
+  it("lists a build registration no stage file, no tenant and no catalog build unit names, and nothing else", async () => {
     const builds = new Registrations(new FakePlatformRepo());
     const tenants = new TenantRegistrations(new FakePlatformRepo());
-    await registered(builds, UNIT);                    // orphaned
+    await registered(builds, UNIT);                      // orphaned
     await registered(builds, "acme", { stage: true });   // a consumer: its stage file stands beside it
-    await registered(builds, "example-apps-other");     // named by a tenant below
+    await registered(builds, "example-apps-other");      // named by a tenant below
+    await registered(builds, "digita-platform");         // the catalog's own build unit, build-only (#241)
     await tenants.commitTenant({ stage: "prod", guid: GUID, registration: entry({ appsRepo: `https://github.com/${ORG}/example-apps-other.git`, appsImage: "example-apps-other", appsImageTag: "1.0.0" }), runId: "run_onb" });
-    expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds })).toEqual([{ unit: UNIT, repoURL: REPO }]);
+    expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, catalogBuildUnits: async () => CATALOG_UNITS })).toEqual([{ unit: UNIT, repoURL: REPO }]);
   });
 
-  it("finds nothing where every build registration is accounted for", async () => {
+  it("finds nothing where every build registration is accounted for, and refuses where the catalog cannot be read", async () => {
     const builds = new Registrations(new FakePlatformRepo());
     await registered(builds, "acme", { stage: true });
-    expect(await scanOrphanBuilds({ registrations: new TenantRegistrations(new FakePlatformRepo()), buildRegistrations: builds })).toEqual([]);
+    await registered(builds, "digita-platform");
+    const tenants = new TenantRegistrations(new FakePlatformRepo());
+    expect(await scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, catalogBuildUnits: async () => CATALOG_UNITS })).toEqual([]);
+    await expect(scanOrphanBuilds({ registrations: tenants, buildRegistrations: builds, catalogBuildUnits: async () => { throw new Error("catalog unreachable"); } })).rejects.toThrow(/catalog unreachable/);
   });
 });
 
 describe("tenant-apps-repo-purge run", () => {
-  it("plans the four steps for an orphan and refuses a unit that is accounted for", async () => {
+  it("plans the three steps for an orphan and refuses a unit that is accounted for", async () => {
     const builds = new Registrations(new FakePlatformRepo());
     await registered(builds, UNIT);
     await registered(builds, "acme", { stage: true });
+    await registered(builds, "digita-platform");
     const def = makeTenantAppsRepoPurgeDef(ports({ buildRegistrations: builds }));
     const plan = await def.plan({ unit: UNIT }, { db: db.db });
     expect(plan.kind).toBe("tenant-apps-repo-purge");
     expect(plan.targetId).toBe("cls_1");
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "delete-repository", "remove-build-registration", "remove-repo-pat"]);
-    expect(plan.summary).toContain(REPO);
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-build-registration", "remove-repo-pat"]);
+    expect(plan.summary).toContain(`The repository ${REPO} stands`);
     expect(plan.locks).toContainEqual({ resource: "git-branch", key: builds.branch });
-    await expect(def.plan({ unit: "acme" }, { db: db.db })).rejects.toThrow(/not an orphaned build registration/);
-    await expect(def.plan({ unit: "never-registered" }, { db: db.db })).rejects.toThrow(/not an orphaned build registration/);
+    for (const unit of ["acme", "digita-platform", "never-registered"]) {
+      await expect(def.plan({ unit }, { db: db.db })).rejects.toThrow(/not an orphaned build registration/);
+    }
+    const { catalogBuildUnits: _unwired, ...withoutCatalog } = ports({ buildRegistrations: builds });
+    await expect(makeTenantAppsRepoPurgeDef(withoutCatalog).plan({ unit: UNIT }, { db: db.db })).rejects.toThrow(/cannot be read on this manager/);
   });
 
-  it("deletes the platform-created repository, the registration and the Vault entry; a resume finds each already gone", async () => {
+  it("removes the registration and the Vault entry and leaves the repository standing; a resume finds each already gone", async () => {
     const builds = new Registrations(new FakePlatformRepo());
     await registered(builds, UNIT);
     const githubApp = new FakeGitHubApp();
@@ -127,31 +139,23 @@ describe("tenant-apps-repo-purge run", () => {
     const def = makeTenantAppsRepoPurgeDef(ports({ buildRegistrations: builds, githubApp, seeder }));
     const logs: string[] = [];
     await runAll(def.steps({ unit: UNIT }), logs);
-    expect(githubApp.deleted).toEqual([`${ORG}/${UNIT}`]);
+    expect(githubApp.repos.has(`${ORG}/${UNIT}`)).toBe(true);
     expect(await builds.readBuildRegistration(UNIT)).toBeNull();
     expect(seeder.deletedBuildRepoPats).toEqual([{ consumerName: UNIT }]);
-    expect(logs.some((l) => l === `repository ${REPO} deleted`)).toBe(true);
+    expect(logs.some((l) => l === `repository ${REPO} stands — this Manager deletes no repository (#241); it is the owner's to delete by hand once it is to go`)).toBe(true);
     expect(logs.some((l) => l === `build registration of ${UNIT} removed`)).toBe(true);
     await runAll(def.steps({ unit: UNIT }), logs);
-    expect(githubApp.deleted).toEqual([`${ORG}/${UNIT}`]);
-    expect(logs.some((l) => l.includes("already absent — no repository to delete"))).toBe(true);
+    expect(githubApp.repos.has(`${ORG}/${UNIT}`)).toBe(true);
     expect(logs.some((l) => l === `build registration of ${UNIT} already absent`)).toBe(true);
+    expect(seeder.deletedBuildRepoPats).toEqual([{ consumerName: UNIT }, { consumerName: UNIT }]);
   });
 
-  it("leaves a repository standing that this platform did not create, and refuses without the App", async () => {
+  it("says where no Vault seeder is wired, and needs no App at all", async () => {
     const builds = new Registrations(new FakePlatformRepo());
-    await builds.commitRegistration({ unit: { name: UNIT, repoURL: `https://github.com/customer/${UNIT}.git`, suspended: false, quiesced: false }, builds: [UNIT], runId: "run_onb" });
-    const githubApp = new FakeGitHubApp();
-    githubApp.org = ORG;
+    await registered(builds, UNIT);
     const logs: string[] = [];
-    await runAll(makeTenantAppsRepoPurgeDef(ports({ buildRegistrations: builds, githubApp })).steps({ unit: UNIT }), logs);
-    expect(githubApp.deleted).toEqual([]);
-    expect(logs.some((l) => l.includes("is not one this platform created") && l.includes("left standing"))).toBe(true);
-    expect(await builds.readBuildRegistration(UNIT)).toBeNull(); // the registration goes regardless
+    await runAll(makeTenantAppsRepoPurgeDef(ports({ buildRegistrations: builds })).steps({ unit: UNIT }), logs);
+    expect(await builds.readBuildRegistration(UNIT)).toBeNull();
     expect(logs.some((l) => l.includes("no Vault seeder is wired"))).toBe(true);
-    const again = new Registrations(new FakePlatformRepo());
-    await registered(again, UNIT);
-    const steps = makeTenantAppsRepoPurgeDef(ports({ buildRegistrations: again })).steps({ unit: UNIT });
-    await expect(steps[1]!.run(ctx("delete-repository", []))).rejects.toThrow(/no GitHub App identity/);
   });
 });

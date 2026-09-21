@@ -38,7 +38,10 @@ import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts"
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
 import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
-import { makeTenantAppsRepoPurgeDef } from "../domains/units/tenant-apps-repo-purge.run.ts";
+import { makeTenantAppsRepoPurgeDef, orphanBuildsScan } from "../domains/units/tenant-apps-repo-purge.run.ts";
+import { readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
+import { unitNameFromRepoURL } from "../../shared/consumer.ts";
+import type { OrphanBuildView } from "../../shared/api-types.ts";
 import type { RelocationPorts } from "../domains/units/relocation.ts";
 import type { TenantRelocationPorts } from "../domains/units/relocation-world-tenant.ts";
 import { makeTenantBackupDef } from "../domains/units/backup.run.ts";
@@ -70,6 +73,8 @@ export interface TenantFamily {
   /** The pointer registrations its orphan-scan read route diffs against the inventory. Undefined
    *  when the family is not configured. */
   tenantRegistrations?: TenantRegistrations;
+  /** The build half of that scan (#241). Undefined when the family is not configured. */
+  orphanBuilds?: () => Promise<OrphanBuildView[]>;
   /** Bring the catalog's books branch into being and to the catalog's trunk, so the tenant
    *  ApplicationSet's git generator has a revision to resolve before the first tenant exists and the
    *  member charts on that revision are the current ones. It crosses as a closure because buildUnits
@@ -269,11 +274,15 @@ export function buildTenantOnboarding(
     // withdraws the bucket keys create-tenant minted, through the same store.
     seeder,
     ...(objectStore ? { objectStore } : {}),
-    // A tenant's apps repository goes with its last app (#217): deleted through the App that created
-    // it, its build registration removed from the same registrations the onboarding wrote.
+    // A tenant's apps bundle goes with its last app (#217): its build registration removed from the
+    // same registrations the onboarding wrote; the repository stands (#241).
     githubApp,
     buildRegistrations: registrations,
+    // What accounts for a build-only registration beside a tenant's bundle: the catalog's own build
+    // units, read off its books branch at every scan (#241).
+    catalogBuildUnits: async (signal) => ((await readTenantSpec(onboardPorts, signal ? { signal } : {}))?.buildRepos ?? []).map((b) => unitNameFromRepoURL(b.repo)),
   };
+  const orphanBuilds = orphanBuildsScan(lifecyclePorts);
 
   // The tenant relocation ports: the lifecycle set (registrations/resolver/dns/argo-sync/apex) plus the
   // shared relocation surface and the platform repo URL the member AppProjects allow as a source.
@@ -329,5 +338,5 @@ export function buildTenantOnboarding(
   // (GET /api/tenants/:id/live), and scan the LIVE tenant pointers for orphans (GET /api/tenants/orphans)
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
-  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, carryTrunkToBooksBranch };
+  return { defs, enabled: true, resolver, catalogRepoUrl: repoURL, appCatalog, tenantRegistrations, orphanBuilds, carryTrunkToBooksBranch };
 }

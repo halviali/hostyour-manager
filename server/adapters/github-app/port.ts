@@ -49,12 +49,10 @@ export interface GitHubApp {
    *  The rule every repository credential follows (#194): reached ⇒ the App is its identity and no
    *  PAT is asked; not reached ⇒ the repository's own PAT, exactly as before the App existed. */
   reachesRepository(input: { owner: string; repo: string; signal?: AbortSignal }): Promise<boolean>;
-  /** IDEMPOTENT delete (DELETE /repos/{org}/{name}, the App's administration:write): {deleted:true}
-   *  for a repository that stood, {deleted:false} for one already gone (404) — a removal resumed
-   *  after a crash finds it gone rather than failing on it. Any other refusal throws GitHubAppError
-   *  carrying GitHub's own message. Only a tenant's apps repository is ever deleted through this
-   *  (tenant-apps-repo-delete.ts), and only the one the App created. */
-  deleteRepository(input: { org: string; name: string; signal?: AbortSignal }): Promise<{ deleted: boolean }>;
+  // NO deleteRepository, on purpose (#241): no run of this Manager deletes a repository on GitHub.
+  // The App's installation owner is the customer's owner, so a repository name reached through it
+  // is one of the customer's — the first purge of #241 deleted three of them. A repository the
+  // platform created is the owner's to delete by hand once it is to go.
 }
 
 /** Any GitHub App API failure — a transport error, or a non-2xx that is not the idempotent

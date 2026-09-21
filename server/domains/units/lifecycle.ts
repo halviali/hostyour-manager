@@ -200,14 +200,17 @@ export interface TenantLifecyclePorts {
    *  and skipped when absent, the same shape seeder has: the store is what MINTED the keys, so a
    *  purge running without one has none it could take back, and the step says so. */
   objectStore?: ObjectStore;
-  /** The platform's GitHub App — what created a tenant's apps repository, and the only thing that
-   *  deletes it (tenant-apps-repo-delete.ts). Optional but UNCONDITIONALLY needed by the delete
-   *  where a repository is recorded: absent ⇒ the step fails loud, never a silent skip. */
+  /** The platform's GitHub App — what created a tenant's apps repository. It deletes nothing
+   *  (#241): the repository stands when the tenant goes. */
   githubApp?: GitHubApp;
   /** The build registrations (registrations/<unit>/build.yaml) the bundle's build-only onboarding
-   *  wrote — its removal goes with the repository, and the orphan purge (#241) reads them to say
-   *  which one nothing accounts for. Optional and said when absent. */
+   *  wrote — its removal goes with the tenant's last app, and the orphan purge (#241) reads them to
+   *  say which one nothing accounts for. Optional and said when absent. */
   buildRegistrations?: Pick<Registrations, "removeBuildRegistration" | "readBuildRegistration" | "readUnitStages" | "listBuildRegistrations" | "branch">;
+  /** The units the catalog's `tenant.buildRepos` names, read off its books branch — what accounts
+   *  for a build-only registration beside a tenant's own apps bundle (#241: the first purge listed
+   *  the catalog's own build units as orphaned and took three of the customer's repositories). */
+  catalogBuildUnits?: (signal?: AbortSignal) => Promise<string[]>;
 }
 
 /** A tenant + its cluster context, resolved from the tenants row (tnt_) and its clusters row. The

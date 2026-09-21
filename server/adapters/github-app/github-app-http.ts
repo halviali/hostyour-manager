@@ -116,14 +116,6 @@ export class HttpGitHubApp implements GitHubApp {
     return String(body.id ?? "") === String(this.opts.installationId);
   }
 
-  async deleteRepository(input: { org: string; name: string; signal?: AbortSignal }): Promise<{ deleted: boolean }> {
-    const path = `/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.name)}`;
-    const res = await this.send(await this.installationToken(input.signal), path, { method: "DELETE", ...(input.signal ? { signal: input.signal } : {}) });
-    if (res.status === 204) return { deleted: true };
-    if (res.status === 404) return { deleted: false };
-    throw new GitHubAppError(`GitHub DELETE ${path} → ${res.status}: ${await HttpGitHubApp.ghMessage(res)}`, res.status);
-  }
-
   async createRepository(input: CreateRepositoryInput): Promise<{ created: boolean }> {
     const path = `/orgs/${encodeURIComponent(input.org)}/repos`;
     const res = await this.send(await this.installationToken(input.signal), path, {

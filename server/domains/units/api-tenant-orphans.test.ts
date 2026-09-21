@@ -448,7 +448,7 @@ describe("POST /api/tenants/purge (the force-offboard trigger)", () => {
     // while its Applications do (the fail-soft settle guard re-reads the fan-out just before the flip).
     expect(run?.steps.map((s) => s.name)).toEqual([
       "attest-target",
-      `purge-${ORPHAN_GUID}-delete-apps-repository`,
+      `purge-${ORPHAN_GUID}-remove-apps-registration`,
       `purge-${ORPHAN_GUID}-remove`,
       `purge-${ORPHAN_GUID}-watch-prune`,
       `purge-${ORPHAN_GUID}-delete-projects`,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { parse as parseYaml } from "yaml";
-import type { RunDefinition, Step, Plan, PlanStreamCtx } from "../../executor/types.ts";
+import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { appName, guid as guidSchema, subdomain as subdomainSchema } from "../../../shared/tenant.ts";
 import { ConsumerManifestSchema, type TenantSpec } from "../../../shared/consumer.ts";
@@ -52,8 +52,8 @@ export type TenantAppsRepoParams = z.infer<typeof TenantAppsRepoParams>;
 
 /** The catalog's tenant spec off this installation's books branch — where `appsOrg`, `appsBundle`
  *  and `appsRepo` are stated (the same clone validateTenant makes). */
-export async function readTenantSpec(ports: TenantOnboardPorts, ctx: PlanStreamCtx): Promise<TenantSpec | null> {
-  const cloned = await ports.repo.cloneAtRef({ repoURL: ports.catalogRepoUrl, ref: ports.registrations.branch, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), signal: ctx.signal });
+export async function readTenantSpec(ports: TenantOnboardPorts, ctx: { signal?: AbortSignal }): Promise<TenantSpec | null> {
+  const cloned = await ports.repo.cloneAtRef({ repoURL: ports.catalogRepoUrl, ref: ports.registrations.branch, ...(ports.catalogCredentialId ? { credentialId: ports.catalogCredentialId } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
   try {
     const text = await ports.repo.readFile(cloned.workdir, TENANT_MANIFEST_PATH);
     if (text === null) return null;

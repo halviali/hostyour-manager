@@ -303,7 +303,7 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, ...apps }, `tenant-apps-repo(${guid}): ${apps.appsImage} ${trailer(runId)}`);
   }
 
-  /** The inverse of setTenantAppsRepo (tenant-apps-repo-delete.ts): the tenant is its platform alone
+  /** The inverse of setTenantAppsRepo (tenant-apps-repo-remove.ts): the tenant is its platform alone
    *  again, the three bundle fields gone together the way the schema demands them together. */
   async clearTenantAppsRepo(stage: Stage, guid: string, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);

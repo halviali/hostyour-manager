@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { Config } from "../kernel/config.ts";
+import type { OrphanBuildView } from "../../shared/api-types.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { Db } from "../db/client.ts";
@@ -126,6 +127,8 @@ export interface UnitsWiring {
    *  Undefined when tenant onboarding is not configured; the scan route then degrades to an empty
    *  result with a reason. */
   tenantRegistrations?: TenantRegistrations;
+  /** The build half of the orphan scan (#241). Undefined when the tenant family is not configured. */
+  orphanBuilds?: () => Promise<OrphanBuildView[]>;
   /** Bring the catalog's books branch into being, and to the catalog's trunk, at boot. The tenant
    *  ApplicationSet's git generator reads that branch from the moment the installation is deployed,
    *  and every member Application reads its chart there too, so without this the ApplicationSet has
@@ -318,6 +321,7 @@ export function buildUnits(
     ...(tenant.catalogRepoUrl ? { catalogRepoUrl: tenant.catalogRepoUrl } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
+    ...(tenant.orphanBuilds ? { orphanBuilds: tenant.orphanBuilds } : {}),
     ...(tenant.carryTrunkToBooksBranch ? { carryTrunkToBooksBranch: tenant.carryTrunkToBooksBranch } : {}),
     // The shared activation client is always constructed above — surface it for the tenant invite route.
     activator,

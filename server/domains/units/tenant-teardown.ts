@@ -32,7 +32,7 @@ import { memberAppProject, memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { renderTenantArgoSync } from "./build-rbac.ts";
 import { clearRelocationHold, type TenantLifecyclePorts } from "./lifecycle.ts";
-import { deleteTenantAppsRepository } from "./tenant-apps-repo-delete.ts";
+import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 import { allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 
 /** ONE tenant a teardown takes off its cluster. Frozen into the composing run's params at plan time so
@@ -279,18 +279,18 @@ export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardo
   const pfx = `${opts.stepPrefix}-${t.guid}`;
   const { title, removing, settled } = opts.wording;
   return [
-    // The tenant's apps repository goes with the tenant (#217), read off the registration while it
-    // still stands — the next step git-rms it. A registration that is not readable names nothing
-    // this step can trust; the pointer is still removed by path below.
+    // The tenant's apps build registration goes with the tenant (#217), read off the registration
+    // while it still stands — the next step git-rms it; the repository stands (#241). A registration
+    // that is not readable names nothing this step can trust; the pointer is still removed by path.
     {
-      name: `${pfx}-delete-apps-repository`,
-      title: `${title} ${t.guid}: delete its apps repository, where this platform created one`,
+      name: `${pfx}-remove-apps-registration`,
+      title: `${title} ${t.guid}: remove its apps build registration; the repository stands`,
       run: async (ctx) => {
         if ((await ports.registrations.scanTenant(t.stage, t.guid)).status !== "read") {
-          ctx.log("meta", `${settled} ${t.guid}'s registration is not readable — an apps repository it may name is left standing`);
+          ctx.log("meta", `${settled} ${t.guid}'s registration is not readable — an apps bundle it may name stays registered`);
           return;
         }
-        await deleteTenantAppsRepository(ctx, ports, { stage: t.stage, guid: t.guid }, { clear: false });
+        await removeTenantAppsRegistration(ctx, ports, { stage: t.stage, guid: t.guid }, { clear: false });
       },
     },
     {

@@ -49,9 +49,10 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
   );
 }
 
-/** The build registrations nothing accounts for (#241): no tenant names one as its apps bundle and no
- *  stage file stands beside it, so no run of a tenant will ever take it away. The one action is the
- *  purge; the plan refuses a unit that is accounted for after all. */
+/** The build registrations nothing accounts for (#241): no tenant names one as its apps bundle, the
+ *  catalog's buildRepos does not name it and no stage file stands beside it, so no run of a tenant
+ *  will ever take it away. The one action is the purge — the registration and the Vault entry; the
+ *  repository on GitHub stands. The plan refuses a unit that is accounted for after all. */
 function OrphanBuildRows({ builds, onPurge }: { builds: OrphanBuildView[]; onPurge: (unit: string) => void }) {
   return (
     <ul className="rows">
@@ -60,7 +61,7 @@ function OrphanBuildRows({ builds, onPurge }: { builds: OrphanBuildView[]; onPur
           <div className="row">
             <span className="badge badge--degraded">build</span>
             <span className="row__title mono">{b.unit}</span>
-            <span className="row__meta">registrations/{b.unit}/build.yaml · {b.repoURL} · named by no tenant, at no stage</span>
+            <span className="row__meta">registrations/{b.unit}/build.yaml · {b.repoURL} · named by no tenant and no catalog build unit, at no stage</span>
             <span className="row__end">
               <button type="button" className="btn btn--danger" onClick={() => onPurge(b.unit)}>
                 Purge…
@@ -134,8 +135,9 @@ export function TenantOrphanPanel(props: {
           {scan.builds.length > 0 && (
             <>
               <p role="alert" className="alert alert--warn">
-                {scan.builds.length} build registration(s) nothing accounts for: no tenant names them as its apps bundle and no stage file
-                stands beside them. Each is presented by the App-token refresh every tick and keeps its Vault entry until purged.
+                {scan.builds.length} build registration(s) nothing accounts for: no tenant names them as its apps bundle, the catalog&rsquo;s
+                buildRepos does not name them and no stage file stands beside them. Each is presented by the App-token refresh every tick and
+                keeps its Vault entry until purged. A purge removes the registration and the Vault entry; the repository on GitHub stands.
               </p>
               <OrphanBuildRows builds={scan.builds} onPurge={props.onPurgeBuild} />
             </>

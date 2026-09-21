@@ -166,7 +166,7 @@ describe("tenant-offboard of a tenant whose app rows are SETTLED", () => {
     argo.setStatuses(syncedMap([memberApplication(GUID, "web", "prod")])); // everything pruned EXCEPT the settled app member
     const steps = makeOffboardTenantDef(ports(reg, { argo })).steps({ tenantId: "tnt_1" });
     await steps[0]!.run(ctx("run_off", "attest-target", {}, []));
-    await steps[1]!.run(ctx("run_off", "delete-apps-repository", {}, []));
+    await steps[1]!.run(ctx("run_off", "remove-apps-registration", {}, []));
     await steps[2]!.run(ctx("run_off", "remove-tenant", {}, []));
     await expect(steps[3]!.run(ctx("run_off", "watch-removal", {}, []))).rejects.toThrow(`${memberApplication(GUID, "web", "prod")}=Healthy`);
   });

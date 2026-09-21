@@ -140,8 +140,8 @@ describe("tenantTeardownSteps — the step-name prefix", () => {
     // The guid is appended by the BUILDER (never left to the caller), so the same flavour applied to
     // two tenants still yields eight distinct names — the executor keys step impls by name.
     expect(names).toEqual([
-      `replace-${GUID}-delete-apps-repository`, `replace-${GUID}-remove`, `replace-${GUID}-watch-prune`, `replace-${GUID}-delete-projects`, `replace-${GUID}-record`,
-      `replace-${other}-delete-apps-repository`, `replace-${other}-remove`, `replace-${other}-watch-prune`, `replace-${other}-delete-projects`, `replace-${other}-record`,
+      `replace-${GUID}-remove-apps-registration`, `replace-${GUID}-remove`, `replace-${GUID}-watch-prune`, `replace-${GUID}-delete-projects`, `replace-${GUID}-record`,
+      `replace-${other}-remove-apps-registration`, `replace-${other}-remove`, `replace-${other}-watch-prune`, `replace-${other}-delete-projects`, `replace-${other}-record`,
     ]);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -152,7 +152,7 @@ describe("tenantTeardownSteps — the step-name prefix", () => {
     // its prune unproven.
     const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), REAP, []);
     expect(steps.map((s) => s.name)).toEqual([
-      `reap-${GUID}-delete-apps-repository`, `reap-${GUID}-remove`, `reap-${GUID}-watch-prune`, `reap-${GUID}-delete-projects`, `reap-${GUID}-verify-prune`, `reap-${GUID}-record`,
+      `reap-${GUID}-remove-apps-registration`, `reap-${GUID}-remove`, `reap-${GUID}-watch-prune`, `reap-${GUID}-delete-projects`, `reap-${GUID}-verify-prune`, `reap-${GUID}-record`,
     ]);
   });
 });
@@ -207,7 +207,7 @@ describe("tenantTeardownSteps — the cascade and the record step's place", () =
   it("places the cascade BETWEEN delete-projects and record, so the row flip is the LAST step", () => {
     const steps = tenantTeardownSteps(ports(new TenantRegistrations(new FakePlatformRepo())), target(), REAP, cascade([]));
     expect(steps.map((s) => s.name)).toEqual([
-      `reap-${GUID}-delete-apps-repository`, `reap-${GUID}-remove`, `reap-${GUID}-watch-prune`, `reap-${GUID}-delete-projects`,
+      `reap-${GUID}-remove-apps-registration`, `reap-${GUID}-remove`, `reap-${GUID}-watch-prune`, `reap-${GUID}-delete-projects`,
       "delete-namespaces", "delete-tenant-crypto",
       `reap-${GUID}-verify-prune`, // the settle guard reads the fan-out AFTER the cascade had its go
       `reap-${GUID}-record`,
@@ -377,7 +377,7 @@ describe("tenantTeardownSteps — the wording", () => {
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const steps = tenantTeardownSteps(ports(reg), target(), REAP, []);
     expect(steps.map((s) => s.title)).toEqual([
-      `Reap ${GUID}: delete its apps repository, where this platform created one`,
+      `Reap ${GUID}: remove its apps build registration; the repository stands`,
       `Reap ${GUID}: remove its pointer (GitOps un-deploy)`,
       `Reap ${GUID}: wait for ArgoCD to prune its fan-out`,
       `Reap ${GUID}: delete every member's isolation AppProject, admission policy and the argo-sync grant`,

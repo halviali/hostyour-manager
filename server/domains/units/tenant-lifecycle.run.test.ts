@@ -261,9 +261,9 @@ describe("remove-app run", () => {
   });
 
   const TWO_APPS = [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }];
-  // The repository goes with the last app (#217): the App that created it deletes it, its build
-  // registration goes, and the registration is its platform alone again. A sibling standing keeps it.
-  it("the last app removed takes the tenant's apps repository, its build registration and the bundle fields with it; a sibling standing keeps them", async () => {
+  // The bundle goes with the last app (#217): its build registration goes and the registration is its
+  // platform alone again; the repository STANDS (#241). A sibling standing keeps the bundle.
+  it("the last app removed takes the tenant's apps build registration and the bundle fields with it, and leaves the repository standing; a sibling standing keeps them", async () => {
     seedTenant({ apps: ["erp", "web"] });
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const bundle = { appsRepo: "https://github.com/acme-org/example-apps-simetrix.git", appsImage: "example-apps-simetrix", appsImageTag: "0.1.0-stable-20260101000000-abc1234" };
@@ -275,11 +275,12 @@ describe("remove-app run", () => {
     const prt = ports(reg, { githubApp, buildRegistrations: { removeBuildRegistration: async (name: string) => { removedUnits.push(name); return { removed: true }; } } as unknown as NonNullable<TenantLifecyclePorts["buildRegistrations"]> });
     const logs: string[] = [];
     await runAll(makeRemoveAppDef(prt).steps({ tenantId: "tnt_1", app: "web" }), "run_rma", { tenantId: "tnt_1", app: "web" }, logs);
-    expect(githubApp.deleted).toEqual([]);
+    expect(removedUnits).toEqual([]);
     expect((await reg.readTenant("prod", GUID))?.entry.appsRepo).toBe(bundle.appsRepo);
-    expect(logs.some((l) => l.includes("still deploys erp — its apps repository stays"))).toBe(true);
+    expect(logs.some((l) => l.includes("still deploys erp — its apps bundle stays registered"))).toBe(true);
     await runAll(makeRemoveAppDef(prt).steps({ tenantId: "tnt_1", app: "erp" }), "run_rma2", { tenantId: "tnt_1", app: "erp" }, logs);
-    expect(githubApp.deleted).toEqual(["acme-org/example-apps-simetrix"]);
+    expect(githubApp.repos.has("acme-org/example-apps-simetrix")).toBe(true); // the repository stands (#241)
+    expect(logs.some((l) => l === `repository ${bundle.appsRepo} stands — this Manager deletes no repository (#241); it is the owner's to delete by hand once it is to go`)).toBe(true);
     expect(removedUnits).toEqual(["example-apps-simetrix"]);
     const after = (await reg.readTenant("prod", GUID))?.entry;
     expect(after?.apps).toEqual([]);
@@ -287,35 +288,28 @@ describe("remove-app run", () => {
     expect(after?.appsImage).toBe("");
     // A resume finds nothing to delete and nothing to clear.
     await runAll(makeRemoveAppDef(prt).steps({ tenantId: "tnt_1", app: "erp" }), "run_rma3", { tenantId: "tnt_1", app: "erp" }, logs);
-    expect(githubApp.deleted).toEqual(["acme-org/example-apps-simetrix"]);
-    expect(logs.some((l) => l.includes("records no apps repository — nothing to delete"))).toBe(true);
+    expect(removedUnits).toEqual(["example-apps-simetrix"]);
+    expect(logs.some((l) => l.includes("records no apps repository — nothing to take back"))).toBe(true);
   });
 
-  it("never deletes a repository this platform did not create, and refuses without the App where one is recorded", async () => {
+  it("takes the registration back without the App, whoever created the repository — nothing on GitHub is touched", async () => {
     seedTenant({ apps: ["erp"] });
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const foreign = { appsRepo: "https://github.com/customer/their-apps.git", appsImage: "their-apps", appsImageTag: "1.0.0" };
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(foreign), runId: "run_onb" });
-    const githubApp = new FakeGitHubApp();
-    githubApp.org = "acme-org";
+    const removedUnits: string[] = [];
     const logs: string[] = [];
-    await runAll(makeRemoveAppDef(ports(reg, { githubApp })).steps({ tenantId: "tnt_1", app: "erp" }), "run_rma", { tenantId: "tnt_1", app: "erp" }, logs);
-    expect(githubApp.deleted).toEqual([]);
-    expect((await reg.readTenant("prod", GUID))?.entry.appsRepo).toBe(foreign.appsRepo);
-    expect(logs.some((l) => l.includes("is not one this platform created") && l.includes("left standing"))).toBe(true);
-    // Without the App nothing can delete what it created: loud, never a silent skip.
-    const reg2 = new TenantRegistrations(new FakePlatformRepo());
-    await reg2.commitTenant({ stage: "prod", guid: GUID, registration: entry({ appsRepo: "https://github.com/acme-org/example-apps-simetrix.git", appsImage: "example-apps-simetrix", appsImageTag: "1.0.0" }), runId: "run_onb" });
-    const steps = makeRemoveAppDef(ports(reg2)).steps({ tenantId: "tnt_1", app: "erp" });
-    await steps[1]!.run(ctx("run_x", "remove-app-pointer", { tenantId: "tnt_1", app: "erp" }, []));
-    await expect(steps[3]!.run(ctx("run_x", "delete-apps-repository", { tenantId: "tnt_1", app: "erp" }, []))).rejects.toThrow(/no GitHub App identity/);
+    await runAll(makeRemoveAppDef(ports(reg, { buildRegistrations: { removeBuildRegistration: async (name: string) => { removedUnits.push(name); return { removed: true }; } } as unknown as NonNullable<TenantLifecyclePorts["buildRegistrations"]> })).steps({ tenantId: "tnt_1", app: "erp" }), "run_rma", { tenantId: "tnt_1", app: "erp" }, logs);
+    expect(removedUnits).toEqual(["their-apps"]);
+    expect(logs.some((l) => l.includes(`repository ${foreign.appsRepo} stands`))).toBe(true);
+    expect((await reg.readTenant("prod", GUID))?.entry.appsImage).toBe("");
   });
 
   it("plans with the five steps + tenant-remove-app kind", async () => {
     seedTenant({ apps: ["erp", "web"] });
     const plan = await makeRemoveAppDef(ports(new TenantRegistrations(new FakePlatformRepo()))).plan({ tenantId: "tnt_1", app: "web" }, { db: db.db });
     expect(plan.kind).toBe("tenant-remove-app");
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-app-pointer", "watch-prune", "delete-apps-repository", "record-app-removed"]);
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-app-pointer", "watch-prune", "remove-apps-registration", "record-app-removed"]);
   });
 });
 
@@ -326,7 +320,7 @@ describe("tenant-offboard run", () => {
     const plan = await def.plan({ tenantId: "tnt_1" }, { db: db.db });
     expect(def.mutating).toBe(true);
     expect(plan.targetKind).toBe("tenant");
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "delete-apps-repository", "remove-tenant", "watch-removal", "delete-appprojects", "remove-dns", "record-offboard"]);
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-apps-registration", "remove-tenant", "watch-removal", "delete-appprojects", "remove-dns", "record-offboard"]);
     expect(plan.locks).toEqual([{ resource: "git-branch", key: `catalog@${FAKE_BOOKS_BRANCH}` }, { resource: "master-kube", key: "m" }]);
   });
 
@@ -404,7 +398,7 @@ describe("tenant-offboard run", () => {
     argo.setStatuses(syncedMap(FULL_SET)); // still Synced ⇒ not pruned
     const steps = makeOffboardTenantDef(ports(reg, { argo })).steps({ tenantId: "tnt_1" });
     await steps[0]!.run(ctx("run_off", "attest-target", {}, []));
-    await steps[1]!.run(ctx("run_off", "delete-apps-repository", {}, []));
+    await steps[1]!.run(ctx("run_off", "remove-apps-registration", {}, []));
     await steps[2]!.run(ctx("run_off", "remove-tenant", {}, []));
     await expect(steps[3]!.run(ctx("run_off", "watch-removal", {}, []))).rejects.toThrow(/was not pruned/);
   });
@@ -419,7 +413,7 @@ describe("tenant-offboard run", () => {
     argo.setStatuses(syncedMap([memberApplication(GUID, "auth", "prod")]));
     const steps = makeOffboardTenantDef(ports(reg, { argo })).steps({ tenantId: "tnt_1" });
     await steps[0]!.run(ctx("run_off", "attest-target", {}, []));
-    await steps[1]!.run(ctx("run_off", "delete-apps-repository", {}, []));
+    await steps[1]!.run(ctx("run_off", "remove-apps-registration", {}, []));
     await steps[2]!.run(ctx("run_off", "remove-tenant", {}, []));
     await expect(steps[3]!.run(ctx("run_off", "watch-removal", {}, []))).rejects.toThrow(/was not pruned/);
   });
@@ -478,7 +472,7 @@ describe("a still-provisioning tenant offboards COMPLETELY", () => {
     argo.setStatuses(syncedMap([memberApplication(GUID, "web", "prod")])); // everything pruned EXCEPT web
     const steps = makeOffboardTenantDef(ports(reg, { argo })).steps({ tenantId: "tnt_1" });
     await steps[0]!.run(ctx("run_off", "attest-target", {}, []));
-    await steps[1]!.run(ctx("run_off", "delete-apps-repository", {}, []));
+    await steps[1]!.run(ctx("run_off", "remove-apps-registration", {}, []));
     await steps[2]!.run(ctx("run_off", "remove-tenant", {}, []));
     await expect(steps[3]!.run(ctx("run_off", "watch-removal", {}, []))).rejects.toThrow(/was not pruned/);
   });
