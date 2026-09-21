@@ -215,7 +215,7 @@ describe("makeAppCatalogProvider (TTL cache + fail-soft)", () => {
     repo.fail = true;
     const warnings: string[] = [];
     const p = makeAppCatalogProvider({ repo, repoURL: REPO_URL, ref: "master", warn: (_f, msg) => warnings.push(msg), ttlMs: 1000, now: () => 0 });
-    expect(await p.list()).toEqual({ apps: [] });
+    expect(await p.list()).toEqual({ apps: [], packageScopes: [] });
     expect(warnings).toHaveLength(1);
   });
 

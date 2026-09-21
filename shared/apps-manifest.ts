@@ -83,6 +83,18 @@ export interface TenantCatalogAppView extends AppEntry {
  *  api-types.ts, which stands at the file-size budget. */
 export interface TenantAppCatalogView {
   apps: TenantCatalogAppView[];
+  /** Present where the template's `.npmrc` routes scopes to GitHub Packages: the owner whose reader
+   *  the bundle's build installs them with, and whether one is recorded. The add-app form asks for
+   *  the token while `recorded` is null — the FIRST tenant onboarding asks, none after (#233). */
+  packagesReader?: PackagesReaderView;
   reason?: string;
   error?: string;
+}
+
+/** The packages reader an owner's bundles install private packages with: needed for `scopes`,
+ *  recorded (fingerprint and date) or not. */
+export interface PackagesReaderView {
+  owner: string;
+  scopes: string[];
+  recorded: { fingerprint: string; recordedAt: string } | null;
 }

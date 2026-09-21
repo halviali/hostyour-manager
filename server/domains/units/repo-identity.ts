@@ -39,11 +39,13 @@ export async function appReachesRepoURL(app: Pick<GitHubApp, "reachesRepository"
 }
 
 export const ORGANISATIONS_PAGE = "the Organisations page";
+export const ADD_APP_FORM = "the tenant's Add app form";
 
-/** The refusal a repository routing a scope to GitHub Packages gets where its organisation records
- *  no packages reader — one sentence every caller uses. */
-export function packagesReaderMissing(owner: string, repo: string, scopes: readonly string[]): string {
-  return `organisation ${owner} records no packages reader, and ${owner}/${repo} installs private npm packages of ${scopes.map((s) => `@${s}`).join(", ")} from GitHub Packages (its .npmrc) — record a token that reads them on ${ORGANISATIONS_PAGE} first`;
+/** The refusal a repository routing a scope to GitHub Packages gets where its owner records no
+ *  packages reader — one sentence every caller uses; `where` names the place the token is given
+ *  (a tenant's bundle: the Add app form, #233). */
+export function packagesReaderMissing(owner: string, repo: string, scopes: readonly string[], where: string = ORGANISATIONS_PAGE): string {
+  return `organisation ${owner} records no packages reader, and ${owner}/${repo} installs private npm packages of ${scopes.map((s) => `@${s}`).join(", ")} from GitHub Packages (its .npmrc) — record a token that reads them in ${where} first`;
 }
 
 /** The scopes a repository's `.npmrc` routes to GitHub Packages — the one measurement that says

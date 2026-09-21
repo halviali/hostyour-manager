@@ -60,6 +60,14 @@ export async function listOrganisationIdentities(deps: Pick<OrganisationDeps, "d
   });
 }
 
+/** ONE owner's recorded packages reader as the wizard shows it — fingerprint and date — or null. */
+export async function packagesReaderView(deps: { db: Db; store: Pick<CredentialStore, "list"> }, org: string): Promise<OrganisationCredentialView | null> {
+  const id = organisationIdentity(deps.db, org)?.packagesCredentialId ?? null;
+  if (!id) return null;
+  const row = (await deps.store.list({ subject: { kind: "organisation", id: org }, purpose: "packages-reader" })).find((r) => r.id === id);
+  return row ? { fingerprint: row.fingerprint, recordedAt: row.recordedAt } : null;
+}
+
 /** The credential ids an onboarding derives a unit's identity from — the identity rule's read. */
 export function readOrganisationIdentity(db: Db, org: string): { packagesCredentialId: string | null; repoCredentialId: string | null } | null {
   return organisationIdentity(db, org);

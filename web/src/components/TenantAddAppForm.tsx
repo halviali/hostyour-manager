@@ -12,6 +12,9 @@ interface Props {
   catalog: TenantAppCatalogView | null;
   busy: boolean;
   onAdd: (choice: TenantAddAppChoice) => void;
+  /** Records the owner's packages reader (the token measured and sealed server-side) and reloads
+   *  the catalog, so the step below disappears once it is recorded. */
+  onRecordPackagesReader: (owner: string, token: string) => Promise<void>;
 }
 
 /** The add-app control of the tenant page: the apps of the tenant's OWN bundle that are not deployed
@@ -20,9 +23,12 @@ interface Props {
  *  what stands in the tenant's repository is what tenant-add-app accepts (gate T4 judges against the
  *  same apps.yaml), so a name typed past the catalog would only be refused at the plan. The route's
  *  `error` and `reason` are shown as they are: an empty offer never reads as "nothing to add". */
-export function TenantAddAppForm({ catalog, busy, onAdd }: Props) {
+export function TenantAddAppForm({ catalog, busy, onAdd, onRecordPackagesReader }: Props) {
   const [app, setApp] = useState("");
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  const [token, setToken] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [recordError, setRecordError] = useState<string | null>(null);
 
   if (catalog === null) return <span className="field__hint">Loading the tenant&apos;s catalog…</span>;
   if (catalog.error)
@@ -45,6 +51,24 @@ export function TenantAddAppForm({ catalog, busy, onAdd }: Props) {
       </span>
     );
   const entry = offered.find((a) => a.name === app) ?? null;
+  // THE FIRST TENANT ONBOARDING ASKS FOR THE PACKAGES READER, NONE AFTER (#233): the step stands
+  // only while the template routes a scope to GitHub Packages and the owner records no reader.
+  const reader = catalog.packagesReader;
+  const readerMissing = reader !== undefined && reader.recorded === null;
+  const record = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!reader) return;
+    setRecording(true);
+    setRecordError(null);
+    try {
+      await onRecordPackagesReader(reader.owner, token);
+      setToken("");
+    } catch (err) {
+      setRecordError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRecording(false);
+    }
+  };
 
   // Picking an app starts every selection at the default its entry declares, exactly as the wizard does.
   const choose = (e: ChangeEvent<HTMLSelectElement>) => {
@@ -59,6 +83,30 @@ export function TenantAddAppForm({ catalog, busy, onAdd }: Props) {
   };
 
   return (
+    <>
+    {readerMissing && (
+      <form className="field" onSubmit={record}>
+        <label className="field__label" htmlFor="tenant-packages-reader">
+          Packages reader of {reader.owner}
+        </label>
+        <span className="field__hint">
+          The bundle installs private npm packages of {reader.scopes.map((s) => `@${s}`).join(", ")} from GitHub Packages, and {reader.owner} records no token that
+          reads them yet. Asked once, here: a classic PAT with read:packages, or a fine-grained PAT with Packages: Read for {reader.owner}. Measured against GitHub
+          before it is sealed; only its fingerprint is kept, and it is shown and replaced under Settings afterwards.
+        </span>
+        <input id="tenant-packages-reader" className="input" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_… or github_pat_…" disabled={recording} />
+        {recordError && (
+          <p role="alert" className="alert alert--danger">
+            {recordError}
+          </p>
+        )}
+        <div className="actions">
+          <button type="submit" className="btn btn--primary" disabled={recording || token.trim() === ""}>
+            Record
+          </button>
+        </div>
+      </form>
+    )}
     <form className="field" onSubmit={submit}>
       <label className="field__label" htmlFor="tenant-add-app">
         Add app
@@ -83,10 +131,11 @@ export function TenantAddAppForm({ catalog, busy, onAdd }: Props) {
           </label>
         ))}
       <div className="actions">
-        <button type="submit" className="btn btn--primary" disabled={busy || entry === null}>
+        <button type="submit" className="btn btn--primary" disabled={busy || entry === null || readerMissing}>
           Add app
         </button>
       </div>
     </form>
+    </>
   );
 }

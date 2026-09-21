@@ -189,7 +189,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     const r = await plan(h, REQUEST);
     expect(r.outcome).toBe("rejected");
     if (r.outcome !== "rejected") return;
-    expect(r.summary).toMatch(new RegExp(`organisation ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* Organisations page`));
+    expect(r.summary).toMatch(new RegExp(`organisation ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* Add app form`));
   });
   it("refuses a catalog whose appsOrg is not the organisation the App is installed in", async () => {
     const h = harness();

@@ -33,7 +33,7 @@ import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } f
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
-import { npmrcPackageScopes, packagesReaderMissing, type OrganisationIdentityReader } from "./repo-identity.ts";
+import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OrganisationIdentityReader } from "./repo-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
 
 const repoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
@@ -146,7 +146,7 @@ export async function resolveTenantAppsUnit(
     // The bundle's build installs what the template's .npmrc routes to GitHub Packages with the
     // organisation's packages reader (#220, #221) — asked here, before anything is created.
     const scopes = npmrcPackageScopes(read.npmrc);
-    if (scopes.length > 0 && !input.organisations(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes));
+    if (scopes.length > 0 && !input.organisations(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes, ADD_APP_FORM));
     for (const app of input.chosen) if (offered.includes(app) && !(await read.folders(app))) unfolded.push(app);
     if (!read.manifest.builds.some((b) => b.name === template.name)) return refuse(`${template.repo} declares no build named ${template.name} in its ${CONSUMER_MANIFEST_PATH} — the tenant's build takes its containerfile from that entry`);
   } finally {

@@ -5,8 +5,11 @@ import type { AppEnv } from "../../http/app-env.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { errNotFound } from "../../kernel/errors.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
+import type { CredentialStore } from "../../security/store.ts";
+import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { AppCatalogProvider } from "./app-catalog.ts";
+import { packagesReaderView } from "./organisations.ts";
 
 // The catalog of ONE tenant, apart from api.ts the way api-tenant-apps-repo.ts is: the apps the
 // catalog's TEMPLATE names (app-catalog.ts — what can be added to any tenant), each marked deployed
@@ -18,6 +21,10 @@ import type { AppCatalogProvider } from "./app-catalog.ts";
 // (TenantAppCatalogView says why neither may render as "no apps").
 export interface TenantAppCatalogApiDeps {
   db: Db;
+  store: Pick<CredentialStore, "list">;
+  /** The platform's GitHub App: the owner it is installed with is the owner every tenant's bundle
+   *  belongs to, and whose packages reader the bundle's build installs with. */
+  githubApp: Pick<GitHubApp, "installationOrg">;
   registrations?: TenantRegistrations;
   appCatalog?: AppCatalogProvider;
 }
@@ -25,7 +32,7 @@ export interface TenantAppCatalogApiDeps {
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantAppCatalogApiDeps): void {
-  const { db, registrations, appCatalog } = deps;
+  const { db, store, githubApp, registrations, appCatalog } = deps;
   app.get("/api/tenants/:id/app-catalog", async (c) => {
     const id = c.req.param("id");
     const tenant = db.select({ guid: tenants.guid, stage: tenants.stage }).from(tenants).where(eq(tenants.id, id)).get();
@@ -38,7 +45,12 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
       if (!current) return none(`tenant ${tenant.guid} is not onboarded (no registration at ${tenant.stage})`);
       const template = await appCatalog.list(c.req.raw.signal);
       const deployed = new Set(current.entry.apps.map((a) => a.name));
-      return c.json({ apps: template.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })) } satisfies TenantAppCatalogView);
+      // The packages reader is asked for exactly where it is needed: the template routes a scope to
+      // GitHub Packages and the owner records no reader. Absent scopes, nothing is asked (#233).
+      const packagesReader = template.packageScopes.length > 0
+        ? await (async () => { const owner = await githubApp.installationOrg(c.req.raw.signal); return { owner, scopes: template.packageScopes, recorded: await packagesReaderView({ db, store }, owner) }; })()
+        : undefined;
+      return c.json({ apps: template.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })), ...(packagesReader ? { packagesReader } : {}) } satisfies TenantAppCatalogView);
     } catch (e) {
       return c.json({ apps: [], error: errText(e) } satisfies TenantAppCatalogView);
     }

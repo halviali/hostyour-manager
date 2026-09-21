@@ -26,6 +26,7 @@ import { ConsumerManifestSchema, tenantAppsTemplate, type TenantSpec } from "../
 import { errValidation } from "../../kernel/errors.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
+import { npmrcPackageScopes } from "./repo-identity.ts";
 
 /** values-<name>.yaml file-name shape; the capture group is the candidate app. The bare values.yaml
  *  (no `-<name>` suffix) never matches, so the chart base is excluded for free. */
@@ -64,10 +65,12 @@ export interface ReadAppsManifestInput {
   signal?: AbortSignal;
 }
 
-/** THE PRIMITIVE: the apps manifest of ONE apps repository, cloned at its default branch head with
- *  the credential given, or null where it carries no apps.yaml there. THROWS on a clone that fails
- *  and on an apps.yaml that does not parse; the throwaway checkout is always disposed. */
-export async function readAppsManifest(input: ReadAppsManifestInput): Promise<AppsManifest | null> {
+/** THE PRIMITIVE: ONE apps repository cloned at its default branch head with the credential given —
+ *  its apps manifest (null where it carries no apps.yaml there) and the scopes its `.npmrc` routes
+ *  to GitHub Packages (what a bundle's build installs with the owner's packages reader, #233). THROWS
+ *  on a clone that fails and on an apps.yaml that does not parse; the throwaway checkout is always
+ *  disposed. */
+export async function readAppsTemplate(input: ReadAppsManifestInput): Promise<{ manifest: AppsManifest | null; packageScopes: string[] }> {
   const cloned = await input.repo.cloneAtRef({
     repoURL: input.repoURL,
     ref: DEFAULT_BRANCH_HEAD,
@@ -76,11 +79,19 @@ export async function readAppsManifest(input: ReadAppsManifestInput): Promise<Ap
   });
   try {
     const text = await input.repo.readFile(cloned.workdir, APPS_MANIFEST_PATH);
-    return text === null ? null : parseAppsManifest(text);
+    return { manifest: text === null ? null : parseAppsManifest(text), packageScopes: npmrcPackageScopes(await input.repo.readFile(cloned.workdir, ".npmrc")) };
   } finally {
     await input.repo.dispose(cloned.workdir);
   }
 }
+
+/** The apps manifest alone (readAppsTemplate). */
+export async function readAppsManifest(input: ReadAppsManifestInput): Promise<AppsManifest | null> {
+  return (await readAppsTemplate(input)).manifest;
+}
+
+/** The catalog a wizard offers: the apps, and the scopes the template installs privately. */
+export type AppCatalog = AppsManifest & { packageScopes: string[] };
 
 export interface ReadAppCatalogInput {
   spec: TenantSpec;
@@ -98,21 +109,21 @@ export interface ReadAppCatalogInput {
  *  overlay stand-in, each stand-in logged. THROWS on a clone that fails and on an apps.yaml that does
  *  not parse — the caller decides whether that is a preflight rejection (the gates) or a fail-soft
  *  fallback (the wizard route). */
-export async function readAppCatalog(input: ReadAppCatalogInput): Promise<AppsManifest> {
+export async function readAppCatalog(input: ReadAppCatalogInput): Promise<AppCatalog> {
   const { spec, catalog } = input;
-  const standIn = async (why: string): Promise<AppsManifest> => {
+  const standIn = async (why: string): Promise<AppCatalog> => {
     input.warn(`${why} — the app catalog is the ${spec.perApp.engine.chart}/values-<app>.yaml overlays, with the two seed selections and no titles`);
-    return fallbackCatalog(await catalog.repo.listDir(catalog.workdir, spec.perApp.engine.chart));
+    return { ...fallbackCatalog(await catalog.repo.listDir(catalog.workdir, spec.perApp.engine.chart)), packageScopes: [] };
   };
   const template = tenantAppsTemplate(spec);
   if (template === null) return standIn(`${TENANT_MANIFEST_PATH} declares no tenant.appsBundle`);
-  const manifest = await readAppsManifest({
+  const read = await readAppsTemplate({
     repo: catalog.repo,
     repoURL: template.repo,
     ...(catalog.credentialId ? { credentialId: catalog.credentialId } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   });
-  return manifest ?? standIn(`the apps template ${template.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
+  return read.manifest ? { ...read.manifest, packageScopes: read.packageScopes } : standIn(`the apps template ${template.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
 }
 
 /** What a single catalog fetch needs: the same catalog ref + read credential validateTenant clones
@@ -131,7 +142,7 @@ export interface ListAppCatalogDeps {
 /** Clone the catalog at ref (the SAME RepoReader validateTenant uses), read its fan-out manifest,
  *  and read the app catalog off it. THROWS on a clone/read failure — makeAppCatalogProvider turns
  *  that into the fail-soft fallback; the throwaway workdir is always disposed (finally). */
-export async function listTenantAppCatalog(deps: ListAppCatalogDeps): Promise<AppsManifest> {
+export async function listTenantAppCatalog(deps: ListAppCatalogDeps): Promise<AppCatalog> {
   const cloned = await deps.repo.cloneAtRef({
     repoURL: deps.repoURL,
     ref: deps.ref,
@@ -160,7 +171,7 @@ export async function listTenantAppCatalog(deps: ListAppCatalogDeps): Promise<Ap
  *  create-tenant wizard degrades to an "app catalog unavailable" note, never a blank screen, and
  *  onboarding with no apps still works. */
 export interface AppCatalogProvider {
-  list(signal?: AbortSignal): Promise<AppsManifest>;
+  list(signal?: AbortSignal): Promise<AppCatalog>;
 }
 
 /** Minimal structured-log sink (pino warn-shaped) so this domain module observes a failed fetch without
@@ -180,14 +191,14 @@ export interface AppCatalogProviderDeps {
 }
 
 const DEFAULT_TTL_MS = 5 * 60_000;
-const EMPTY: AppsManifest = { apps: [] };
+const EMPTY: AppCatalog = { apps: [], packageScopes: [] };
 
 export function makeAppCatalogProvider(deps: AppCatalogProviderDeps): AppCatalogProvider {
   const ttlMs = deps.ttlMs ?? DEFAULT_TTL_MS;
   const now = deps.now ?? Date.now;
-  let cache: { catalog: AppsManifest; at: number } | null = null;
+  let cache: { catalog: AppCatalog; at: number } | null = null;
   return {
-    async list(signal?: AbortSignal): Promise<AppsManifest> {
+    async list(signal?: AbortSignal): Promise<AppCatalog> {
       const t = now();
       if (cache && t - cache.at < ttlMs) return cache.catalog; // fresh — one clone per TTL window, not per load
       try {

@@ -342,7 +342,7 @@ export async function wire(): Promise<Wired> {
       // measurement rides the consumer client where it is wired; without it nothing can be recorded.
       if (units.github) registerOrganisationRoutes(a, { db: db.db, store, github: units.github, githubApp, actor: runActor });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
-      registerTenantAppCatalogRoute(a, { db: db.db, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
+      registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {
         config, db: db.db, sqlite: db.sqlite, store, logger,
         github,

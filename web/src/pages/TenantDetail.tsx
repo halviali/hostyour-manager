@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
-  getTenant, getTenantAppCatalog, addTenantApp, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
+  getTenant, getTenantAppCatalog, addTenantApp, recordOrganisationCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
   setTenantSize,
   backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
   type TenantDetailView,
@@ -107,6 +107,12 @@ export function TenantDetail() {
   const addApp = (choice: TenantAddAppChoice): void => {
     const { name, ...selections } = choice;
     void act(() => addTenantApp(tenantId, name, selections));
+  };
+  // The packages reader the first tenant onboarding asks for (#233): recorded as the owner's, then
+  // the catalog is read again so the form stops asking.
+  const recordPackagesReader = async (owner: string, token: string): Promise<void> => {
+    await recordOrganisationCredential(owner, "packages-reader", token);
+    setCatalog(await getTenantAppCatalog(tenantId));
   };
 
   if (error && !tenant)
@@ -248,7 +254,7 @@ export function TenantDetail() {
         );
       })()}
 
-      {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} />}
+      {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} onRecordPackagesReader={recordPackagesReader} />}
 
       {!settled && (
         <div className="actionbar">

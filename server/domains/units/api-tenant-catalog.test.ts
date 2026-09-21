@@ -77,6 +77,7 @@ describe("GET /api/tenants/app-catalog", () => {
     const { app, cookie } = await makeTenant(makeAppCatalogProvider({ repo, repoURL: DEPLOY_URL, ref: "master", credentialId: "catalog-read-pat", warn: () => {} }));
     expect(await (await app.request("/api/tenants/app-catalog", authed(cookie))).json()).toEqual({
       apps: [{ name: "erp", title: "ERP", description: "Orders and stock.", selections: { seedDemo: { title: "Demo data", default: true } } }],
+      packageScopes: [], // the template routes no scope to GitHub Packages (#233)
     });
     // The catalog at the books ref, then the template at its default branch head.
     expect(repo.clones.map((c) => [c.repoURL, c.ref])).toEqual([[DEPLOY_URL, "master"], ["https://github.com/acme/acme-apps.git", "HEAD"]]);

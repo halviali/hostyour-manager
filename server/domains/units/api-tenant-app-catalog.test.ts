@@ -9,7 +9,11 @@ import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
-import type { AppsManifest, TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
+import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
+import type { AppCatalog } from "./app-catalog.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
+import { seedCredentialRow } from "../../security/store.fixture.ts";
+import { CredentialStore } from "../../security/store.ts";
 import { registerTenantAppCatalogRoute, type TenantAppCatalogApiDeps } from "./api-tenant-app-catalog.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -25,7 +29,8 @@ const config = parseConfig({ ...GITHUB_APP_ENV, PUBLIC_URL: "https://m1.example"
 const logger = pino({ level: "silent" });
 const GUID = "zsjs023ctne0";
 
-const CATALOG: AppsManifest = {
+const CATALOG: AppCatalog = {
+  packageScopes: [],
   apps: [
     { name: "erp", title: "ERP", description: "Orders and stock.", selections: { seedDemo: { title: "Demo data", default: true } } },
     { name: "crm", title: "CRM", description: "", selections: {} },
@@ -54,12 +59,15 @@ function registrationsWith(bundle: { appsRepo?: string; appsImage?: string; apps
 
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });
 
-async function serve(deps: Omit<TenantAppCatalogApiDeps, "db">): Promise<{ app: Hono<AppEnv>; cookie: string }> {
+async function serve(deps: Omit<TenantAppCatalogApiDeps, "db" | "store" | "githubApp">): Promise<{ app: Hono<AppEnv>; cookie: string }> {
   const session = new SessionCodec(db.db, config);
+  const githubApp = new FakeGitHubApp();
+  githubApp.org = "example-org";
+  const store = new CredentialStore({ db: db.db, logger });
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
     registerAuth: () => undefined,
-    registerProtected: (a) => registerTenantAppCatalogRoute(a, { db: db.db, ...deps }),
+    registerProtected: (a) => registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...deps }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, cookie };
@@ -80,6 +88,20 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     // A tenant onboarded as its platform alone (#211) has no bundle yet: the same template, nothing deployed.
     const noBundle = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), appCatalog: template });
     expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }] });
+  });
+
+  // THE FIRST TENANT ONBOARDING ASKS FOR THE PACKAGES READER, NONE AFTER (#233): the template's
+  // scopes travel with the catalog, and the owner's recorded reader says whether the form asks.
+  it("names the packages reader the bundle needs — asked while the owner records none, shown recorded once it does, absent where the template routes no scope", async () => {
+    const routing = { list: async () => ({ ...CATALOG, packageScopes: ["example-org", "shared"] }) };
+    const asked = await serve({ registrations: registrationsWith(), appCatalog: routing });
+    expect((await read(asked.app, asked.cookie)).body.packagesReader).toEqual({ owner: "example-org", scopes: ["example-org", "shared"], recorded: null });
+    seedCredentialRow(db.db, { id: "cred_pkg", kind: "pat", label: "packages reader (example-org)", subject: { kind: "organisation", id: "example-org" }, purpose: "packages-reader", fingerprint: "sha256:pkg" });
+    const recorded = (await read(asked.app, asked.cookie)).body.packagesReader;
+    expect(recorded?.recorded?.fingerprint).toBe("sha256:pkg");
+    expect(recorded?.recorded?.recordedAt).toMatch(/^\d{4}-/);
+    const none = await serve({ registrations: registrationsWith(), appCatalog: { list: async () => CATALOG } });
+    expect((await read(none.app, none.cookie)).body.packagesReader).toBeUndefined();
   });
 
   it("says why there is no catalog: not wired, no catalog reader, not onboarded — each a reason, never a bare empty list", async () => {
