@@ -150,6 +150,25 @@ describe("refreshAppTokens", () => {
     expect(kube.secretWrites).toHaveLength(18);
   });
 
+  // ONE UNREACHABLE UNIT IS ITS OWN FAILURE (#240): the tick goes on to the others and the catalog.
+  it("counts a unit whose repository the App does not reach and whose owner records no PAT as failed by name, and rewrites the others and the catalog in the same tick", async () => {
+    const { store, opened } = fakeStore({ value: "ghs_unit" });
+    const { seeder, written } = fakeSeeder();
+    const { logger, errors } = fakeLogger();
+    const reg = await registrations();
+    await reg.commitRegistration({ unit: { name: "gone", repoURL: "https://github.com/nobody/gone.git", owner: "nobody", onboardedAt: "2026-01-01T00:00:00Z", suspended: false, quiesced: false }, builds: ["gone"], runId: "run_4" });
+    const githubApp = app();
+    const r = await refreshAppTokens({ store, owners, registrations: reg, seeder, kube: new FakeClusterReader(), logger, catalog: { repoURL: "https://github.com/acme/catalog.git" }, githubApp });
+    expect(r.failed).toEqual(["gone"]);
+    expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", CATALOG_BUMP_UNIT]);
+    expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps", "catalog"]);
+    expect(opened).not.toContain("cred_gone");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('"unit":"gone"');
+    expect(errors[0]).toContain("has no identity");
+    expect(errors[0]).toContain("owner nobody records no repository PAT");
+  });
+
   it("logs the unit whose write fails, with its name, deletes none of its Secrets, and refreshes the others", async () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder(["acme-apps"]);

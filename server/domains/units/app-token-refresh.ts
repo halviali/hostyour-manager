@@ -104,19 +104,31 @@ export async function readBuildSecretRefreshTimes(kube: Pick<ClusterReader, "lis
 export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ refreshed: string[]; failed: string[] }> {
   const refreshed: string[] = [];
   const failed: string[] = [];
-  const units: { unit: string; credentialId: string; repoURL: string }[] = [];
+  const units: { unit: string; repoURL: string }[] = [];
   const buildUnits: string[] = [];
   try {
     for (const { unit, entry } of await deps.registrations.listBuildRegistrations()) {
       buildUnits.push(unit);
-      units.push({ unit, credentialId: await resolveRepoCredentialId({ repoURL: entry.repoURL, githubApp: deps.githubApp, owners: deps.owners, store: deps.store }), repoURL: entry.repoURL });
+      units.push({ unit, repoURL: entry.repoURL });
     }
   } catch (err) {
-    deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the repo-pat refresh could not read which units carry a credential — no repo-pat was rewritten this time");
+    deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the repo-pat refresh could not read which units are registered — no repo-pat was rewritten this time");
     return { refreshed, failed };
   }
   const undeleted: string[] = [];
-  for (const { unit, credentialId, repoURL } of units) {
+  for (const { unit, repoURL } of units) {
+    // THE UNIT'S OWN FAILURE (#240): a repository the App no longer reaches — deleted by hand, moved,
+    // its owner's PAT forgotten — is that unit's, logged by name and counted failed; the other units
+    // and the catalog's entry go on, because a refresh that stops at one leaves every other clone
+    // reading a token that expires within the hour.
+    let credentialId: string;
+    try {
+      credentialId = await resolveRepoCredentialId({ repoURL, githubApp: deps.githubApp, owners: deps.owners, store: deps.store });
+    } catch (err) {
+      failed.push(unit);
+      deps.logger.error({ unit, repoURL, err: err instanceof Error ? err.message : String(err) }, "this unit's repository has no identity, so its build repo-pat was not rewritten — offboard the unit, install the App on the repository, or record its owner's PAT");
+      continue;
+    }
     try {
       await refreshUnitRepoPat(deps, unit, credentialId, packagesReaderFor(deps.owners, repoURL), { purpose: "app-token-refresh" });
     } catch (err) {
