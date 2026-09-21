@@ -123,15 +123,14 @@ export async function wire(): Promise<Wired> {
   phase("database");
   // THE PLATFORM'S GITHUB APP IDENTITY — one client, one token cache, built here because three
   // things hold it: the credential store mints a `github-app` credential through it at every open,
-  // the tenant family creates a tenant's own repository with it, and the readiness check below names
-  // the organisation it is installed in. Absent when the three GITHUB_APP_* keys are — the run kinds
-  // that need it then refuse at the plan, the store refuses such a credential by name, and the
-  // readiness row is not listed.
-  const githubApp = config.githubApp ? new HttpGitHubApp(config.githubApp) : undefined;
+  // the tenant family reads and writes the catalog and creates a tenant's own repository with it,
+  // and the readiness checks below name the owner it is installed with and whether it reaches the
+  // catalog. Every installation has it (config.ts githubApp, hostyour-cloud#237).
+  const githubApp = new HttpGitHubApp(config.githubApp);
   // Secrets backend: Vault when configured (prod), else a local keyfile-encrypted
   // store (dev). Either way the store API is identical to every caller, and one of the two is
   // always supplied (boot/store-backend.ts).
-  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config), ...(githubApp ? { githubApp } : {}) });
+  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config), githubApp });
   phase("credential store");
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
@@ -262,7 +261,7 @@ export async function wire(): Promise<Wired> {
   // then skips instead of reporting a comparison it never made.
   const checks = [
     ...runSelfChecks({ db, config, store, bus, runDefinitions }),
-    ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(githubApp ? { githubApp } : {}) })),
+    ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), githubApp })),
   ];
   phase("self-checks");
   assertBlockingChecksPass(checks);
@@ -331,8 +330,8 @@ export async function wire(): Promise<Wired> {
       // The size table: a read and one write, both unconditional — they need no adapter, and what
       // this installation sells is a fact whether or not onboarding is currently configured.
       registerUnitSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
-      registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(githubApp ? { githubApp } : {}) });
-      registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), ...(githubApp ? { githubApp } : {}) });
+      registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), githubApp });
+      registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), githubApp });
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
       // flag (the catalog PAT). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.
@@ -341,7 +340,7 @@ export async function wire(): Promise<Wired> {
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
       // The organisation identities (#219): recorded here, derived per unit by every onboarding. The
       // measurement rides the consumer client where it is wired; without it nothing can be recorded.
-      if (units.github) registerOrganisationRoutes(a, { db: db.db, store, github: units.github, ...(githubApp ? { githubApp } : {}), actor: runActor });
+      if (units.github) registerOrganisationRoutes(a, { db: db.db, store, github: units.github, githubApp, actor: runActor });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
       registerTenantAppCatalogRoute(a, { db: db.db, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {

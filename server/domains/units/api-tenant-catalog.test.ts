@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import { pino } from "pino";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
@@ -21,7 +22,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 // fail-soft, its cache and the overlay stand-in are unit-tested in app-catalog.test.ts. A sibling
 // of api.test.ts because that file is at the file-size budget.
 
-const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
+const config = parseConfig({ ...GITHUB_APP_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 const DEPLOY_URL = "https://github.com/acme/acme-catalog.git";

@@ -197,9 +197,8 @@ export function buildUnits(
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
   /** The platform's GitHub App identity, built in the composition root beside the kube trio and for
    *  the same reason: the boot self-check names its installation organisation, and a family building
-   *  its own would put that identity behind the family's configuration guard. Absent when
-   *  config.githubApp is. */
-  githubApp?: GitHubApp,
+   *  its own would put that identity behind the family's configuration guard. */
+  githubApp: GitHubApp,
 ): UnitsWiring {
   // ONE activation client for the whole manager — a plain fetch to a consumer's / tenant's OWN public
   // ingress (no config gate; the target host is the unit's own). Constructed here and shared by BOTH
@@ -297,7 +296,7 @@ export function buildUnits(
       ports: consumer.onboardPorts,
       ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),
       ...(platformRepo ? { platformRepo } : {}),
-      ...(githubApp ? { githubApp } : {}),
+      githubApp,
     };
   }
   // The sanctioned type-erasure (registrations.ts): each typed RunDefinition<P> is stored executor-facing

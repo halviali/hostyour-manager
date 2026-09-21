@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { csrfOk } from "./csrf.ts";
 
 const config = parseConfig({
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example",
   OIDC_ISSUER: "https://idp.example/",
   OIDC_CLIENT_ID: "c",

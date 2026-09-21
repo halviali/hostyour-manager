@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { parseConfig, type Config } from "../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { CredentialStore } from "../security/store.ts";
 import { masterKubeClients } from "./master-kube.ts";
@@ -25,6 +26,7 @@ import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf } from "./selfchecks.ts";
 
 const BASE_ENV = {
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://idp.example/o/manager/",
   OIDC_CLIENT_ID: "manager",
@@ -71,7 +73,7 @@ describe("boot self-checks", () => {
       openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
-    const onboarding = buildUnits(onboardingConfig, store, db.db, logger, { master, resolver });
+    const onboarding = buildUnits(onboardingConfig, store, db.db, logger, { master, resolver }, new FakeGitHubApp());
     const runDefinitions = buildRunDefinitions({ db: db.db, resolver, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) }, onboarding.defs);
     return { db, store, bus: new RunEventBus(), runDefinitions };
   }
@@ -82,7 +84,7 @@ describe("boot self-checks", () => {
 
   it("passes every registered blocking check on a fresh DB", async () => {
     const { db, store, bus, runDefinitions } = fresh();
-    const results = [...runSelfChecks({ db, config, store, bus, runDefinitions }), ...(await runAsyncSelfChecks({ db, config }))];
+    const results = [...runSelfChecks({ db, config, store, bus, runDefinitions }), ...(await runAsyncSelfChecks({ db, config, githubApp: new FakeGitHubApp() }))];
     const byName = new Map(results.map((r) => [r.name, r]));
     for (const name of [
       "db.integrity",
@@ -107,7 +109,7 @@ describe("boot self-checks", () => {
   // serve the run kinds it does hold, so every blocking check has to pass.
   it("passes every blocking check with NEITHER onboarding family wired", async () => {
     const { db, store, bus, runDefinitions } = fresh(config);
-    const results = [...runSelfChecks({ db, config, store, bus, runDefinitions }), ...(await runAsyncSelfChecks({ db, config }))];
+    const results = [...runSelfChecks({ db, config, store, bus, runDefinitions }), ...(await runAsyncSelfChecks({ db, config, githubApp: new FakeGitHubApp() }))];
     expect(results.find((r) => r.name === "run-definitions.total")?.ok).toBe(true);
     expect(() => assertBlockingChecksPass(results)).not.toThrow();
     // What that boot serves is exactly the families buildRunDefinitions registers unconditionally.
@@ -213,7 +215,7 @@ describe("boot self-checks", () => {
 
   it("onboarding.deploy_state_name_mirror is GREEN when the platform writes the name this process reads", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: deployStateValues(DEPLOY_STATE_CONFIGMAP.name) });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: deployStateValues(DEPLOY_STATE_CONFIGMAP.name), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "onboarding.deploy_state_name_mirror");
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(true);
@@ -223,7 +225,7 @@ describe("boot self-checks", () => {
   // for another, and both are named in the line an operator gets.
   it("onboarding.deploy_state_name_mirror is RED on a drifted name, names both, and does NOT fail boot", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: deployStateValues("hostyour-cloud-deploy-state") });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: deployStateValues("hostyour-cloud-deploy-state"), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "onboarding.deploy_state_name_mirror");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("hostyour-cloud-deploy-state");
@@ -237,7 +239,7 @@ describe("boot self-checks", () => {
     const { db } = fresh();
     const repo = new FakePlatformRepo();
     repo.seed(DEPLOY_STATE_VALUES_BRANCH, DEPLOY_STATE_VALUES_PATH, "configmap:\n  configmap:\n    enabled: true\n");
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: repo });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: repo, githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "onboarding.deploy_state_name_mirror");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("no readable configmap.configmap.name");
@@ -245,7 +247,7 @@ describe("boot self-checks", () => {
 
   it("release.grammar_mirror is GREEN when the platform repo carries the grammar this process enforces", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoCarrying(MIRROR) });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoCarrying(MIRROR), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "release.grammar_mirror");
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(true);
@@ -257,7 +259,7 @@ describe("boot self-checks", () => {
   // unreadable platform checkout still serves everything that has nothing to do with release tags.
   it("release.grammar_mirror is RED on a drifted copy, names both literals, and does NOT fail boot", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoCarrying(DRIFTED) });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoCarrying(DRIFTED), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "release.grammar_mirror");
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(false);
@@ -275,7 +277,7 @@ describe("boot self-checks", () => {
     const { db } = fresh();
     const repo = new FakePlatformRepo();
     repo.seed(CHANNEL_STAGES_BRANCH, CHANNEL_STAGES_PATH, "global:\n  timezone: Europe/Amsterdam\n");
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: repo });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: repo, githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "release.grammar_mirror");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("no readable global.releaseTagFilter");
@@ -286,7 +288,7 @@ describe("boot self-checks", () => {
   // side. It must SKIP and say so, never report a pass, and never be listed on /readyz as measured.
   it("release.grammar_mirror SKIPS without a platform repo instead of reporting a pass", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config });
+    const results = await runAsyncSelfChecks({ db, config, githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "release.grammar_mirror");
     expect(check?.kind).toBe("skipped");
     expect(check?.ok).toBe(false);
@@ -314,7 +316,7 @@ describe("boot self-checks", () => {
 
   it("ansiwise.pin_readable is GREEN when the trunk carries the pin, and says which version it read", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning(PIN_FILE, PINNED) });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning(PIN_FILE, PINNED), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "ansiwise.pin_readable");
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(true);
@@ -329,7 +331,7 @@ describe("boot self-checks", () => {
   // red line and the detail names the file and the branch, which is what a reader has to act on.
   it("ansiwise.pin_readable is RED when the trunk carries the file at the OLD path, and does NOT fail boot", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning("platform/versions.yaml", PINNED) });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning("platform/versions.yaml", PINNED), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "ansiwise.pin_readable");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain(PIN_FILE);
@@ -341,7 +343,7 @@ describe("boot self-checks", () => {
 
   it("ansiwise.pin_readable is RED when the file is there and states no version for the binary", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning(PIN_FILE, 'cliTools:\n  yq:\n    version: "v4.53.3"\n') });
+    const results = await runAsyncSelfChecks({ db, config, platformRepo: platformRepoPinning(PIN_FILE, 'cliTools:\n  yq:\n    version: "v4.53.3"\n'), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "ansiwise.pin_readable");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("cliTools.ansiwise.version");
@@ -349,7 +351,7 @@ describe("boot self-checks", () => {
 
   it("ansiwise.pin_readable SKIPS without a platform repo instead of reporting a pass", async () => {
     const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config });
+    const results = await runAsyncSelfChecks({ db, config, githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "ansiwise.pin_readable");
     expect(check?.kind).toBe("skipped");
     expect(check?.ok).toBe(false);
@@ -379,7 +381,7 @@ describe("boot self-checks", () => {
 
   it("install-order.agrees is GREEN against the platform's stated order, and names every run kind it held", async () => {
     const { db, runDefinitions } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(STATED_MASTER) });
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(STATED_MASTER), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "install-order.agrees");
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(true);
@@ -398,7 +400,7 @@ describe("boot self-checks", () => {
   it("install-order.agrees is RED when the stated order and the driven order disagree, and does NOT fail boot", async () => {
     const { db, runDefinitions } = fresh();
     const swapped = ["deploy-host", "deploy-branch", "deploy-platform-services", "deploy-cluster", "onboard-manager"];
-    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(swapped) });
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: declaring(swapped), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "install-order.agrees");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("deploy-platform-services after deploy-cluster");
@@ -409,7 +411,7 @@ describe("boot self-checks", () => {
 
   it("install-order.agrees is RED when the trunk carries no such declaration at all", async () => {
     const { db, runDefinitions } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: new FakePlatformRepo() });
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions, platformRepo: new FakePlatformRepo(), githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "install-order.agrees");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain(INSTALL_ORDER_PATH);
@@ -417,7 +419,7 @@ describe("boot self-checks", () => {
 
   it("install-order.agrees SKIPS without a platform repo instead of reporting a pass", async () => {
     const { db, runDefinitions } = fresh();
-    const results = await runAsyncSelfChecks({ db, config, runDefinitions });
+    const results = await runAsyncSelfChecks({ db, config, runDefinitions, githubApp: new FakeGitHubApp() });
     const check = results.find((r) => r.name === "install-order.agrees");
     expect(check?.kind).toBe("skipped");
     expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("install-order.agrees");
@@ -426,7 +428,7 @@ describe("boot self-checks", () => {
   // DOES THIS MANAGER HOLD THE PLATFORM'S GITHUB APP IDENTITY, AND WHERE IS IT INSTALLED? One read of
   // the installation with the App's own JWT at boot, so a key pasted without its line breaks or an
   // installation the key does not sign for is a red row on /readyz and not a failed tenant run.
-  it("github-app.installation is GREEN and NAMES the organisation on /readyz when the identity resolves", async () => {
+  it("github-app.installation is GREEN and NAMES the owner on /readyz when the identity resolves", async () => {
     const { db } = fresh();
     const githubApp = new FakeGitHubApp();
     githubApp.org = "example-org";
@@ -434,7 +436,7 @@ describe("boot self-checks", () => {
     const check = results.find((r) => r.name === "github-app.installation");
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(true);
-    expect(readinessOf(results).checks).toContainEqual({ name: "github-app.installation", ok: true, detail: "installed in the organisation example-org" });
+    expect(readinessOf(results).checks).toContainEqual({ name: "github-app.installation", ok: true, detail: "installed with example-org" });
   });
 
   it("github-app.installation is RED, boot goes on, and the reason stays OFF /readyz when GitHub refuses the identity", async () => {
@@ -451,34 +453,20 @@ describe("boot self-checks", () => {
     expect(readinessOf(results).checks).toContainEqual({ name: "github-app.installation", ok: false });
   });
 
-  // WHICH IDENTITY WRITES THE CATALOG (#194): measured against the App's installation, so an unused
-  // PAT beside a reaching App is red and removed, and a family wired on a promise GitHub refuses is red.
-  it("catalog.identity names the App where it reaches the catalog, is RED beside an unused PAT, and takes the PAT where the App does not reach", async () => {
+  // DOES THE APP REACH THE CATALOG (#194, hostyour-cloud#237): the App is the catalog's one identity,
+  // so a family wired on a promise GitHub refuses is red at boot.
+  it("catalog.identity is green where the App's installation reaches the catalog, red where it does not, and skipped without a catalog", async () => {
     const { db } = fresh();
     const withCatalog: Config = { ...config, catalog: { repoURL: "https://github.com/example-org/catalog.git" } };
     const githubApp = new FakeGitHubApp();
-    const row = async (cfg: Config, app: FakeGitHubApp | undefined) => (await runAsyncSelfChecks({ db, config: cfg, ...(app ? { githubApp: app } : {}) })).find((r) => r.name === "catalog.identity");
-    const viaApp = await row(withCatalog, githubApp);
+    const row = async (cfg: Config) => (await runAsyncSelfChecks({ db, config: cfg, githubApp })).find((r) => r.name === "catalog.identity");
+    const viaApp = await row(withCatalog);
     expect(viaApp?.ok).toBe(true);
-    expect(viaApp?.detail).toBe("example-org/catalog is written with the GitHub App (its installation reaches it)");
-    const unusedPat = await row({ ...withCatalog, catalog: { repoURL: "https://github.com/example-org/catalog.git", token: "ghp_x" } }, githubApp);
-    expect(unusedPat?.ok).toBe(false);
-    expect(unusedPat?.detail).toContain("CATALOG_WRITE_PAT is set beside it — the PAT is unused");
-    const outside = { ...withCatalog, catalog: { repoURL: "https://github.com/other-org/catalog.git", token: "ghp_x" } };
-    expect((await row(outside, githubApp))?.detail).toBe("other-org/catalog is written with CATALOG_WRITE_PAT (the GitHub App's installation does not reach it)");
-    const nothing = await row({ ...withCatalog, catalog: { repoURL: "https://github.com/other-org/catalog.git" } }, githubApp);
-    expect(nothing?.ok).toBe(false);
-    expect((await row(config, undefined))?.kind).toBe("skipped");
-  });
-
-  it("github-app.installation SKIPS without the identity instead of reporting a pass, naming the three keys", async () => {
-    const { db } = fresh();
-    const results = await runAsyncSelfChecks({ db, config });
-    const check = results.find((r) => r.name === "github-app.installation");
-    expect(check?.kind).toBe("skipped");
-    expect(check?.ok).toBe(false);
-    expect(check?.detail).toContain("GITHUB_APP_PRIVATE_KEY");
-    expect(readinessOf(results).checks.map((c) => c.name)).not.toContain("github-app.installation");
+    expect(viaApp?.detail).toBe("example-org/catalog is read and written with the GitHub App (its installation reaches it)");
+    const outside = await row({ ...withCatalog, catalog: { repoURL: "https://github.com/other-org/catalog.git" } });
+    expect(outside?.ok).toBe(false);
+    expect(outside?.detail).toContain("does not reach other-org/catalog");
+    expect((await row(config))?.kind).toBe("skipped");
   });
 
   it("the append-only probe leaves no sentinel row behind (rolled back)", () => {

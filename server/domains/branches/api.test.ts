@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { createApp } from "../../http/app.ts";
 import { parseConfig, type Config } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
@@ -14,6 +15,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { BranchesView, BranchDiffView } from "../../../shared/api-types.ts";
 
 const baseEnv = {
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test",
   DATA_DIR: "/d", LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",

@@ -157,20 +157,19 @@ const EnvSchema = z.object({
   // non-standard cluster.
   GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
   BUILD_EVENTLISTENER_SUBDOMAIN: z.string().min(1).default("build"),
-  // THE PLATFORM'S OWN GITHUB IDENTITY — a GitHub App installed in the organisation the tenant
-  // repositories are created in (adapters/github-app). The three values come from Vault
+  // THE PLATFORM'S OWN GITHUB IDENTITY — a GitHub App installed with the owner of the catalog and
+  // of every tenant repository (adapters/github-app). The three values come from Vault
   // <stage>/app/github-app via the manager's own ExternalSecret (the seeder is write-only, so like
-  // GITHUB_WEBHOOK_SECRET they arrive as env, never as a Vault read-back). ALL THREE OR NONE — an id
-  // without the key that signs for it, or a key without the installation it acts in, addresses
-  // nothing, and the refusal names the ones that are missing. Absent ⇒ the run kinds that create a
-  // tenant repository refuse at the plan, and the readiness row for the App is not listed.
+  // GITHUB_WEBHOOK_SECRET they arrive as env, never as a Vault read-back). REQUIRED, all three: the
+  // App is the identity the catalog is read and written with, and an installation without it does
+  // not exist (hostyour-cloud#237); a missing one refuses the boot by name.
   //
   // The key is a PEM, and a PEM crosses a values file, a Vault entry and an env var before it gets
   // here: a writer along that road escapes its line breaks as the two characters `\n`, so those are
   // put back before the key is read, and a key node's crypto cannot read is refused HERE by name,
   // not at the first tenant.
-  GITHUB_APP_ID: z.string().min(1).optional(),
-  GITHUB_APP_INSTALLATION_ID: z.string().regex(/^\d+$/, "GITHUB_APP_INSTALLATION_ID must be the installation's numeric id — it is a path segment of the GitHub API").optional(),
+  GITHUB_APP_ID: z.string().min(1),
+  GITHUB_APP_INSTALLATION_ID: z.string().regex(/^\d+$/, "GITHUB_APP_INSTALLATION_ID must be the installation's numeric id — it is a path segment of the GitHub API"),
   GITHUB_APP_PRIVATE_KEY: z.string().min(1).transform((pem) => pem.replaceAll("\\n", "\n")).refine((pem) => {
     try {
       createPrivateKey(pem);
@@ -178,30 +177,22 @@ const EnvSchema = z.object({
     } catch {
       return false;
     }
-  }, "GITHUB_APP_PRIVATE_KEY is not a private key this process can read — it must be the PEM GitHub issued for the App, line breaks intact or written as \\n").optional(),
+  }, "GITHUB_APP_PRIVATE_KEY is not a private key this process can read — it must be the PEM GitHub issued for the App, line breaks intact or written as \\n"),
   // The unit DNS record: the DNS-only Cloudflare token from secret/<stage>/app/cloudflare-dns,
   // fed to the manager as env off the manager-cloudflare-dns ExternalSecret's Secret. Set ⇒ the
   // DnsProvider is wired and the provision-dns/remove-dns steps work; unset ⇒ those steps fail LOUD
   // (DNS is a mandatory part of onboard, offboard and purge — never a silent skip).
   CLOUDFLARE_DNS_API_TOKEN: z.string().min(1).optional(),
-  // Tenant (multi-app) onboarding. The central
-  // catalog GitOps repo the live ApplicationSets read is a PLATFORM CONSTANT (owner/repo),
-  // so it defaults and is rarely overridden. CATALOG_WRITE_PAT is the Manager's
-  // first-party, write-capable PAT for it (Contents: read+write on catalog) — the SAME token
-  // clones it for manager-side validation AND pushes tenant registrations onto the books branch. It is DISTINCT
-  // from GITHUB_WRITE_PAT (that one writes the consumer platform repo); a second repo needs its own
-  // credential. Set ⇒ the tenant Run family is registered (a SECOND platform repo bound to
-  // catalog + the manager-side HelmRenderer, kube in-cluster over the pod SA);
-  // unset ⇒ the tenant mutating routes answer 501. The tenant format is INDEPENDENT of the consumer
-  // gate-runner
+  // Tenant (multi-app) onboarding. The catalog GitOps repo the live ApplicationSets read is THE
+  // INSTALLATION'S OWN repository (owner/repo), read and written with the platform's GitHub App —
+  // the SAME identity clones it for manager-side validation AND pushes tenant registrations onto
+  // the books branch. Set ⇒ the tenant Run family is registered (a SECOND platform repo bound to
+  // the catalog + the manager-side HelmRenderer, kube in-cluster over the pod SA); unset ⇒ the
+  // tenant mutating routes answer 501. The tenant format is INDEPENDENT of the consumer gate-runner
   // (tenant charts are trusted first-party, validated manager-side — no consumer gate-runner).
-  // NO DEFAULT, deliberately. The catalogue is the INSTALLATION's own repository - the answer that
-  // supplies it says so in as many words, and no rule composes its name out of anything else. A
-  // default here is a second name nobody chose: an installation that sets the write credential and
-  // forgets the repository would bind its whole tenant family to somebody else's repository, and
-  // the first sign of it would be a clone that either fails or, worse, succeeds.
+  // NO DEFAULT, deliberately: the answer that supplies it says so in as many words, and no rule
+  // composes its name out of anything else. A default here is a second name nobody chose.
   CATALOG_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'CATALOG_REPO must be "owner/repo"').optional(),
-  CATALOG_WRITE_PAT: z.string().min(1).optional(),
   // The Hetzner Storage Box behind move, backup and restore: the staging area every dump
   // lands on and every restore reads from, reachable over SSH. The three values come from
   // secret/<stage>/app/storage-box via the manager's own ExternalSecret (the seeder is write-only,
@@ -312,12 +303,6 @@ const EnvSchema = z.object({
 }).refine((e) => Boolean(e.GITHUB_REPO) === Boolean(e.GITHUB_WRITE_PAT), {
   message: "GITHUB_REPO and GITHUB_WRITE_PAT must be set together (both enable the Branches/Reset feature, or neither)",
   path: ["GITHUB_REPO"],
-}).refine((e) => !e.CATALOG_WRITE_PAT || Boolean(e.CATALOG_REPO), {
-  message: "CATALOG_WRITE_PAT names a credential for a catalog CATALOG_REPO does not name — set CATALOG_REPO, or drop the PAT",
-  path: ["CATALOG_REPO"],
-}).refine((e) => !e.CATALOG_REPO || Boolean(e.CATALOG_WRITE_PAT) || Boolean(e.GITHUB_APP_ID), {
-  message: "CATALOG_REPO is set with no identity to read and write it — the platform's GitHub App (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY, where its installation reaches the catalog) or CATALOG_WRITE_PAT",
-  path: ["CATALOG_REPO"],
 }).refine((e) => {
   const set = [e.STORAGE_BOX_HOST, e.STORAGE_BOX_USER, e.STORAGE_BOX_PASSWORD].filter(Boolean).length;
   return set === 0 || set === 3;
@@ -327,19 +312,7 @@ const EnvSchema = z.object({
 }).refine((e) => Boolean(e.CLOUDFLARE_R2_API_TOKEN) === Boolean(e.CLOUDFLARE_R2_ACCOUNT_ID), {
   message: "CLOUDFLARE_R2_API_TOKEN and CLOUDFLARE_R2_ACCOUNT_ID must be set together (a token addresses nothing without the account it manages, and an account nothing can be created in)",
   path: ["CLOUDFLARE_R2_API_TOKEN"],
-}).refine((e) => missingGitHubAppKeys(e).length === 0, {
-  error: (issue) => `GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY must be set together (the App's identity needs all three, or none) — missing: ${missingGitHubAppKeys(issue.input as GitHubAppEnv).join(", ")}`,
-  path: ["GITHUB_APP_ID"],
 });
-
-type GitHubAppEnv = { GITHUB_APP_ID?: string | undefined; GITHUB_APP_INSTALLATION_ID?: string | undefined; GITHUB_APP_PRIVATE_KEY?: string | undefined };
-
-/** The keys of the App trio a partial configuration left out — empty for none set and for all set. */
-function missingGitHubAppKeys(e: GitHubAppEnv): string[] {
-  const keys = ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"] as const;
-  const missing = keys.filter((k) => !e[k]);
-  return missing.length === keys.length ? [] : missing;
-}
 
 export interface Config {
   publicUrl: string;
@@ -415,17 +388,12 @@ export interface Config {
     fence: { mustFailTargets: string[]; managerAddr: string; mustPassTarget: string };
     kubeVersion: string;
   };
-  /** Present ⇒ tenant (multi-app) onboarding is wired: the central catalog GitOps repo the
-   *  live ApplicationSets read (repoURL, the installation's own answer) and, where the platform's
-   *  GitHub App does not reach it, the Manager's first-party, write-capable PAT for it (token). ONE
-   *  identity clones catalog for manager-side validation and pushes tenant pointers to master: the
-   *  App where its installation reaches the catalog (the token minted at every open), else the PAT
-   *  (#194). Independent of `onboarding` (the consumer gate-runner) — tenant charts are trusted
-   *  first-party, validated manager-side; kube access is in-cluster via the pod SA. Absent ⇒ the
-   *  tenant Run family answers 501. */
+  /** Present ⇒ tenant (multi-app) onboarding is wired: the installation's own catalog GitOps repo
+   *  the live ApplicationSets read, cloned for manager-side validation and pushed to with the
+   *  platform's GitHub App (the token minted at every open). Absent ⇒ the tenant mutating routes
+   *  answer 501. */
   catalog?: {
     repoURL: string;
-    token?: string;
   };
   /** The consumer build webhook. `subdomain` is the image-builder
    *  EventListener ingress label (default "build") the onboard step points the hook at
@@ -437,11 +405,11 @@ export interface Config {
     subdomain: string;
     secret?: string;
   };
-  /** Present ⇒ the platform's GitHub App identity is wired (adapters/github-app): the App's id, the
-   *  installation in the organisation the tenant repositories are created in, and the PEM private
-   *  key its JWT is signed with (line breaks restored). Absent ⇒ the run kinds that create a tenant
-   *  repository refuse at the plan, and the readiness row for the App is not listed. */
-  githubApp?: {
+  /** The platform's GitHub App identity (adapters/github-app): the App's id, its installation with
+   *  the owner of the catalog and of the tenant repositories, and the PEM private key its JWT is
+   *  signed with (line breaks restored). Always present: the App is the identity the catalog is
+   *  read and written with (hostyour-cloud#237). */
+  githubApp: {
     appId: string;
     installationId: string;
     privateKey: string;
@@ -590,23 +558,19 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
           },
         }
       : {}),
-    // CATALOG_REPO is the discriminator: present ⇒ tenant onboarding is configured, and the refine
-    // above holds an identity behind it — the App or the PAT. The repoURL is built the same way the
-    // consumer platform URL is (https, never with embedded credentials).
-    ...(e.CATALOG_REPO
-      ? { catalog: { repoURL: `https://github.com/${e.CATALOG_REPO}.git`, ...(e.CATALOG_WRITE_PAT ? { token: e.CATALOG_WRITE_PAT } : {}) } }
-      : {}),
+    // CATALOG_REPO is the discriminator: present ⇒ tenant onboarding is configured; the App is its
+    // identity. The repoURL is built the same way the consumer platform URL is (https, never with
+    // embedded credentials).
+    ...(e.CATALOG_REPO ? { catalog: { repoURL: `https://github.com/${e.CATALOG_REPO}.git` } } : {}),
     // Always present: the subdomain always has its "build" default; only the HMAC secret is optional
     // (absent ⇒ the onboard setup-webhook step fails loud, never a silent no-build).
     webhook: {
       subdomain: e.BUILD_EVENTLISTENER_SUBDOMAIN,
       ...(e.GITHUB_WEBHOOK_SECRET ? { secret: e.GITHUB_WEBHOOK_SECRET } : {}),
     },
-    // The refine above guarantees the three together; the triple guard narrows them. The key's
-    // line breaks were restored by the schema, so what rides here is the PEM as GitHub issued it.
-    ...(e.GITHUB_APP_ID && e.GITHUB_APP_INSTALLATION_ID && e.GITHUB_APP_PRIVATE_KEY
-      ? { githubApp: { appId: e.GITHUB_APP_ID, installationId: e.GITHUB_APP_INSTALLATION_ID, privateKey: e.GITHUB_APP_PRIVATE_KEY } }
-      : {}),
+    // The key's line breaks were restored by the schema, so what rides here is the PEM as GitHub
+    // issued it.
+    githubApp: { appId: e.GITHUB_APP_ID, installationId: e.GITHUB_APP_INSTALLATION_ID, privateKey: e.GITHUB_APP_PRIVATE_KEY },
     ...(e.CLOUDFLARE_DNS_API_TOKEN ? { dns: { cloudflareApiToken: e.CLOUDFLARE_DNS_API_TOKEN } } : {}),
     // The refine above guarantees the three together; the triple guard narrows them.
     ...(e.STORAGE_BOX_HOST && e.STORAGE_BOX_USER && e.STORAGE_BOX_PASSWORD

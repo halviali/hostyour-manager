@@ -103,8 +103,9 @@ export function buildTenantOnboarding(
   /** The consumer onboarding's ports, handed late: the tenant defs run its build-only chain per build
    *  unit a tenant lacks (tenant-builds.ts), and that family is wired after this one. */
   onboard: () => TenantBuildDeps | undefined,
-  /** The platform's GitHub App — the identity a tenant's own repository is created with. */
-  githubApp: GitHubApp | undefined,
+  /** The platform's GitHub App — the identity the catalog is read and written with, and a tenant's
+   *  own repository is created with. */
+  githubApp: GitHubApp,
 ): TenantFamily {
   // The platform repo coordinates are required: every member AppProject must allow the `$values`
   // source its Application pulls from, and a project written without it would fail every sync.
@@ -113,17 +114,10 @@ export function buildTenantOnboarding(
   const repoURL = config.catalog.repoURL;
   const platformRepoURL = `https://github.com/${config.github.owner}/${config.github.repo}.git`;
   // ONE identity does BOTH jobs: the reader clones the repo at a ref for manager-side validation, and
-  // the platform repo pushes tenant pointers. The configured PAT where the installation answered one
-  // (an inline opener returning it, never the store — the SAME shape the consumer write path uses for
-  // GITHUB_WRITE_PAT); else the App's installation token, minted at every open, because a token
-  // GitHub issues for an hour must never be held (#194). The readiness row catalog.identity says
-  // which of the two this installation writes the catalog with, and whether the App reaches it.
-  const deployToken = config.catalog.token;
-  const app = githubApp;
-  if (deployToken === undefined && !app) return { defs: [], enabled: false };
-  const openDeployToken = deployToken !== undefined
-    ? (): Promise<Buffer> => Promise.resolve(Buffer.from(deployToken, "utf8"))
-    : async (): Promise<Buffer> => Buffer.from(await app!.installationToken(), "utf8");
+  // the platform repo pushes tenant pointers — the App's installation token, minted at every open,
+  // because a token GitHub issues for an hour must never be held (#194). The readiness row
+  // catalog.identity says whether the App reaches the catalog.
+  const openDeployToken = async (): Promise<Buffer> => Buffer.from(await githubApp.installationToken(), "utf8");
 
   // The reader clones the catalog and the apps template under the catalog's own read credential,
   // and a tenant's OWN repository under the credential its build registration names: the one id
@@ -241,7 +235,7 @@ export function buildTenantOnboarding(
     buildUnitRegistration,
     // Creates a tenant's own repository in the organisation the App is installed in. Absent ⇒ the run
     // kind that needs it refuses at the plan, naming the three config keys.
-    ...(githubApp ? { githubApp } : {}),
+    githubApp,
   };
   // The create-tenant wizard's app catalog: the SAME reader + read credential validateTenant clones
   // the catalog with, on the books branch, and the apps template (tenant.appsRepo) read with that
@@ -277,7 +271,7 @@ export function buildTenantOnboarding(
     ...(objectStore ? { objectStore } : {}),
     // A tenant's apps repository goes with its last app (#217): deleted through the App that created
     // it, its build registration removed from the same registrations the onboarding wrote.
-    ...(githubApp ? { githubApp } : {}),
+    githubApp,
     buildRegistrations: registrations,
   };
 

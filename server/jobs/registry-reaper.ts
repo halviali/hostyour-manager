@@ -96,13 +96,9 @@ async function main(): Promise<void> {
     logger.error({ repoURL: deployCfg.repoURL }, "registry-reaper: CATALOG_REPO is not owner/repo — the tenant catalog's branches cannot be enumerated (fail-closed, nothing deleted)");
     process.exit(1);
   }
-  // The catalog's identity, the way wire-tenants.ts chooses it: the configured PAT, else the App's
-  // installation token — minted ONCE here, because this job runs for minutes and the token for an hour.
-  const deployToken = deployCfg.token ?? (config.githubApp ? await new HttpGitHubApp(config.githubApp).installationToken() : undefined);
-  if (deployToken === undefined) {
-    logger.error({}, "registry-reaper: no identity reads the tenant catalog — neither CATALOG_WRITE_PAT nor the platform's GitHub App is configured (fail-closed, nothing deleted)");
-    process.exit(1);
-  }
+  // The catalog's identity, the same as wire-tenants.ts's: the App's installation token — minted
+  // ONCE here, because this job runs for minutes and the token for an hour.
+  const deployToken = await new HttpGitHubApp(config.githubApp).installationToken();
   const deploy = carrierRepo({ owner: deployOwner, repo: deployRepo, token: deployToken }, config.dataDir, "reaper-deploy", books);
   const unit = new GitRepoReader({ openCredential: (id) => store.open(id, { purpose: "registry-reaper:read-unit-chart" }) });
   const registry = new HttpRegistryMaintenance({ registryHost, dockerConfigPath });

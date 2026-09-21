@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
@@ -20,6 +21,7 @@ import type { ResetResult } from "../../../shared/api-types.ts";
 // $DATA_DIR/backups), so it must be a real writable path on every OS (a fake "/d" happens to work
 // on Windows but not on Linux CI). This module-level parse is only for the logger.
 const baseEnv = {
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test",
   DATA_DIR: tmpdir(), LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",

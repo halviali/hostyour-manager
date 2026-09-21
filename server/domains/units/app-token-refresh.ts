@@ -49,11 +49,11 @@ export interface AppTokenRefreshDeps {
   organisations: OrganisationIdentityReader;
   registrations: Pick<Registrations, "listBuildRegistrations">;
   seeder: Pick<VaultSeeder, "refreshBuildRepoPat">;
-  /** The catalog as configured (config.catalog): where it carries no token and the App reaches it,
-   *  the bump entry is the Manager's to write on every tick (#197). Absent ⇒ no tenant family. */
-  catalog?: { repoURL: string; token?: string | undefined } | undefined;
+  /** The catalog as configured (config.catalog): its bump entry is the Manager's to write from the
+   *  App on every tick (#197). Absent ⇒ no tenant family. */
+  catalog?: { repoURL: string } | undefined;
   /** The platform's GitHub App — measured against the catalog and minting the bump token. */
-  githubApp?: Pick<GitHubApp, "reachesRepository" | "installationToken"> | undefined;
+  githubApp: Pick<GitHubApp, "reachesRepository" | "installationToken">;
   /** The build plane's cluster reader — the master's own, the cluster this Manager runs on. Absent
    *  on a Manager whose kube is not wired: the entries are still rewritten, and the deletion that
    *  would carry them into the Secrets is logged as skipped, per unit. */
@@ -143,17 +143,16 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   return { refreshed, failed };
 }
 
-/** The catalog's bump entry, written from the App where the App is the catalog's identity — the
- *  catalog configured with no token and the App's installation reaching it, measured now
- *  (repo-identity.ts, the rule of #194). Then `bump-git-https` deleted in EVERY build namespace, because
- *  every unit's release pushes the catalog's books branch with this one entry. A catalog with a
- *  configured PAT is left alone: the installer seeded it and it does not expire. */
+/** The catalog's bump entry, written from the App — the catalog's one identity (hostyour-cloud#237),
+ *  its installation's reach measured now (repo-identity.ts, the rule of #194). Then `bump-git-https`
+ *  deleted in EVERY build namespace, because every unit's release pushes the catalog's books branch
+ *  with this one entry. */
 async function refreshCatalogBumpToken(deps: AppTokenRefreshDeps, buildUnits: readonly string[], refreshed: string[], failed: string[]): Promise<void> {
   const { catalog, githubApp } = deps;
-  if (!catalog || catalog.token !== undefined || !githubApp) return;
+  if (!catalog) return;
   try {
     if (!(await appReachesRepoURL(githubApp, catalog.repoURL))) {
-      deps.logger.error({ repoURL: catalog.repoURL }, "the catalog carries no CATALOG_WRITE_PAT and the GitHub App's installation does not reach it — the release pipeline's bump has no credential (readiness row catalog.identity)");
+      deps.logger.error({ repoURL: catalog.repoURL }, "the GitHub App's installation does not reach the catalog — the release pipeline's bump has no credential (readiness row catalog.identity)");
       failed.push(CATALOG_BUMP_UNIT);
       return;
     }

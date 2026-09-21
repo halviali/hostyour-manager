@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "./session.ts";
@@ -36,6 +37,7 @@ describe("OIDC login flow + chokepoint end-to-end", () => {
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     const config = parseConfig({
+      ...GITHUB_APP_ENV,
       PUBLIC_URL: "https://m1.example",
       OIDC_ISSUER: mock.issuer,
       OIDC_CLIENT_ID: mock.clientId,
@@ -117,6 +119,7 @@ describe("OIDC login flow + chokepoint end-to-end", () => {
 
   it("validateReturnTo rejects cross-origin and protocol-relative targets", async () => {
     const cfg = parseConfig({
+      ...GITHUB_APP_ENV,
       PUBLIC_URL: "https://m1.example",
       OIDC_ISSUER: "https://i.example/",
       OIDC_CLIENT_ID: "c",

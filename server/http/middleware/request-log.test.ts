@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { streamSSE } from "hono/streaming";
 import { createApp } from "../app.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../../domains/access/session.ts";
 import { errNotFound } from "../../kernel/errors.ts";
@@ -23,6 +24,7 @@ import { requestSubject } from "./request-log.ts";
 // send both and read the line back.
 
 const config = parseConfig({
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://idp.example/o/manager/",
   OIDC_CLIENT_ID: "manager",

@@ -206,7 +206,9 @@ describe("the download address", () => {
 
   it("is refused by the installation's own settings when either slot is missing", async () => {
     const { parseConfig } = await import("../../kernel/config.ts");
+    const { GITHUB_APP_ENV } = await import("../../kernel/config.fixture.ts");
     const base = {
+      ...GITHUB_APP_ENV,
       PUBLIC_URL: "https://c.example.invalid", OIDC_ISSUER: "https://i.example.invalid/",
       OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", MANAGER_VERSION: "0.0.0", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
     } as unknown as NodeJS.ProcessEnv;

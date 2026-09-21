@@ -5,12 +5,14 @@ import { join } from "node:path";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { createServer, deleteServer, purgeBootstrapPassword, serverCredFlags, CreateServerInput } from "./write.ts";
 import { getServer } from "./read.ts";
 
 const logger = createLogger(
   parseConfig({
+    ...GITHUB_APP_ENV,
     PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
     MANAGER_VERSION: "test",

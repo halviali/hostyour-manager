@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { RunContext } from "../../executor/context.ts";
@@ -34,6 +35,7 @@ import {
 
 const logger = createLogger(
   parseConfig({
+    ...GITHUB_APP_ENV,
     PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c",
     OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/data",
     ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent",

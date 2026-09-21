@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as oidc from "openid-client";
 import { parseConfig, type Config } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { createOidcAdapter } from "./authentik.ts";
 import { startMockIdp, type MockIdp } from "./testing/mock-idp.ts";
@@ -16,6 +17,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
   function adapterFor(mock: MockIdp, groups: string[]): { adapter: OidcPort; config: Config } {
     mock.setGroups(groups);
     const config = parseConfig({
+      ...GITHUB_APP_ENV,
       PUBLIC_URL: "https://m1.example",
       OIDC_ISSUER: mock.issuer,
       OIDC_CLIENT_ID: mock.clientId,
@@ -85,6 +87,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
 
   it("surfaces an unreachable IdP as IDP_UNREACHABLE", async () => {
     const config = parseConfig({
+      ...GITHUB_APP_ENV,
       PUBLIC_URL: "https://m1.example",
       OIDC_ISSUER: "http://127.0.0.1:1/", // nothing listening
       OIDC_CLIENT_ID: "c",

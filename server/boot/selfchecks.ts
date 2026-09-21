@@ -455,47 +455,34 @@ async function checkInstallOrder(platformRepo: PlatformRepo | undefined, runDefi
  * reading it sees WHICH organisation this manager creates repositories in and not only that it can.
  *
  * DEGRADING, for the reason the checks above state: it reaches a REMOTE, and a GitHub that is down
- * must not take a Manager down with it. Without the identity it SKIPS and says so: the run kinds
- * that need it refuse at the plan, and a green row here would claim an identity nobody configured.
+ * must not take a Manager down with it.
  */
-async function checkGitHubAppInstallation(githubApp: GitHubApp | undefined): Promise<CheckResult> {
+async function checkGitHubAppInstallation(githubApp: GitHubApp): Promise<CheckResult> {
   const name = "github-app.installation";
-  if (!githubApp) {
-    return {
-      name,
-      kind: "skipped",
-      ok: false,
-      detail: "no GitHub App identity is configured on this manager (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY) — no run can create a tenant repository, and nothing was asked of GitHub",
-    };
-  }
   try {
-    const org = await githubApp.installationOrg();
-    return { name, kind: "degrading", ok: true, detail: `installed in the organisation ${org}` };
+    const owner = await githubApp.installationOrg();
+    return { name, kind: "degrading", ok: true, detail: `installed with ${owner}` };
   } catch (e) {
     return { name, kind: "degrading", ok: false, detail: messageOf(e) };
   }
 }
 
 /**
- * WHICH IDENTITY WRITES THE CATALOG — the platform's GitHub App where its installation reaches the
- * catalog repository, else CATALOG_WRITE_PAT (wire-tenants.ts, #194). MEASURED here, because a
- * config cannot ask GitHub: the App reaching the catalog beside a configured PAT is red, so the
- * unused credential is removed rather than carried into the next installation; the App configured
- * and NOT reaching it with no PAT is red, because the tenant family was wired on a promise GitHub
- * refuses; neither configured SKIPS. DEGRADING, as every check that reaches a remote is.
+ * DOES THE APP REACH THE CATALOG — the platform's GitHub App is the one identity that reads and
+ * writes the catalog (wire-tenants.ts, hostyour-cloud#237), and whether its installation reaches
+ * the catalog repository is a fact of GitHub, not of the configuration: MEASURED here, so a tenant
+ * family wired on a promise GitHub refuses is red at boot, not at the first tenant. No catalog SKIPS.
+ * DEGRADING, as every check that reaches a remote is.
  */
-async function checkCatalogIdentity(config: Config, githubApp: GitHubApp | undefined): Promise<CheckResult> {
+async function checkCatalogIdentity(config: Config, githubApp: GitHubApp): Promise<CheckResult> {
   const name = "catalog.identity";
   const catalog = config.catalog;
   if (!catalog) return { name, kind: "skipped", ok: false, detail: "no catalog is configured on this manager (CATALOG_REPO) — no tenant family, nothing to write" };
   const [owner, repo] = catalog.repoURL.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "").split("/");
-  if (!githubApp) return { name, kind: "degrading", ok: catalog.token !== undefined, detail: catalog.token !== undefined ? `${owner}/${repo} is written with CATALOG_WRITE_PAT (no GitHub App on this manager)` : `${owner}/${repo} has no identity: no GitHub App and no CATALOG_WRITE_PAT` };
   try {
     const reached = await githubApp.reachesRepository({ owner: owner ?? "", repo: repo ?? "" });
-    if (reached && catalog.token !== undefined) return { name, kind: "degrading", ok: false, detail: `the GitHub App reaches ${owner}/${repo} and CATALOG_WRITE_PAT is set beside it — the PAT is unused, remove it from the installation's config` };
-    if (reached) return { name, kind: "degrading", ok: true, detail: `${owner}/${repo} is written with the GitHub App (its installation reaches it)` };
-    if (catalog.token !== undefined) return { name, kind: "degrading", ok: true, detail: `${owner}/${repo} is written with CATALOG_WRITE_PAT (the GitHub App's installation does not reach it)` };
-    return { name, kind: "degrading", ok: false, detail: `the GitHub App's installation does not reach ${owner}/${repo} and no CATALOG_WRITE_PAT is set — the tenant family has no identity for its catalog` };
+    if (reached) return { name, kind: "degrading", ok: true, detail: `${owner}/${repo} is read and written with the GitHub App (its installation reaches it)` };
+    return { name, kind: "degrading", ok: false, detail: `the GitHub App's installation does not reach ${owner}/${repo} — the tenant family has no identity for its catalog; install the App on it` };
   } catch (e) {
     return { name, kind: "degrading", ok: false, detail: messageOf(e) };
   }
@@ -536,9 +523,9 @@ export function checkRegistrationsMigrated(outcomes: MigratedBooks[]): CheckResu
  *  runSelfChecks; results concat. `platformRepo` is optional exactly as the wiring has it —
  *  wire-units.ts builds the port only with config.github and a books branch behind it.
  *  `runDefinitions` is optional for the same shape of reason: a check that holds a run kind against
- *  the platform's declaration has nothing to hold without one. `githubApp` is optional as
- *  config.githubApp is. */
-export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo; runDefinitions?: RunDefinitions; githubApp?: GitHubApp }): Promise<CheckResult[]> {
+ *  the platform's declaration has nothing to hold without one. `githubApp` is every installation's
+ *  (config.githubApp). */
+export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; platformRepo?: PlatformRepo; runDefinitions?: RunDefinitions; githubApp: GitHubApp }): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   try {
     const codec = new SessionCodec(deps.db.db, deps.config);

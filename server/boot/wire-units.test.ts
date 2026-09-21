@@ -4,6 +4,7 @@
 // would require one and 501 without it). Constructing the real adapters is safe in
 // a unit test: every kube loader only populates the KubeConfig object — no cluster IO happens
 // until a Run actually calls out.
+import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +12,7 @@ import { join } from "node:path";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
 import { CredentialStore } from "../security/store.ts";
 import { masterKubeClients } from "./master-kube.ts";
 import { KubeClusterReader } from "../adapters/kube/kube.ts";
@@ -30,6 +32,7 @@ const TENANT_KINDS: readonly string[] = RUN_FAMILY.tenant;
 // is part of the enable set for both, because both write onto the branch this installation keeps its
 // books on and that branch is named after the cluster holding the master role.
 const enabledEnv = {
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example",
   OIDC_ISSUER: "https://idp.example/",
   OIDC_CLIENT_ID: "manager",
@@ -94,7 +97,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
       openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
-    return [config, store, h.db, logger, { master, resolver }];
+    return [config, store, h.db, logger, { master, resolver }, new FakeGitHubApp()];
   }
 
   it("enables BOTH families WITHOUT a kubeconfig — in-cluster (pod SA) is the default kube access", () => {

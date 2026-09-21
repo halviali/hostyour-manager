@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
@@ -19,6 +20,7 @@ import type { ReleasesView } from "../../../shared/api-types.ts";
 // files, and that a missing statement stays missing.
 
 const config = parseConfig({
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c",

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { generateKeyPairSync } from "node:crypto";
 import { parseConfig, ConfigError, MAX_SOCKET_PATH_BYTES } from "./config.ts";
+import { GITHUB_APP_ENV, GITHUB_APP_PEM } from "./config.fixture.ts";
 
 const validEnv = {
+  ...GITHUB_APP_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://idp.m1.example.com/application/o/manager/",
   OIDC_CLIENT_ID: "manager",
@@ -166,38 +167,23 @@ describe("parseConfig", () => {
 });
 
 describe("tenant onboarding config (catalog)", () => {
-  it("leaves catalog absent when neither half is set", () => {
+  it("leaves catalog absent when CATALOG_REPO is not set", () => {
     expect(parseConfig(validEnv).catalog).toBeUndefined();
   });
 
-  it("refuses a PAT without the repository, and a repository without any identity, because a catalogue nobody named is not a catalogue", () => {
-    // The repository is the INSTALLATION's own and has no default: one that binds a whole tenant
-    // family to a repository nobody chose is worse than a refusal, because a clone that SUCCEEDS
-    // against the wrong repository says nothing at all.
-    expect(() => parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant" })).toThrow(ConfigError);
-    expect(() => parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" })).toThrow(ConfigError);
-  });
-
-  // The measured rule (#194): the App is the catalog's identity where its installation reaches it,
-  // so a config carrying the App and the repository needs no PAT; the row catalog.identity measures
-  // which one applies at boot.
-  it("takes CATALOG_REPO with the GitHub App and no CATALOG_WRITE_PAT — the App is the catalog's identity", () => {
-    const pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }) as string;
-    const c = parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog", GITHUB_APP_ID: "12345", GITHUB_APP_INSTALLATION_ID: "42", GITHUB_APP_PRIVATE_KEY: pem });
+  // The App is the catalog's one identity (hostyour-cloud#237): CATALOG_REPO names the repository and
+  // nothing else is asked; the row catalog.identity measures the App's reach at boot.
+  it("takes CATALOG_REPO as the catalog, read and written with the GitHub App", () => {
+    const c = parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" });
     expect(c.catalog).toEqual({ repoURL: "https://github.com/acme/acme-catalog.git" });
   });
 
-  it("honors a custom CATALOG_REPO", () => {
-    const c = parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant", CATALOG_REPO: "acme/deploy" });
-    expect(c.catalog?.repoURL).toBe("https://github.com/acme/deploy.git");
-  });
-
   it("rejects a malformed CATALOG_REPO", () => {
-    expect(() => parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant", CATALOG_REPO: "not-a-repo" })).toThrow(ConfigError);
+    expect(() => parseConfig({ ...validEnv, CATALOG_REPO: "not-a-repo" })).toThrow(ConfigError);
   });
 
   it("is independent of the consumer gate-runner (tenant charts validate manager-side)", () => {
-    const c = parseConfig({ ...validEnv, CATALOG_WRITE_PAT: "ghp_tenant", CATALOG_REPO: "acme/acme-catalog" });
+    const c = parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" });
     expect(c.catalog).toBeDefined();
     expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_MANAGER_ADDR, yet tenant config still resolves
   });
@@ -206,8 +192,9 @@ describe("tenant onboarding config (catalog)", () => {
 describe("the platform's GitHub App identity (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY)", () => {
   // A real key, in the PKCS#1 form GitHub issues, because the schema reads the PEM to refuse one
   // this process cannot sign with — a made-up string would test the wrong refusal.
-  const PEM = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }) as string;
-  const trio = { GITHUB_APP_ID: "12345", GITHUB_APP_INSTALLATION_ID: "42", GITHUB_APP_PRIVATE_KEY: PEM };
+  const PEM = GITHUB_APP_PEM;
+  const trio = GITHUB_APP_ENV;
+  const { GITHUB_APP_ID: _id, GITHUB_APP_INSTALLATION_ID: _inst, GITHUB_APP_PRIVATE_KEY: _key, ...withoutApp } = validEnv;
   const issues = (env: NodeJS.ProcessEnv): string => {
     try {
       parseConfig(env);
@@ -217,8 +204,9 @@ describe("the platform's GitHub App identity (GITHUB_APP_ID, GITHUB_APP_INSTALLA
     }
   };
 
-  it("stays ABSENT with none of the three — no run can create a tenant repository, and boot says nothing", () => {
-    expect(parseConfig(validEnv).githubApp).toBeUndefined();
+  it("REFUSES a configuration without the App — an installation without it does not exist (hostyour-cloud#237)", () => {
+    expect(() => parseConfig(withoutApp as NodeJS.ProcessEnv)).toThrow(ConfigError);
+    expect(issues(withoutApp as NodeJS.ProcessEnv)).toContain("GITHUB_APP_ID");
   });
 
   it("carries all three through as githubApp", () => {
@@ -229,12 +217,12 @@ describe("the platform's GitHub App identity (GITHUB_APP_ID, GITHUB_APP_INSTALLA
     // An id without the key that signs for it, or a key without the installation it acts in,
     // addresses nothing — and the operator reading the boot log must not have to diff three keys
     // against a values file to learn which one the ExternalSecret dropped.
-    expect(() => parseConfig({ ...validEnv, GITHUB_APP_ID: "12345" })).toThrow(ConfigError);
-    const missingTwo = issues({ ...validEnv, GITHUB_APP_ID: "12345" });
-    expect(missingTwo).toContain("missing: GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY");
-    expect(missingTwo).not.toContain("missing: GITHUB_APP_ID");
-    const missingOne = issues({ ...validEnv, GITHUB_APP_ID: "12345", GITHUB_APP_PRIVATE_KEY: PEM });
-    expect(missingOne).toContain("missing: GITHUB_APP_INSTALLATION_ID");
+    const missingTwo = issues({ ...withoutApp, GITHUB_APP_ID: "12345" } as NodeJS.ProcessEnv);
+    expect(missingTwo).toContain("GITHUB_APP_INSTALLATION_ID");
+    expect(missingTwo).toContain("GITHUB_APP_PRIVATE_KEY");
+    const missingOne = issues({ ...withoutApp, GITHUB_APP_ID: "12345", GITHUB_APP_PRIVATE_KEY: PEM } as NodeJS.ProcessEnv);
+    expect(missingOne).toContain("GITHUB_APP_INSTALLATION_ID");
+    expect(missingOne).not.toContain("GITHUB_APP_PRIVATE_KEY");
   });
 
   it("restores the line breaks of a key that arrived with them written as backslash-n", () => {

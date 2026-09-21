@@ -5,6 +5,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
+import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
@@ -94,7 +95,7 @@ describe("the repository PAT of an organisation", () => {
 });
 
 describe("the organisations over HTTP", () => {
-  const config = parseConfig({ PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/tmp/x.sock" });
+  const config = parseConfig({ ...GITHUB_APP_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/tmp/x.sock" });
   async function serve(): Promise<{ app: Hono<AppEnv>; cookie: string }> {
     const session = new SessionCodec(db.db, config);
     const app = createApp({
