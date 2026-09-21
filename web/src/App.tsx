@@ -9,7 +9,7 @@ import { OperatorKeys } from "./pages/OperatorKeys.tsx";
 import { RunDetail } from "./pages/RunDetail.tsx";
 import { Branches } from "./pages/Branches.tsx";
 import { Mail } from "./pages/Mail.tsx";
-import { Organisations } from "./pages/Organisations.tsx";
+import { Settings } from "./pages/Settings.tsx";
 import { Dns } from "./pages/Dns.tsx";
 import { ResetWizard } from "./pages/ResetWizard.tsx";
 import { Consumers } from "./pages/Consumers.tsx";
@@ -48,7 +48,7 @@ export function App() {
               <Route path="/servers/keys" element={<OperatorKeys />} />
               <Route path="/consumers" element={<Consumers />} />
               <Route path="/consumers/onboard" element={<ConsumerOnboard />} />
-              <Route path="/organisations" element={<Organisations />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="/tenants" element={<Tenants />} />
               <Route path="/tenants/create" element={<TenantCreate />} />
               <Route path="/tenants/:id" element={<TenantDetail />} />
