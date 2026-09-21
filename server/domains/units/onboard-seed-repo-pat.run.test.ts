@@ -139,6 +139,6 @@ describe("onboard seed-repo-pat step — the packages reader where a scope is ro
     expect(logs.some((l) => l.includes("routes no scope to GitHub Packages — no packages reader needed"))).toBe(true);
     const routed = ports({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { ".npmrc": "@x:registry=https://npm.pkg.github.com\n" } }) });
     await expect(seedRepoPatStep(routed, params()).run(ctx([], "ghs_repo")))
-      .rejects.toThrow(/organisation x records no packages reader, and x\/acme installs private npm packages of @x from GitHub Packages .* Organisations page/);
+      .rejects.toThrow(/organisation x records no packages reader, and x\/acme installs private npm packages of @x from GitHub Packages .* consumer wizard/);
   });
 });

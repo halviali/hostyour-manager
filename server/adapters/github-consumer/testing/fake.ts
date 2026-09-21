@@ -83,6 +83,16 @@ export class FakeGitHubConsumer implements GitHubConsumer {
 
   /** owner/repo -> the tag names listReleaseTags answers; unseeded repos answer none. */
   private readonly tags = new Map<string, string[]>();
+  /** owner/repo/path -> the text readFile answers; an unseeded path answers null (no such file). */
+  private readonly files = new Map<string, string>();
+
+  seedFile(owner: string, repo: string, path: string, text: string): void {
+    this.files.set(`${this.key(owner, repo)}/${path}`, text);
+  }
+
+  async readFile(input: { owner: string; repo: string; path: string; token: string; signal?: AbortSignal }): Promise<string | null> {
+    return this.files.get(`${this.key(input.owner, input.repo)}/${input.path}`) ?? null;
+  }
   /** Every listReleaseTags call, so a test can assert which repositories the next-version read spanned. */
   readonly tagReads: Array<{ owner: string; repo: string }> = [];
   /** The token each tag listing was made with — the identity the read ran under. */

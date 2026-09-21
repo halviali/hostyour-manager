@@ -10,7 +10,7 @@ import { BUILD_TARGET_SECRETS, deleteBuildSecrets, readBuildSecretRefreshTimes, 
 import { unitBuildNamespace } from "./build-rbac.ts";
 import { sleep } from "./onboard-release-cycle.ts";
 import { probePackages } from "./onboard-probes.ts";
-import { npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "./repo-identity.ts";
+import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "./repo-identity.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { readOrganisationIdentity } from "./organisations.ts";
@@ -44,7 +44,7 @@ async function packagesReaderOrRefuse(ports: OnboardPorts, p: OnboardParams, ctx
   }
   if (scopes.length > 0) {
     const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
-    throw errValidation(packagesReaderMissing(owner, repo, scopes));
+    throw errValidation(packagesReaderMissing(owner, repo, scopes, CONSUMER_WIZARD));
   }
   ctx.log("meta", `${p.repoURL} routes no scope to GitHub Packages — no packages reader needed, the entry's packages property is empty`);
   return null;

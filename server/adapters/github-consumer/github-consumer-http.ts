@@ -198,6 +198,14 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     return body.default_branch;
   }
 
+  async readFile(input: { owner: string; repo: string; path: string; token: string; signal?: AbortSignal }): Promise<string | null> {
+    const path = `${this.repoPath(input.owner, input.repo)}/contents/${input.path.split("/").map(encodeURIComponent).join("/")}`;
+    const res = await this.send(input.token, path, { headers: { accept: "application/vnd.github.raw+json" }, ...(input.signal ? { signal: input.signal } : {}) });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+    return res.text();
+  }
+
   async listReleaseTags(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string[]> {
     const base = this.repoPath(input.owner, input.repo);
     const names: string[] = [];

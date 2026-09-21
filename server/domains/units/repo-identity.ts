@@ -40,6 +40,7 @@ export async function appReachesRepoURL(app: Pick<GitHubApp, "reachesRepository"
 
 export const ORGANISATIONS_PAGE = "the Organisations page";
 export const ADD_APP_FORM = "the tenant's Add app form";
+export const CONSUMER_WIZARD = "the consumer wizard";
 
 /** The refusal a repository routing a scope to GitHub Packages gets where its owner records no
  *  packages reader — one sentence every caller uses; `where` names the place the token is given

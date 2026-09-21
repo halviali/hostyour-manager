@@ -158,6 +158,10 @@ export interface GitHubConsumer {
   /** The repo's default branch (GET /repos/{owner}/{repo} → default_branch) — the ref a workflow
    *  dispatch runs on, resolved per repo because main vs master is never assumed. */
   getDefaultBranch(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<string>;
+  /** ONE file of the repository at its default branch, as text (GET /repos/{owner}/{repo}/contents/
+   *  {path}, raw), or null where it carries none — what the wizard's prefill reads the `.npmrc` with
+   *  to know whether the owner's packages reader is needed (#237), before any clone exists. */
+  readFile(input: { owner: string; repo: string; path: string; token: string; signal?: AbortSignal }): Promise<string | null>;
 
   /** Every tag name of the repository (paginated), for the next-version read (shared/release.ts
    *  nextReleaseVersion): the caller keeps the ones in the release grammar. A non-2xx is an error —

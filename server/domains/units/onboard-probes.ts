@@ -18,7 +18,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { readOrganisationIdentity } from "./organisations.ts";
-import { ORGANISATIONS_PAGE, npmrcPackageScopes, packagesReaderMissing } from "./repo-identity.ts";
+import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing } from "./repo-identity.ts";
 import { consumerUnitHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
@@ -95,7 +95,7 @@ export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: 
     const lock = (await ports.repo.readFile(clone.workdir, "pnpm-lock.yaml")) ?? (await ports.repo.readFile(clone.workdir, "package-lock.json")) ?? "";
     const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
     const readerId = readOrganisationIdentity(ctx.db, owner)?.packagesCredentialId;
-    if (!readerId) return [check("packages", "Private npm packages", "hard", "fail", packagesReaderMissing(owner, repo, scopes), `record it on ${ORGANISATIONS_PAGE}`)];
+    if (!readerId) return [check("packages", "Private npm packages", "hard", "fail", packagesReaderMissing(owner, repo, scopes, CONSUMER_WIZARD), `record it in ${CONSUMER_WIZARD}`)];
     const reader = await ctx.creds.open(readerId, { purpose: "consumer-onboard:probe-packages", runId: "plan" });
     return withToken(reader, async (token) => {
       const out: PreflightCheck[] = [];
@@ -108,7 +108,7 @@ export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: 
           ? check(`packages.${scope}`, title, "hard", "pass", `@${scope}/${name} is readable with the packages reader of ${owner}`)
           : answer === "absent"
             ? check(`packages.${scope}`, title, "hard", "warn", `@${scope}/${name} is not published there`)
-            : check(`packages.${scope}`, title, "hard", "fail", `@${scope}/${name} is not readable with the packages reader of ${owner}`, `record a packages reader of ${scope === owner ? owner : `${owner} that also reads @${scope}`} on ${ORGANISATIONS_PAGE}`));
+            : check(`packages.${scope}`, title, "hard", "fail", `@${scope}/${name} is not readable with the packages reader of ${owner}`, `record a packages reader of ${scope === owner ? owner : `${owner} that also reads @${scope}`} in ${CONSUMER_WIZARD}`));
       }
       return out;
     });

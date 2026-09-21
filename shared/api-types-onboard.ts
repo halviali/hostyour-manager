@@ -2,6 +2,7 @@
 // apart from api.ts (api-onboard-prefill.ts): what it fills its fields with before any run exists.
 import type { Stage } from "./enums.ts";
 import type { ReleaseChannel } from "./release.ts";
+import type { PackagesReaderView } from "./apps-manifest.ts";
 
 /** GET /api/consumers/channels — the channel table the onboard wizard reads: WHICH stages a release
  *  channel may reach. Served LITERALLY from the platform repo's clusters/platform/values-common.yaml
@@ -25,4 +26,8 @@ export interface OnboardPrefillView {
   /** The identity the onboarding will run with: the PAT the wizard was given, else the platform's
    *  GitHub App where its installation reaches the repository (measured, no PAT asked). */
   identity: "github-app" | "pat"; // the App, or the organisation's repository PAT (#220)
+  /** Present where the repository's `.npmrc` routes scopes to GitHub Packages: whose packages
+   *  reader the build installs them with, and whether one is recorded. The wizard asks for the
+   *  token while `recorded` is null — once per owner (#237). */
+  packagesReader?: PackagesReaderView;
 }

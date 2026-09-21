@@ -15,7 +15,7 @@ import type { GitHubApp } from "../../adapters/github-app/port.ts";
 export interface OnboardPrefillApiDeps extends Partial<ReleaseVersionDeps> {
   onboardingEnabled: boolean;
   db: Db;
-  store: Pick<CredentialStore, "open">;
+  store: Pick<CredentialStore, "open" | "list">;
   /** The platform's GitHub App — the identity of a repository its installation reaches. */
   githubApp?: GitHubApp;
 }

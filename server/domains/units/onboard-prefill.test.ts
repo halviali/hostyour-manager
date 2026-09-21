@@ -16,8 +16,13 @@ const signal = (): AbortSignal => new AbortController().signal;
 function organisations(owners: string[], withPat: string[] = []): OrganisationIdentityReader {
   return (org) => (owners.includes(org) ? { packagesCredentialId: `cred_pkg_${org}`, repoCredentialId: withPat.includes(org) ? `cred_pat_${org}` : null } : null);
 }
-/** A store that opens an organisation's repository PAT to a token named after it. */
-const store = { open: async (id: string) => Buffer.from(`token-of-${id}`, "utf8") };
+/** A store that opens an owner's repository PAT to a token named after it, and lists one recorded
+ *  packages reader row per owner the reader names (fingerprint after the owner). */
+const store = {
+  open: async (id: string) => Buffer.from(`token-of-${id}`, "utf8"),
+  list: async (filter?: { subject?: { kind: string; id: string } }) =>
+    (filter?.subject ? [{ id: `cred_pkg_${filter.subject.id}`, fingerprint: `sha256:pkg-${filter.subject.id}`, recordedAt: "2026-09-21T00:00:00.000Z" }] : []) as never,
+};
 
 describe("readOnboardPrefill", () => {
   it("answers the next number after the repository's release tags, naming the repository", async () => {
@@ -90,6 +95,21 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
   it("refuses a repository on a manager with no App and no repository PAT, saying which half is missing", async () => {
     const err = await readOnboardPrefill({ github: new FakeGitHubConsumer(), organisations: organisations(["x"]), store }, request(), signal()).catch((e: unknown) => e);
     expect(String((err as Error).message)).toContain("is not configured on this manager");
+  });
+});
+
+// THE PACKAGES READER IS ASKED FOR WHERE IT IS NEEDED (#237): the `.npmrc` read through the API says
+// which scopes the build installs privately; the owner's recorded reader says whether the wizard asks.
+describe("readOnboardPrefill — the owner's packages reader", () => {
+  it("names the reader the build needs — recorded where the owner records one, to be asked where none, absent where no scope is routed", async () => {
+    const github = new FakeGitHubConsumer();
+    github.seedFile("x", "acme", ".npmrc", "@x:registry=https://npm.pkg.github.com\n@shared:registry=https://npm.pkg.github.com\n");
+    const recorded = await readOnboardPrefill({ github, organisations: organisations(["x"], ["x"]), store }, request(), signal());
+    expect(recorded.packagesReader).toEqual({ owner: "x", scopes: ["x", "shared"], recorded: { fingerprint: "sha256:pkg-x", recordedAt: "2026-09-21T00:00:00.000Z" } });
+    const asked = await readOnboardPrefill({ github, organisations: (org) => (org === "x" ? { packagesCredentialId: null, repoCredentialId: "cred_pat_x" } : null), store }, request(), signal());
+    expect(asked.packagesReader).toEqual({ owner: "x", scopes: ["x", "shared"], recorded: null });
+    const none = await readOnboardPrefill({ github: new FakeGitHubConsumer(), organisations: organisations(["x"], ["x"]), store }, request(), signal());
+    expect(none.packagesReader).toBeUndefined();
   });
 });
 

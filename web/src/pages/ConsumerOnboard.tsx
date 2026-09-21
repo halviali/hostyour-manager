@@ -2,7 +2,8 @@ import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate, Link } from "react-router";
 import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, type OnboardTargetView } from "../api.ts";
+import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOrganisationCredential, type OnboardTargetView } from "../api.ts";
+import { PackagesReaderStep } from "../components/PackagesReaderStep.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -91,6 +92,14 @@ export function ConsumerOnboard() {
     }
   }
 
+  // THE PACKAGES READER IS ASKED FOR WHERE THE CHECK DEMANDS IT (#237): recorded as the owner's, then
+  // the repository is read again so the step disappears and the onboarding can be submitted.
+  const readerMissing = prefill?.packagesReader !== undefined && prefill.packagesReader.recorded === null;
+  const recordPackagesReader = async (owner: string, token: string): Promise<void> => {
+    await recordOrganisationCredential(owner, "packages-reader", token);
+    setPrefill(await prefillOnboard({ repoURL: form.repoURL.trim() }));
+  };
+
   // The stages the chosen channel admits — the plan holds the same ceiling (assertChannelReaches) at
   // the point that writes; the wizard only offers what would pass. No channel chosen yet ⇒ nothing to offer.
   const admittedStages = form.channel ? (channels?.[form.channel as keyof NonNullable<typeof channels>] ?? []) : [];
@@ -167,15 +176,17 @@ export function ConsumerOnboard() {
             </button>
             <span className="field__hint">
               A check, not a step of the onboarding: lists the repository&apos;s release tags with the identity the
-              onboarding will run with — the organisation&apos;s, by the owner of the URL: the platform&apos;s GitHub App where
-              it reaches the repository, else the organisation&apos;s repository PAT recorded on the{" "}
+              onboarding will run with — the owner&apos;s, by the owner of the URL: the platform&apos;s GitHub App where it
+              reaches the repository, else the owner&apos;s repository PAT recorded on the{" "}
               <Link to="/organisations">Organisations</Link> page — so that identity is proven to read the repository, and
-              shows the version the onboarding will release under Version. The organisation&apos;s packages reader must be
-              recorded there too: it is what the unit&apos;s build installs private npm packages with. Nothing is asked here,
-              nothing is cloned and nothing is kept.
-              {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App" : "the organisation's repository PAT"}.` : ""}
+              shows the version the onboarding will release under Version. Where the repository installs private npm
+              packages, the owner&apos;s packages reader is asked for below, once. Nothing is cloned and nothing is kept.
+              {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App" : "the owner's repository PAT"}.` : ""}
             </span>
           </div>
+          {readerMissing && prefill?.packagesReader && (
+            <PackagesReaderStep reader={prefill.packagesReader} onRecord={recordPackagesReader} subject="The repository" />
+          )}
           <label className="field">
             <span className="field__label">Consumer name</span>
             <input value={form.consumerName} onChange={onName} placeholder="acme" pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?" required />
@@ -279,6 +290,7 @@ export function ConsumerOnboard() {
             disabled={
               busy ||
               reading ||
+              readerMissing ||
               (!buildOnly && noTargets) ||
               !form.consumerName ||
               !form.repoURL ||

@@ -84,7 +84,7 @@ describe("probePackages — one private package per scope the repository routes 
     expect(opened).toEqual(["cred_pkg_x"]);
     github.packages.set("@acme/components", ["ghp_other"]);
     expect(await probePackages(ports({ github, repo: repo() }), params(), c))
-      .toMatchObject([{ status: "fail", severity: "hard", detail: "@acme/components is not readable with the packages reader of x", hint: "record a packages reader of x that also reads @acme on the Organisations page" }]);
+      .toMatchObject([{ status: "fail", severity: "hard", detail: "@acme/components is not readable with the packages reader of x", hint: "record a packages reader of x that also reads @acme in the consumer wizard" }]);
     dropCredentialRows(db.db, { kind: "organisation", id: "x" });
     expect(await probePackages(ports({ github, repo: repo() }), params(), c)).toMatchObject([{ id: "packages", status: "fail", detail: expect.stringContaining("organisation x records no packages reader, and x/acme installs private npm packages of @acme") }]);
   });
