@@ -60,8 +60,13 @@ describe("openDb — migration phase + append-only invariants", () => {
     const standing = new Database(file);
     migrate(drizzle(standing), { migrationsFolder: baselineOnly });
     expect(standing.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]);
-    // The rows a standing installation carries, in every shape 0003 derives an owner and a purpose from.
+    // The rows a standing installation carries: a table a migration REBUILDS or ALTERS must hold one,
+    // or the test proves nothing about the installation (#229: an ADD COLUMN with a non-constant
+    // default passes on an empty `apps` and dies on the first one with rows). Every shape 0003
+    // derives an owner and a purpose from is among the credentials.
     standing.prepare("INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'digi1')").run();
+    standing.prepare("INSERT INTO clusters (id, server_id, stage, domain) VALUES ('cl_1', 'srv_1', 'prod', 's1.example.com')").run();
+    standing.prepare("INSERT INTO apps (id, cluster_id, name, stage, host, created_at) VALUES ('app_1', 'cl_1', 'post', 'prod', 'post.example.com', 1700000000000)").run();
     const cred = standing.prepare("INSERT INTO credentials (id, kind, label, server_id, encrypted_blob, fingerprint) VALUES (?,?,?,?,'plain:v0:eA==',?)");
     cred.run("cred_key", "ssh_key", "SSH key for s1", "srv_1", "SHA256:key");
     cred.run("cred_pw", "other", "password for s1", "srv_1", "bootstrap-password");
@@ -75,7 +80,8 @@ describe("openDb — migration phase + append-only invariants", () => {
     handles.push(h);
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]); // 0004 dropped it again
     expect(h.sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get()).toEqual({ n: journal.entries.length });
-    expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('apps') WHERE name = 'updated_at'").all()).toEqual([{ name: "updated_at" }]); // 0002
+    expect(h.sqlite.prepare("SELECT id, created_at, updated_at FROM apps").all()).toEqual([{ id: "app_1", created_at: 1700000000000, updated_at: 1700000000000 }]); // 0002: carried, updated_at = created_at
+    expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'apps' AND name NOT LIKE 'sqlite_%'").all()).toEqual([{ name: "apps_name_stage_uq" }]);
     expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('credentials') WHERE name = 'server_id'").all()).toEqual([]); // 0004
     expect(h.sqlite.prepare("SELECT id, subject_kind, subject_id, purpose FROM credentials ORDER BY id").all()).toEqual([
       { id: "cred_app_unit", subject_kind: "unit", subject_id: "post", purpose: "repository-identity" },
