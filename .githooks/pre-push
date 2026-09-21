@@ -1,26 +1,4 @@
 #!/usr/bin/env bash
-# NOT A GATE. The push gate of every repository of this organisation is one file, simetrix-gh's
-# hooks/pre-push, and this finds it and hands it git's own standard input unread. Nothing is
-# decided here, so this file cannot come to a different verdict than the one beside it in the
-# next repository.
-#
-# Installed once per clone with:  git config core.hooksPath .githooks
-#
-# THE NEIGHBOURHOOD IS MEASURED FROM THE MAIN CHECKOUT, NOT FROM THIS TREE. Work is done in a
-# worktree under `../.worktrees/<repo>/`, and the only thing standing beside a worktree is
-# another worktree. `--git-common-dir` points into the main checkout's `.git` from a worktree as
-# well as from the checkout itself, so one line answers for both.
-#
-# THE TOOLING CHECKOUT IS FOUND BY NAME, WITHOUT CASE. A checkout is regularly cased differently
-# from the repository it came from, and an exact match reports a present one as absent.
-set -uo pipefail
-main="$(cd "$(git rev-parse --git-common-dir)/.." && git rev-parse --show-toplevel)"
-for entry in "$(dirname "$main")"/*; do
-  [ -d "$entry" ] || continue
-  [ "$(printf '%s' "${entry##*/}" | tr '[:upper:]' '[:lower:]')" = 'simetrix-gh' ] || continue
-  [ -f "$entry/hooks/pre-push" ] \
-    || { echo "pre-push: REFUSED — $entry/hooks/pre-push is missing, so nothing judged this push." >&2; exit 1; }
-  exec bash "$entry/hooks/pre-push" "$@"
-done
-echo "pre-push: REFUSED — no simetrix-gh checkout stands beside $main, and the push gate of every repository lives there, at hooks/pre-push." >&2
-exit 1
+# The push gate is `ai-core pre-push` (setup-ai-core); this file only starts it with git's own standard input.
+command -v ai-core >/dev/null 2>&1 || { echo "pre-push: REFUSED — ai-core is not on the PATH of this shell, so nothing judged this push. Install setup-ai-core, or open a new terminal where its bin/ is on the PATH." >&2; exit 1; }
+exec ai-core pre-push "$@"
