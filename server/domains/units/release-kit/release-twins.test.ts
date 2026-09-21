@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,6 +43,20 @@ const SCRIPTS = {
 function run(file: string, args: string[], cwd: string): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync(file, args, { cwd, encoding: "utf8", windowsHide: true });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/** The release scripts themselves, run WITHOUT blocking this worker (hostyour-manager#239): a
+ *  release run takes 5-20 s, and a file of them spent over a minute inside spawnSync, during which
+ *  the worker could answer none of vitest's own RPC — its `onTaskUpdate` timed out and the whole
+ *  suite was reported red with every test green. The git calls of the fixtures stay synchronous:
+ *  milliseconds each. */
+function runAsync(file: string, args: string[], cwd: string): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { cwd, encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err && !("code" in err && typeof (err as { code?: unknown }).code === "number")) { reject(err); return; }
+      resolve({ status: err ? ((err as { code?: number }).code ?? null) : 0, stdout: stdout ?? "", stderr: stderr ?? "" });
+    });
+  });
 }
 
 const dirs: string[] = [];
@@ -213,16 +227,16 @@ interface Fixture {
 
 /** One scenario, performed twice on two identical repositories. Each side answers with its fixture
  *  as well, so a scenario can read what the run left on origin. */
-function bothSpellings(build: () => Fixture, args: string[]): { sh: ReturnType<typeof run> & Fixture; ps1: ReturnType<typeof run> & Fixture } {
+async function bothSpellings(build: () => Fixture, args: string[]): Promise<{ sh: ReturnType<typeof run> & Fixture; ps1: ReturnType<typeof run> & Fixture }> {
   const sh = build();
   const ps1 = build();
   return {
-    sh: { ...run(BASH, [SCRIPTS.sh, ...args], sh.cwd), ...sh },
-    ps1: { ...run("pwsh", ["-NoProfile", "-NonInteractive", "-File", SCRIPTS.ps1, ...args], ps1.cwd), ...ps1 },
+    sh: { ...(await runAsync(BASH, [SCRIPTS.sh, ...args], sh.cwd)), ...sh },
+    ps1: { ...(await runAsync("pwsh", ["-NoProfile", "-NonInteractive", "-File", SCRIPTS.ps1, ...args], ps1.cwd)), ...ps1 },
   };
 }
 
-function expectSameBytes(o: ReturnType<typeof bothSpellings>): { stdout: string; stderr: string } {
+function expectSameBytes(o: Awaited<ReturnType<typeof bothSpellings>>): { stdout: string; stderr: string } {
   const sh = { out: normalise(o.sh.stdout, o.sh.root), err: normalise(o.sh.stderr, o.sh.root) };
   const ps1 = { out: normalise(o.ps1.stdout, o.ps1.root), err: normalise(o.ps1.stderr, o.ps1.root) };
   expect(ps1.out).toBe(sh.out);
@@ -298,39 +312,39 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     );
   }
 
-  it("refuses a malformed version identically", RUNS, () => {
-    const { stderr, stdout } = expectSameBytes(bothSpellings(() => bareDir(), ["1.2", "stable", "dev"]));
+  it("refuses a malformed version identically", RUNS, async () => {
+    const { stderr, stdout } = expectSameBytes(await bothSpellings(() => bareDir(), ["1.2", "stable", "dev"]));
     expect(stderr).toBe("release: version must be x.y.z with no leading zeros (got '1.2')\n");
     expect(stdout).toBe("");
   });
 
-  it("warns about the channel ceiling and refuses a directory that is no repository, identically", RUNS, () => {
-    const { stderr } = expectSameBytes(bothSpellings(() => bareDir(), ["1.2.3", "alpha", "prod"]));
+  it("warns about the channel ceiling and refuses a directory that is no repository, identically", RUNS, async () => {
+    const { stderr } = expectSameBytes(await bothSpellings(() => bareDir(), ["1.2.3", "alpha", "prod"]));
     // The ceiling WARNS and continues; the refusal underneath is the next thing either spelling says.
     expect(stderr).toContain("release: WARNING - channel alpha admits only: dev.");
     expect(stderr).toContain("release: not inside a git repository\n");
   });
 
-  it("refuses a dirty worktree identically", RUNS, () => {
-    const { stderr } = expectSameBytes(bothSpellings(() => fixtureRepo({ manifest: MANIFEST, dirty: true }), ["1.2.3", "stable", "dev"]));
+  it("refuses a dirty worktree identically", RUNS, async () => {
+    const { stderr } = expectSameBytes(await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, dirty: true }), ["1.2.3", "stable", "dev"]));
     expect(stderr).toBe("release: worktree is dirty - commit or stash before releasing\n");
   });
 
-  it("refuses a manifest that states no name identically, naming the same path", RUNS, () => {
+  it("refuses a manifest that states no name identically, naming the same path", RUNS, async () => {
     // The path is composed by each spelling out of the repository root git answers with. Written with
     // a backslash on one side it would differ here by every separator in it.
-    const { stderr } = expectSameBytes(bothSpellings(() => fixtureRepo({}), ["1.2.3", "stable", "dev"]));
+    const { stderr } = expectSameBytes(await bothSpellings(() => fixtureRepo({}), ["1.2.3", "stable", "dev"]));
     expect(stderr).toBe(
       "release: the manifest <root>/work/deploy/platform.yaml states no name - it is what the release line and any pin are written under\n",
     );
   });
 
-  it("performs the whole success path identically, down to the byte", RUNS, () => {
+  it("performs the whole success path identically, down to the byte", RUNS, async () => {
     // A unit that declares no platformRepo: it stamps the version, mints and pushes the tag, pushes
     // the deploy ref, and reports. Nothing here reaches the network — origin is a bare repository
     // beside the working tree — so this is the whole of what such a release does.
     const { stdout, stderr } = expectSameBytes(
-      bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.3", "stable", "dev"]),
+      await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.3", "stable", "dev"]),
     );
     expect(stdout).toBe([
       "release: package.json declares 1.2.3",
@@ -351,9 +365,9 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   // refused before any push and the refusal names the next number; a tag that never reached origin is
   // residue and is cut again. Each is performed by both spellings and read back off origin.
 
-  it("refuses a rerun whose tag stands on origin on another commit, before any push, naming the next number", RUNS, () => {
+  it("refuses a rerun whose tag stands on origin on another commit, before any push, naming the next number", RUNS, async () => {
     const before = new Map<string, string>();
-    const o = bothSpellings(() => {
+    const o = await bothSpellings(() => {
       const f = releasedRepo({ moved: true });
       before.set(f.cwd, originRefs(f));
       return f;
@@ -373,8 +387,8 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     }
   });
 
-  it("reuses a tag that stands on origin on HEAD and moves the delivery ref — a further stage, or a retry", RUNS, () => {
-    const o = bothSpellings(() => releasedRepo({ moved: false }), ["1.2.3", "stable", "test"]);
+  it("reuses a tag that stands on origin on HEAD and moves the delivery ref — a further stage, or a retry", RUNS, async () => {
+    const o = await bothSpellings(() => releasedRepo({ moved: false }), ["1.2.3", "stable", "test"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
     expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
@@ -388,8 +402,8 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     }
   });
 
-  it("drops a tag that never reached origin and names another commit, and cuts the release again", RUNS, () => {
-    const o = bothSpellings(() => residueRepo(), ["1.2.3", "stable", "dev"]);
+  it("drops a tag that never reached origin and names another commit, and cuts the release again", RUNS, async () => {
+    const o = await bothSpellings(() => residueRepo(), ["1.2.3", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
     expect(stdout).toContain(
@@ -405,8 +419,8 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     }
   });
 
-  it("pushes a tag that stands on HEAD here and is missing on origin, then reuses it — the push a cut run still owed (#227)", RUNS, () => {
-    const o = bothSpellings(() => owedPushRepo(), ["1.2.3", "stable", "dev"]);
+  it("pushes a tag that stands on HEAD here and is missing on origin, then reuses it — the push a cut run still owed (#227)", RUNS, async () => {
+    const o = await bothSpellings(() => owedPushRepo(), ["1.2.3", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
     expect(stdout).toContain("release: 1.2.3-stable-<ts14> stands on this machine only, on the commit being released - its push never reached origin; pushed now\n");
