@@ -4,6 +4,13 @@ import type { Stage } from "./enums.ts";
 import type { ReleaseChannel } from "./release.ts";
 import type { PackagesReaderView } from "./apps-manifest.ts";
 
+/** A credential of an owner the wizard asks for where the measurement demands it: recorded
+ *  (fingerprint and date) or not. */
+export interface OwnerCredentialView {
+  owner: string;
+  recorded: { fingerprint: string; recordedAt: string } | null;
+}
+
 /** GET /api/consumers/channels — the channel table the onboard wizard reads: WHICH stages a release
  *  channel may reach. Served LITERALLY from the platform repo's clusters/platform/values-common.yaml
  *  (global.channelStages) — the ONE table, enforced in the release pipeline at the point that
@@ -19,13 +26,18 @@ export interface ChannelStagesView {
  *  the channel is `stable`. Each value names its SOURCE in a sentence the wizard prints as the
  *  field's hint, so the operator sees whether the number was read or defaulted. Both stay editable. */
 export interface OnboardPrefillView {
-  version: string;
+  /** The version the onboarding will release — null while no identity reads the repository (#238). */
+  version: string | null;
   versionSource: string;
   channel: ReleaseChannel;
   channelSource: string;
   /** The identity the onboarding will run with: the PAT the wizard was given, else the platform's
    *  GitHub App where its installation reaches the repository (measured, no PAT asked). */
-  identity: "github-app" | "pat"; // the App, or the organisation's repository PAT (#220)
+  identity: "github-app" | "pat" | "none"; // the App, the owner's repository PAT (#220), or none yet (#238)
+  /** Present where the App does not reach the repository: the owner whose repository PAT the
+   *  onboarding runs with, and whether one is recorded. The wizard asks for the token while
+   *  `recorded` is null — once per owner (#238). */
+  repositoryPat?: OwnerCredentialView;
   /** Present where the repository's `.npmrc` routes scopes to GitHub Packages: whose packages
    *  reader the build installs them with, and whether one is recorded. The wizard asks for the
    *  token while `recorded` is null — once per owner (#237). */

@@ -57,13 +57,13 @@ export function npmrcPackageScopes(npmrc: string | null): string[] {
 
 /** The rule, judged without minting or opening anything: what identity ${owner}/${repo} gets, or
  *  why it gets none. The plan-time half — the run's step resolves the same way and seals. */
-export async function judgeRepoIdentity(input: { repoURL: string; githubApp?: Pick<GitHubApp, "reachesRepository" | "installationOrg"> | undefined; organisations: OrganisationIdentityReader; signal?: AbortSignal }): Promise<{ kind: "github-app" | "pat"; repoCredentialId?: string } | { refused: string }> {
+export async function judgeRepoIdentity(input: { repoURL: string; githubApp?: Pick<GitHubApp, "reachesRepository" | "installationOrg"> | undefined; organisations: OrganisationIdentityReader; signal?: AbortSignal }): Promise<{ kind: "github-app" | "pat"; repoCredentialId?: string } | { refused: string; missing: "repository-pat"; owner: string }> {
   const { owner, repo } = parseGitHubOwnerRepo(input.repoURL);
   const org = input.organisations(owner);
   if (input.githubApp && (await appReachesRepoURL(input.githubApp, input.repoURL, input.signal))) return { kind: "github-app" };
   if (org?.repoCredentialId) return { kind: "pat", repoCredentialId: org.repoCredentialId };
   const where = input.githubApp ? `is installed in the organisation ${await input.githubApp.installationOrg(input.signal)} and does not reach ${owner}/${repo}` : "is not configured on this manager";
-  return { refused: `the platform's GitHub App ${where}, and organisation ${owner} records no repository PAT — install the App on the repository, or record the organisation's repository PAT (repo + workflow + admin:repo_hook) on ${ORGANISATIONS_PAGE}` };
+  return { refused: `the platform's GitHub App ${where}, and organisation ${owner} records no repository PAT — install the App on the repository, or record the owner's repository PAT (repo + workflow + admin:repo_hook) in ${CONSUMER_WIZARD}`, missing: "repository-pat", owner };
 }
 
 /** The rule with the token in hand: the App's installation token minted now, or the organisation's

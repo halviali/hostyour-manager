@@ -13,7 +13,7 @@ import { z } from "zod";
 import type { OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import { resolveNextVersion, type ReleaseVersionDeps } from "./release-version.ts";
-import { npmrcPackageScopes, resolveRepoIdentity, type OrganisationIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
+import { judgeRepoIdentity, npmrcPackageScopes, resolveRepoIdentity, type OrganisationIdentityReader, type RepoIdentityApp } from "./repo-identity.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 
 /** What the prefill is asked: the repository. */
@@ -23,12 +23,18 @@ export const OnboardPrefillRequest = z.object({
 export type OnboardPrefillRequest = z.infer<typeof OnboardPrefillRequest>;
 
 export async function readOnboardPrefill(deps: ReleaseVersionDeps & { githubApp?: RepoIdentityApp; organisations: OrganisationIdentityReader; store: Pick<CredentialStore, "open" | "list"> }, input: OnboardPrefillRequest, signal: AbortSignal): Promise<OnboardPrefillView> {
+  const { owner, repo } = parseGitHubOwnerRepo(input.repoURL);
+  // THE REPOSITORY PAT IS ASKED FOR WHERE THE APP DOES NOT REACH (#238): no identity reads the
+  // repository yet, so nothing is read — the wizard shows the step and reads again once recorded.
+  const judged = await judgeRepoIdentity({ repoURL: input.repoURL, githubApp: deps.githubApp, organisations: deps.organisations, signal });
+  if ("refused" in judged) {
+    return { version: null, versionSource: judged.refused, channel: "stable", channelSource: "default", identity: "none", repositoryPat: { owner: judged.owner, recorded: null } };
+  }
   const identity = await resolveRepoIdentity({ repoURL: input.repoURL, githubApp: deps.githubApp, organisations: deps.organisations, store: deps.store, signal });
   const { version, readFrom } = await resolveNextVersion(deps, { repoURL: input.repoURL, token: identity.token, signal });
   // THE PACKAGES READER IS ASKED FOR WHERE IT IS NEEDED (#237): the repository's `.npmrc`, read
   // through the API with the same identity, says which scopes its build installs from GitHub
   // Packages; the owner's recorded reader says whether the wizard has to ask.
-  const { owner, repo } = parseGitHubOwnerRepo(input.repoURL);
   const scopes = npmrcPackageScopes(await deps.github.readFile({ owner, repo, path: ".npmrc", token: identity.token, signal }));
   const readerId = deps.organisations(owner)?.packagesCredentialId ?? null;
   const row = readerId ? (await deps.store.list({ subject: { kind: "organisation", id: owner }, purpose: "packages-reader" })).find((r) => r.id === readerId) : undefined;

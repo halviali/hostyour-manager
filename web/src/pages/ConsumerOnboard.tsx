@@ -1,9 +1,9 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate } from "react-router";
 import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOrganisationCredential, type OnboardTargetView } from "../api.ts";
-import { PackagesReaderStep } from "../components/PackagesReaderStep.tsx";
+import { OwnerCredentialStep } from "../components/OwnerCredentialStep.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -99,6 +99,13 @@ export function ConsumerOnboard() {
     await recordOrganisationCredential(owner, "packages-reader", token);
     setPrefill(await prefillOnboard({ repoURL: form.repoURL.trim() }));
   };
+  // THE REPOSITORY PAT IS ASKED FOR WHERE THE APP DOES NOT REACH (#238): the check answers no
+  // identity and names the owner; recorded, the repository is read again with it.
+  const patMissing = prefill?.identity === "none" && prefill.repositoryPat !== undefined && prefill.repositoryPat.recorded === null;
+  const recordRepositoryPat = async (owner: string, token: string): Promise<void> => {
+    await recordOrganisationCredential(owner, "repository-pat", token);
+    setPrefill(await prefillOnboard({ repoURL: form.repoURL.trim() }));
+  };
 
   // The stages the chosen channel admits — the plan holds the same ceiling (assertChannelReaches) at
   // the point that writes; the wizard only offers what would pass. No channel chosen yet ⇒ nothing to offer.
@@ -177,15 +184,18 @@ export function ConsumerOnboard() {
             <span className="field__hint">
               A check, not a step of the onboarding: lists the repository&apos;s release tags with the identity the
               onboarding will run with — the owner&apos;s, by the owner of the URL: the platform&apos;s GitHub App where it
-              reaches the repository, else the owner&apos;s repository PAT recorded on the{" "}
-              <Link to="/organisations">Organisations</Link> page — so that identity is proven to read the repository, and
-              shows the version the onboarding will release under Version. Where the repository installs private npm
-              packages, the owner&apos;s packages reader is asked for below, once. Nothing is cloned and nothing is kept.
-              {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App" : "the owner's repository PAT"}.` : ""}
+              reaches the repository, else the owner&apos;s repository PAT — so that identity is proven to read the repository,
+              and shows the version the onboarding will release under Version. Where the App does not reach the repository,
+              the owner&apos;s repository PAT is asked for below, once; where the repository installs private npm packages,
+              the owner&apos;s packages reader likewise. Nothing is cloned and nothing is kept.
+              {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App" : prefill.identity === "pat" ? "the owner's repository PAT" : "none yet — the owner's repository PAT is asked for below"}.` : ""}
             </span>
           </div>
+          {patMissing && prefill?.repositoryPat && (
+            <OwnerCredentialStep owner={prefill.repositoryPat.owner} need={{ kind: "repository-pat" }} onRecord={recordRepositoryPat} subject="The repository" />
+          )}
           {readerMissing && prefill?.packagesReader && (
-            <PackagesReaderStep reader={prefill.packagesReader} onRecord={recordPackagesReader} subject="The repository" />
+            <OwnerCredentialStep owner={prefill.packagesReader.owner} need={{ kind: "packages-reader", scopes: prefill.packagesReader.scopes }} onRecord={recordPackagesReader} subject="The repository" />
           )}
           <label className="field">
             <span className="field__label">Consumer name</span>
@@ -198,7 +208,7 @@ export function ConsumerOnboard() {
           <div className="field">
             <span className="field__label">Version</span>
             <span className="field__hint">
-              {prefill ? (
+              {prefill?.version ? (
                 <>
                   <code>{prefill.version}</code> — {prefill.versionSource}.{" "}
                 </>
@@ -291,6 +301,7 @@ export function ConsumerOnboard() {
               busy ||
               reading ||
               readerMissing ||
+              patMissing ||
               (!buildOnly && noTargets) ||
               !form.consumerName ||
               !form.repoURL ||

@@ -220,7 +220,7 @@ describe("create-tenant planStream — the build units and their organisation's 
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
-    expect(result.summary).toMatch(/build unit example-jobs .* has no identity: .*organisation acme records no repository PAT .* Organisations page/);
+    expect(result.summary).toMatch(/build unit example-jobs .* has no identity: .*organisation acme records no repository PAT .* consumer wizard/);
   });
   it("a registered build-only unit is re-released with its stored credential and asks for nothing", async () => {
     seedClusters();

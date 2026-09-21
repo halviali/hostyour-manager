@@ -84,17 +84,22 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
     expect(github.tokensSeen).toEqual(["token-of-cred_pat_x"]);
   });
 
-  it("refuses a repository outside the installation whose organisation records no repository PAT, naming both halves and the page", async () => {
-    const err = await readOnboardPrefill({ github: new FakeGitHubConsumer(), githubApp: new FakeGitHubApp(), organisations: organisations(["x"]), store }, request(), signal()).catch((e: unknown) => e);
-    expect(String((err as Error).message)).toContain("installed in the organisation example-org and does not reach x/acme");
-    expect(String((err as Error).message)).toContain("records no repository PAT");
-    expect(String((err as Error).message)).toContain("Organisations page");
+  // THE REPOSITORY PAT IS ASKED FOR WHERE THE APP DOES NOT REACH (#238): the prefill answers no
+  // identity and names the owner; nothing is read until the wizard records the PAT.
+  it("answers no identity for a repository outside the installation whose owner records no repository PAT, naming the owner and why", async () => {
+    const github = new FakeGitHubConsumer();
+    const view = await readOnboardPrefill({ github, githubApp: new FakeGitHubApp(), organisations: organisations(["x"]), store }, request(), signal());
+    expect(view).toMatchObject({ identity: "none", version: null, repositoryPat: { owner: "x", recorded: null } });
+    expect(view.versionSource).toContain("installed in the organisation example-org and does not reach x/acme");
+    expect(view.versionSource).toContain("consumer wizard");
+    expect(github.tagReads).toEqual([]);
   });
 
 
-  it("refuses a repository on a manager with no App and no repository PAT, saying which half is missing", async () => {
-    const err = await readOnboardPrefill({ github: new FakeGitHubConsumer(), organisations: organisations(["x"]), store }, request(), signal()).catch((e: unknown) => e);
-    expect(String((err as Error).message)).toContain("is not configured on this manager");
+  it("says so for a repository on a manager with no App and no repository PAT", async () => {
+    const view = await readOnboardPrefill({ github: new FakeGitHubConsumer(), organisations: organisations(["x"]), store }, request(), signal());
+    expect(view.identity).toBe("none");
+    expect(view.versionSource).toContain("is not configured on this manager");
   });
 });
 

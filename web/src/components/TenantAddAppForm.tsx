@@ -2,7 +2,7 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import { appSelectionsToRequest } from "../../../shared/app-selections.ts";
 import { undeployedApps } from "../tenantAppRows.ts";
-import { PackagesReaderStep } from "./PackagesReaderStep.tsx";
+import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 
 /** What the control hands the page on submit: one apps[] entry in the request's shape
  *  (shared/app-selections.ts appSelectionsToRequest). */
@@ -68,7 +68,7 @@ export function TenantAddAppForm({ catalog, busy, onAdd, onRecordPackagesReader 
 
   return (
     <>
-    {readerMissing && <PackagesReaderStep reader={reader} onRecord={onRecordPackagesReader} subject="The bundle" />}
+    {readerMissing && <OwnerCredentialStep owner={reader.owner} need={{ kind: "packages-reader", scopes: reader.scopes }} onRecord={onRecordPackagesReader} subject="The bundle" />}
     <form className="field" onSubmit={submit}>
       <label className="field__label" htmlFor="tenant-add-app">
         Add app
