@@ -20,7 +20,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, withAppsTemplate, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 
@@ -74,7 +74,7 @@ const doc = (kind: string, over: Partial<RenderedDoc> = {}): RenderedDoc => ({
 const CLEAN_DOCS = [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment")];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {

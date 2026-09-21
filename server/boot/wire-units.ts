@@ -196,7 +196,7 @@ export function buildUnits(
    *  run kind then has no way to reach one at all. */
   kube: { master: MasterKubeClients; resolver: ClusterKubeResolver },
   /** The platform's GitHub App identity, built in the composition root beside the kube trio and for
-   *  the same reason: the boot self-check names its installation organisation, and a family building
+   *  the same reason: the boot self-check names its installation owner, and a family building
    *  its own would put that identity behind the family's configuration guard. */
   githubApp: GitHubApp,
 ): UnitsWiring {

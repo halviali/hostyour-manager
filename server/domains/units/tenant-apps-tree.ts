@@ -23,7 +23,7 @@ export function tenantAppsUnit(bundle: string, subdomain: string): string {
   return `${bundle}-${subdomain}`;
 }
 
-/** The repository the App creates in the organisation the catalog names: `<org>/<bundle>-<subdomain>`. */
+/** The repository the App creates in the owner the catalog names: `<org>/<bundle>-<subdomain>`. */
 export function tenantAppsRepoURL(org: string, bundle: string, subdomain: string): string {
   return `https://github.com/${org}/${tenantAppsUnit(bundle, subdomain)}.git`;
 }

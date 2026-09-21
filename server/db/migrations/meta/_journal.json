@@ -36,6 +36,13 @@
       "when": 1789931011985,
       "tag": "0004_credential-subject-required",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790014405062,
+      "tag": "0005_credential-subject-owner",
+      "breakpoints": true
     }
   ]
 }

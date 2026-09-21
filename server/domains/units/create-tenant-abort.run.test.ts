@@ -1,4 +1,4 @@
-import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "./unit-size.ts";
 import { eq } from "drizzle-orm";
@@ -108,7 +108,7 @@ const CLEAN_DOCS = [
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and write-pointer resolves the tenant's ceiling against it.
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });

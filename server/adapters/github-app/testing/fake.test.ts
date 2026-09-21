@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { FakeGitHubApp } from "./fake.ts";
 
 // The fake holds the same contract the HTTP client is tested on (github-app-http.test.ts): a scripted
-// token and organisation, and a create that is idempotent by `org/name`. A run test that passes
+// token and owner, and a create that is idempotent by `org/name`. A run test that passes
 // against a fake with a different belief about "already exists" proves nothing about the run.
 describe("FakeGitHubApp", () => {
-  it("answers the scripted token and organisation", async () => {
+  it("answers the scripted token and owner", async () => {
     const fake = new FakeGitHubApp();
     fake.token = "ghs_scripted";
     fake.org = "acme";

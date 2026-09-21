@@ -12,7 +12,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeTenantAppsRepoDef, type TenantAppsRepoParams } from "./tenant-apps-repo.run.ts";
 import { mergeAppsManifest } from "./tenant-apps-tree.ts";
-import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, catalogManifest, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { CATALOG_URL, GUID, IMAGE_TAG, ORG, SHA, SUBDOMAIN, TEMPLATE_APPS_YAML, TEMPLATE_FILES, TEMPLATE_MANIFEST, TEMPLATE_URL, TENANT_URL, UNIT, catalogManifest, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -33,7 +33,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 
 let db: DbHandle;
 beforeEach(() => {
-  db = openDb(":memory:"); recordTestOrganisations(db.db);
+  db = openDb(":memory:"); recordTestOwners(db.db);
   db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active" }).run();
 });
@@ -113,7 +113,7 @@ function fakeCreds(app: FakeGitHubApp): { store: CredentialStore; seals: { id: s
     },
     open: async (id: string) => {
       opened.push(id);
-      if (id === "cred_pkg_org") return Buffer.from("ghp_packages_org", "utf8"); // the organisation's packages reader (recordTestOrganisations)
+      if (id === "cred_pkg_org") return Buffer.from("ghp_packages_org", "utf8"); // the owner's packages reader (recordTestOwners)
       const s = seals.find((x) => x.id === id);
       if (!s) throw new Error(`unknown credential ${id}`);
       return Buffer.from(s.kind === "github-app" ? await app.installationToken() : s.plaintext, "utf8");
@@ -180,18 +180,18 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     expect(r.summary).toMatch(/crm is not in the template's apps\.yaml \(it offers erp, web\)/);
   });
   // The bundle's build installs what the TEMPLATE's .npmrc routes to GitHub Packages (#221): a
-  // template routing a scope needs the organisation's packages reader at plan; one routing none needs nothing.
-  it("refuses a template routing a scope to GitHub Packages where the organisation records no packages reader, and plans one routing none without it", async () => {
-    dropCredentialRows(db.db, { kind: "organisation", id: ORG });
+  // template routing a scope needs the owner's packages reader at plan; one routing none needs nothing.
+  it("refuses a template routing a scope to GitHub Packages where the owner records no packages reader, and plans one routing none without it", async () => {
+    dropCredentialRows(db.db, { kind: "owner", id: ORG });
     expect((await plan(harness(), REQUEST)).outcome).toBe("planned"); // TEMPLATE_FILES carry no .npmrc
     const h = harness();
     h.catalogReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: { ...TEMPLATE_FILES, ".npmrc": `@${ORG}:registry=https://npm.pkg.github.com\n` } });
     const r = await plan(h, REQUEST);
     expect(r.outcome).toBe("rejected");
     if (r.outcome !== "rejected") return;
-    expect(r.summary).toMatch(new RegExp(`organisation ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* Add app form`));
+    expect(r.summary).toMatch(new RegExp(`owner ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* Add app form`));
   });
-  it("refuses a catalog whose appsOrg is not the organisation the App is installed in", async () => {
+  it("refuses a catalog whose appsOrg is not the owner the App is installed in", async () => {
     const h = harness();
     h.githubApp.org = "other-org";
     const r = await plan(h);
@@ -209,7 +209,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
 });
 
 describe("tenant-apps-repo planStream — the plan", () => {
-  it("freezes the organisation, the template and the master, and reads the template with the catalog's credential", async () => {
+  it("freezes the owner, the template and the master, and reads the template with the catalog's credential", async () => {
     const h = harness();
     const r = await plan(h);
     expect(r.outcome).toBe("planned");
@@ -335,7 +335,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     // ONE credential for the whole pass, of the kind that stores nothing; every open went to it, and
     // the PAT scope preflight read no scopes off it — the step itself stood aside for the App's row.
     expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, fingerprint: h.githubApp.identityFingerprint(), plaintext: "" }]);
-    expect(new Set(creds.opened)).toEqual(new Set(["cred_1", "cred_pkg_org"])); // the App row and the organisation's packages reader
+    expect(new Set(creds.opened)).toEqual(new Set(["cred_1", "cred_pkg_org"])); // the App row and the owner's packages reader
     expect(logs.some((l) => l.includes("installation permissions stand in for PAT scopes"))).toBe(true);
     expect(logs.some((l) => l.includes("PAT scopes OK"))).toBe(false);
     expect(logs.at(-1)).toContain(`${UNIT} built as ${UNIT}:${IMAGE_TAG} for prod`);

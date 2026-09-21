@@ -17,7 +17,7 @@ import type { PreflightCheck } from "../../../shared/preflight.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
-import { readOrganisationIdentity } from "./organisations.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing } from "./repo-identity.ts";
 import { consumerUnitHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
@@ -83,8 +83,8 @@ export async function probeIdentity(ports: OnboardPorts, p: OnboardParams, ctx: 
 }
 
 /** seed-repo-pat's probe: one private package per scope the repository routes to GitHub Packages,
- *  read with the organisation's packages reader — the token the build's `.npmrc` will carry (#220).
- *  Refused by name where the organisation records none. */
+ *  read with the owner's packages reader — the token the build's `.npmrc` will carry (#220).
+ *  Refused by name where the owner records none. */
 export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   if (!ports.github) return [];
   const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
@@ -94,7 +94,7 @@ export async function probePackages(ports: OnboardPorts, p: OnboardParams, ctx: 
     if (scopes.length === 0) return [check("packages", "Private npm packages", "soft", "pass", "the repository routes no scope to GitHub Packages — no packages reader needed")];
     const lock = (await ports.repo.readFile(clone.workdir, "pnpm-lock.yaml")) ?? (await ports.repo.readFile(clone.workdir, "package-lock.json")) ?? "";
     const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
-    const readerId = readOrganisationIdentity(ctx.db, owner)?.packagesCredentialId;
+    const readerId = readOwnerIdentity(ctx.db, owner)?.packagesCredentialId;
     if (!readerId) return [check("packages", "Private npm packages", "hard", "fail", packagesReaderMissing(owner, repo, scopes, CONSUMER_WIZARD), `record it in ${CONSUMER_WIZARD}`)];
     const reader = await ctx.creds.open(readerId, { purpose: "consumer-onboard:probe-packages", runId: "plan" });
     return withToken(reader, async (token) => {

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
-  getTenant, getTenantAppCatalog, addTenantApp, recordOrganisationCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
+  getTenant, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
   setTenantSize,
   backupTenant, restoreTenant, migrateTenant, listTenantTargets, listRuns,
   type TenantDetailView,
@@ -111,7 +111,7 @@ export function TenantDetail() {
   // The packages reader the first tenant onboarding asks for (#233): recorded as the owner's, then
   // the catalog is read again so the form stops asking.
   const recordPackagesReader = async (owner: string, token: string): Promise<void> => {
-    await recordOrganisationCredential(owner, "packages-reader", token);
+    await recordOwnerCredential(owner, "packages-reader", token);
     setCatalog(await getTenantAppCatalog(tenantId));
   };
 

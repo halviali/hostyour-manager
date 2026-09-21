@@ -42,7 +42,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "./unit-size.ts";
 import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, withAppsTemplate, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
 const SHA = "a".repeat(40);
 const config = parseConfig({ ...GITHUB_APP_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
@@ -52,7 +52,7 @@ const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and G24 resolves the unit's quota against it while the gates run.
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 /** The manifest the consumer fixtures onboard: one declared build, so gate G18's manifest half holds. */
@@ -168,15 +168,15 @@ function seedSlaveCluster(): void {
 
 const RAW_PAT = "github_pat_raw_secret_value";
 // {channel} — the onboard TRIGGERS the release at the next version after the repo's release tags; the request carries
-// no version, no ref, no tag — and no credential: the unit's identity is its organisation's (#220), recorded once.
+// no version, no ref, no tag — and no credential: the unit's identity is its owner's (#220), recorded once.
 const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team" };
 
-/** Records an organisation's identity with REAL sealed rows of the store under test: its packages
+/** Records an owner's identity with REAL sealed rows of the store under test: its packages
  *  reader always, its repository PAT where `repoPat` is given (the App does not reach it). */
-async function recordOrganisation(store: CredentialStore, org: string, o: { repoPat?: string } = {}): Promise<void> {
-  dropCredentialRows(db.db, { kind: "organisation", id: org });
-  await store.seal({ kind: "pat", label: `packages reader (${org})`, plaintext: Buffer.from(`ghp_packages_${org}`), fingerprint: `sha256:pkg-${org}`, subject: { kind: "organisation", id: org }, purpose: "packages-reader" });
-  if (o.repoPat) await store.seal({ kind: "pat", label: `repository PAT (${org})`, plaintext: Buffer.from(o.repoPat), fingerprint: `sha256:pat-${org}`, subject: { kind: "organisation", id: org }, purpose: "repository-pat" });
+async function recordOwner(store: CredentialStore, org: string, o: { repoPat?: string } = {}): Promise<void> {
+  dropCredentialRows(db.db, { kind: "owner", id: org });
+  await store.seal({ kind: "pat", label: `packages reader (${org})`, plaintext: Buffer.from(`ghp_packages_${org}`), fingerprint: `sha256:pkg-${org}`, subject: { kind: "owner", id: org }, purpose: "packages-reader" });
+  if (o.repoPat) await store.seal({ kind: "pat", label: `repository PAT (${org})`, plaintext: Buffer.from(o.repoPat), fingerprint: `sha256:pat-${org}`, subject: { kind: "owner", id: org }, purpose: "repository-pat" });
 }
 
 describe("consumer API", () => {
@@ -189,7 +189,7 @@ describe("consumer API", () => {
   it("onboard: 201 + runId, and the run reaches planned", async () => {
     seedCluster();
     const { app, executor, cookie, store } = await make(true);
-    await recordOrganisation(store, "x", { repoPat: RAW_PAT });
+    await recordOwner(store, "x", { repoPat: RAW_PAT });
     const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
     expect(res.status).toBe(201);
     const { runId } = (await res.json()) as { runId: string };
@@ -213,15 +213,15 @@ describe("consumer API", () => {
     expect(res.status).toBe(400);
   });
 
-  // The rule (#220): the unit's identity is its organisation's — the App where its installation
-  // reaches the repository (a credential row storing nothing), the organisation's repository PAT
+  // The rule (#220): the unit's identity is its owner's — the App where its installation
+  // reaches the repository (a credential row storing nothing), the owner's repository PAT
   // where it does not (sealed again under the unit's name), a refusal naming the page else; and the
-  // organisation's packages reader is required whichever reads.
-  it("onboards a repository the GitHub App reaches under the App, one it does not under the organisation's repository PAT, and refuses one whose organisation records no repository PAT", async () => {
+  // owner's packages reader is required whichever reads.
+  it("onboards a repository the GitHub App reaches under the App, one it does not under the owner's repository PAT, and refuses one whose owner records no repository PAT", async () => {
     seedCluster();
     const githubApp = new FakeGitHubApp();
     const { app, executor, cookie, store } = await make(true, undefined, githubApp);
-    await recordOrganisation(store, githubApp.org);
+    await recordOwner(store, githubApp.org);
     const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, repoURL: `https://github.com/${githubApp.org}/acme.git` }) });
     expect(res.status).toBe(201);
     const { runId } = (await res.json()) as { runId: string };
@@ -229,31 +229,31 @@ describe("consumer API", () => {
     const params = JSON.parse((db.sqlite.prepare("SELECT params_json FROM runs WHERE id = ?").get(runId) as { params_json: string }).params_json) as { repoCredentialId: string };
     const sealed = (await store.list({ kind: "github-app" })).find((c) => c.id === params.repoCredentialId);
     expect([sealed?.label, sealed?.fingerprint]).toEqual(["GitHub App (acme)", githubApp.identityFingerprint()]);
-    // A repository outside the installation whose organisation records no repository PAT is refused naming both halves.
-    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
-    await recordOrganisation(store, "x");
+    // A repository outside the installation whose owner records no repository PAT is refused naming both halves.
+    dropCredentialRows(db.db, { kind: "owner", id: "x" });
+    await recordOwner(store, "x");
     const outside = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
     expect(outside.status).toBe(400);
-    expect(await outside.text()).toContain("does not reach x/acme, and organisation x records no repository PAT");
-    // With the organisation's repository PAT recorded it is onboarded under a copy of that PAT, sealed under the unit's name.
-    await recordOrganisation(store, "x", { repoPat: RAW_PAT });
+    expect(await outside.text()).toContain("does not reach x/acme, and owner x records no repository PAT");
+    // With the owner's repository PAT recorded it is onboarded under a copy of that PAT, sealed under the unit's name.
+    await recordOwner(store, "x", { repoPat: RAW_PAT });
     const withPat = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify(REQ) });
     expect(withPat.status).toBe(201);
     const second = JSON.parse((db.sqlite.prepare("SELECT params_json FROM runs WHERE id = ?").get(((await withPat.json()) as { runId: string }).runId) as { params_json: string }).params_json) as { repoCredentialId: string };
     const row = (await store.list({ kind: "pat" })).find((c) => c.id === second.repoCredentialId);
     expect(row?.label).toBe("repository PAT (acme)");
     expect((await store.open(second.repoCredentialId, { purpose: "test:assert-sealed" })).toString("utf8")).toBe(RAW_PAT);
-    // An organisation recording nothing at all, not reached by the App, is refused naming the repository PAT and the page.
-    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
+    // An owner recording nothing at all, not reached by the App, is refused naming the repository PAT and the page.
+    dropCredentialRows(db.db, { kind: "owner", id: "x" });
     const none = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, consumerName: "acme3" }) });
     expect(none.status).toBe(400);
-    expect(await none.text()).toContain("organisation x records no repository PAT");
+    expect(await none.text()).toContain("owner x records no repository PAT");
   });
 
-  it("a PAT in the request body is ignored — params_json carries ONLY the sealed reference of the organisation's identity, never a value", async () => {
+  it("a PAT in the request body is ignored — params_json carries ONLY the sealed reference of the owner's identity, never a value", async () => {
     seedCluster();
     const { app, executor, cookie, store } = await make(true);
-    await recordOrganisation(store, "x", { repoPat: RAW_PAT });
+    await recordOwner(store, "x", { repoPat: RAW_PAT });
     const res = await app.request("/api/consumers", { method: "POST", ...authed(cookie), body: JSON.stringify({ ...REQ, repoPat: "github_pat_stray" }) });
     expect(res.status).toBe(201);
     const { runId } = (await res.json()) as { runId: string };

@@ -21,7 +21,7 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { placeholderTagFromChain } from "./tenant-values.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
 import { readTenantSpec, recordAppsRepoStep } from "./tenant-apps-repo.run.ts";
-import { readOrganisationIdentity } from "./organisations.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { BuildUnitSchema, buildUnitStep, planBuildUnits, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
@@ -373,7 +373,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
-      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), organisations: (org) => readOrganisationIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [req.app], spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
       const appsImage = tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
@@ -425,7 +425,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
       // app added after the platform pulls images no earlier run had to build.
       const planned = await planBuildUnits({
         requiredImages, registryHost, buildRepos: outcome.spec?.buildRepos ?? [], appsBundle: outcome.spec?.appsBundle, appsImage, probe: ports.registryProbe,
-        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, organisations: (org) => readOrganisationIdentity(ctx.db, org), stage: tc.stage, subdomain: current.entry.subdomain, signal: ctx.signal, log: ctx.log,
+        registration: ports.buildUnitRegistration ?? (async () => null), githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), stage: tc.stage, subdomain: current.entry.subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       const built = planned.builds;
@@ -469,7 +469,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
         targets: [],
         locks: tenantLocks(ports.registrations),
         warnings: built.warnings,
-        requiredSecrets: [], // a build unit's identity is its organisation's, never asked at approve (#220)
+        requiredSecrets: [], // a build unit's identity is its owner's, never asked at approve (#220)
       };
       return { outcome: "planned", params, plan };
     },

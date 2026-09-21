@@ -4,7 +4,7 @@
 //
 // WHAT IS MEASURED. The target's deploy-state (attest-target re-asks it at run time, step 0 of a
 // mutating run stays a step); the catalog — readable with the manager's credential
-// (write-registration; the push is proven by the commit); the apps repository's organisation — the one the App is
+// (write-registration; the push is proven by the commit); the apps repository's owner — the one the App is
 // installed in — and the template the tree is copied from, reached by the App (create-repository);
 // every build unit's identity — a registered unit's stored credential reads the repository's hooks,
 // an unregistered unit the App reaches is reached, and one whose PAT comes at approve is NOT
@@ -18,7 +18,7 @@ import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run
 import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { judgeRepoIdentity } from "./repo-identity.ts";
-import { readOrganisationIdentity } from "./organisations.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { tenantWildcardHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
@@ -52,7 +52,7 @@ export async function probeCatalog(ports: TenantOnboardPorts, p: CreateTenantPar
   return out;
 }
 
-/** create-repository's probe: the App is installed in the organisation the apps repository is created
+/** create-repository's probe: the App is installed in the owner the apps repository is created
  *  in, and it reaches the template the tree is copied from. */
 export async function probeAppsRepository(ports: TenantOnboardPorts, unit: { org: string; templateRepoURL: string; bundle: string; subdomain: string }, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   const repoURL = tenantAppsRepoURL(unit.org, unit.bundle, unit.subdomain);
@@ -75,11 +75,11 @@ export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, po
   const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
   const title = `The build unit ${unit.unit} (${owner}/${repo})`;
   if (unit.repoCredentialId === undefined) {
-    // The organisation's identity, judged again now (repo-identity.ts): what the step will seal.
-    const judged = await judgeRepoIdentity({ repoURL: unit.repoURL, githubApp: ports.githubApp, organisations: (org) => readOrganisationIdentity(ctx.db, org), signal: ctx.signal });
+    // The owner's identity, judged again now (repo-identity.ts): what the step will seal.
+    const judged = await judgeRepoIdentity({ repoURL: unit.repoURL, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal });
     return ["refused" in judged
       ? check(`unit.${unit.unit}`, title, "hard", "fail", judged.refused)
-      : check(`unit.${unit.unit}`, title, "hard", "pass", judged.kind === "github-app" ? "reached by the platform's GitHub App; its packages read with the organisation's packages reader" : "its organisation's repository PAT; its packages read with the organisation's packages reader")];
+      : check(`unit.${unit.unit}`, title, "hard", "pass", judged.kind === "github-app" ? "reached by the platform's GitHub App; its packages read with the owner's packages reader" : "its owner's repository PAT; its packages read with the owner's packages reader")];
   }
   const d = deps();
   const github = d?.ports.github;

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { OrganisationCredentialView, OrganisationIdentityView } from "../../../shared/api-types-organisations.ts";
-import { listOrganisations, recordOrganisationCredential, forgetOrganisationCredential } from "../api.ts";
+import type { OwnerCredentialView, OwnerIdentityView } from "../../../shared/api-types-owners.ts";
+import { listOwners, recordOwnerCredential, forgetOwnerCredential } from "../api.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -17,12 +17,12 @@ type Which = "packages-reader" | "repository-pat";
  * token is measured against GitHub before it is sealed, and only its fingerprint ever comes back.
  */
 export function Settings() {
-  const [owners, setOwners] = useState<OrganisationIdentityView[] | null>(null);
+  const [owners, setOwners] = useState<OwnerIdentityView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function refresh(): void {
-    listOrganisations()
-      .then((r) => setOwners(r.organisations))
+    listOwners()
+      .then((r) => setOwners(r.owners))
       .catch((e: unknown) => setError(msg(e)));
   }
   useEffect(refresh, []);
@@ -58,7 +58,7 @@ export function Settings() {
   );
 }
 
-function OwnerCard(props: { entry: OrganisationIdentityView; onChanged: () => void; onError: (m: string | null) => void }) {
+function OwnerCard(props: { entry: OwnerIdentityView; onChanged: () => void; onError: (m: string | null) => void }) {
   const { entry } = props;
   return (
     <li className="card">
@@ -94,7 +94,7 @@ function OwnerCard(props: { entry: OrganisationIdentityView; onChanged: () => vo
   );
 }
 
-function CredentialRow(props: { org: string; which: Which; title: string; standing: OrganisationCredentialView | null; hint: string; absent: string; onChanged: () => void; onError: (m: string | null) => void }) {
+function CredentialRow(props: { org: string; which: Which; title: string; standing: OwnerCredentialView | null; hint: string; absent: string; onChanged: () => void; onError: (m: string | null) => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [formKey, setFormKey] = useState(0);
@@ -104,7 +104,7 @@ function CredentialRow(props: { org: string; which: Which; title: string; standi
     setBusy(true);
     props.onError(null);
     try {
-      await recordOrganisationCredential(props.org, props.which, token.trim());
+      await recordOwnerCredential(props.org, props.which, token.trim());
       setToken("");
       setFormKey((k) => k + 1);
       props.onChanged();
@@ -118,7 +118,7 @@ function CredentialRow(props: { org: string; which: Which; title: string; standi
     setBusy(true);
     props.onError(null);
     try {
-      await forgetOrganisationCredential(props.org, props.which);
+      await forgetOwnerCredential(props.org, props.which);
       props.onChanged();
     } catch (err) {
       props.onError(msg(err));

@@ -450,9 +450,9 @@ async function checkInstallOrder(platformRepo: PlatformRepo | undefined, runDefi
  * breaks lost, an installation id can name an installation the key does not sign for, and a
  * suspended installation looks exactly like a working one until a run asks. This asks at boot: one
  * read of the installation with the App's own JWT, which proves the key signs, the id resolves, and
- * names the organisation the installation is bound to — the organisation every plan holds the
- * catalog's `appsOrg` against. The organisation rides onto /readyz as the row's detail, so a person
- * reading it sees WHICH organisation this manager creates repositories in and not only that it can.
+ * names the owner the installation is bound to — the owner every plan holds the
+ * catalog's `appsOrg` against. The owner rides onto /readyz as the row's detail, so a person
+ * reading it sees WHICH owner this manager creates repositories in and not only that it can.
  *
  * DEGRADING, for the reason the checks above state: it reaches a REMOTE, and a GitHub that is down
  * must not take a Manager down with it.
@@ -551,7 +551,7 @@ export async function runAsyncSelfChecks(deps: { db: DbHandle; config: Config; p
  *  alarm on a configuration this platform supports. Its detail is said once, in the boot log.
  *
  *  A PASSING check's detail rides along, because that detail is what the check MEASURED — the
- *  organisation the GitHub App is installed in, the version the engine is pinned at — and /readyz
+ *  owner the GitHub App is installed in, the version the engine is pinned at — and /readyz
  *  is where a person asks a running Manager what it holds. A FAILING check's detail stays in the
  *  boot log: it is an error message that names files and literals, and /readyz is served before the
  *  chokepoint, to anyone. */

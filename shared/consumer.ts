@@ -13,7 +13,7 @@ import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
  *  (domains/units/first-master.ts). A second literal would let the two ask for different files. */
 export const CONSUMER_MANIFEST_PATH = "deploy/platform.yaml";
 
-/** A GitHub account name (a user or an organisation) as GitHub itself admits it: alphanumeric, a
+/** A GitHub account name (a user or an owner) as GitHub itself admits it: alphanumeric, a
  *  hyphen only between two alphanumerics, at most 39 characters. */
 export const GITHUB_ACCOUNT_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 
@@ -132,12 +132,12 @@ export const TenantSpecSchema = z.object({
     repo: gitRepoURL,
     builds: z.array(z.string().regex(/^[a-z0-9-]+$/)).min(1),
   })).default([]),
-  /** THE GITHUB ORGANISATION A TENANT'S OWN REPOSITORY IS CREATED IN, stated by the catalog because
+  /** THE GITHUB OWNER A TENANT'S OWN REPOSITORY IS CREATED IN, stated by the catalog because
    *  the catalog is the customer's: the platform's GitHub App is installed in exactly one
-   *  organisation (adapters/github-app installationOrg), and a plan whose catalog names another is
+   *  owner (adapters/github-app installationOrg), and a plan whose catalog names another is
    *  refused rather than creating a repository where the App has no rights. GitHub's own grammar for
    *  an account name: letters, digits and single hyphens between them, at most 39 characters. */
-  appsOrg: z.string().regex(GITHUB_ACCOUNT_RE, "appsOrg must be a GitHub organisation name: letters, digits and single hyphens, at most 39 characters").optional(),
+  appsOrg: z.string().regex(GITHUB_ACCOUNT_RE, "appsOrg must be a GitHub owner name: letters, digits and single hyphens, at most 39 characters").optional(),
   /** THE APPS TEMPLATE: the name and the repository of the apps bundle a tenant's own apps
    *  repository is COPIED from. `appsRepo` is read with the catalog's own credential; its `apps.yaml`
    *  is the app catalog the wizard offers and T4 judges (shared/apps-manifest.ts). The template is
@@ -192,7 +192,7 @@ export function tenantAppsTemplate(spec: Pick<TenantSpec, "appsBundle" | "appsRe
   return spec.appsBundle !== undefined && spec.appsRepo !== undefined ? { name: spec.appsBundle, repo: spec.appsRepo } : null;
 }
 
-/** The organisation the tenant repositories of this catalog are created in, or undefined where the
+/** The owner the tenant repositories of this catalog are created in, or undefined where the
  *  catalog states none — the ONE reader of `appsOrg`, so a run kind and a gate ask the same question
  *  the same way. Nothing reads it yet: the run kind that creates a tenant repository is the first. */
 export function tenantAppsOrg(spec: Pick<TenantSpec, "appsOrg">): string | undefined {

@@ -96,7 +96,7 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     const routing = { list: async () => ({ ...CATALOG, packageScopes: ["example-org", "shared"] }) };
     const asked = await serve({ registrations: registrationsWith(), appCatalog: routing });
     expect((await read(asked.app, asked.cookie)).body.packagesReader).toEqual({ owner: "example-org", scopes: ["example-org", "shared"], recorded: null });
-    seedCredentialRow(db.db, { id: "cred_pkg", kind: "pat", label: "packages reader (example-org)", subject: { kind: "organisation", id: "example-org" }, purpose: "packages-reader", fingerprint: "sha256:pkg" });
+    seedCredentialRow(db.db, { id: "cred_pkg", kind: "pat", label: "packages reader (example-org)", subject: { kind: "owner", id: "example-org" }, purpose: "packages-reader", fingerprint: "sha256:pkg" });
     const recorded = (await read(asked.app, asked.cookie)).body.packagesReader;
     expect(recorded?.recorded?.fingerprint).toBe("sha256:pkg");
     expect(recorded?.recorded?.recordedAt).toMatch(/^\d{4}-/);

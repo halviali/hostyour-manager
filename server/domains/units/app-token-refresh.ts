@@ -5,8 +5,8 @@
 // (boot/refresh-app-tokens-schedule.ts, once at boot too) and before every release the Manager
 // triggers for such a unit (onboard-seed-repo-pat.ts refreshRepoPatStep). A unit whose credential is
 // a PAT is rewritten on the same ticks (hostyour-manager#230): its `pat` does not expire, but the
-// `packages` beside it is the packages reader of its organisation, recorded and replaced on the
-// Organisations page, and an entry written once at the onboarding never learns of that — which is
+// `packages` beside it is the packages reader of its owner, recorded and replaced on the
+// Owners page, and an entry written once at the onboarding never learns of that — which is
 // how four PAT units stood on `cannot find secret data for key: "packages"` on the first installation.
 //
 // A REWRITE ALONE REACHES NO CLONE. The pipeline's clone task reads the Secret `build-git-https`
@@ -26,7 +26,7 @@ import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import type { ClusterReader } from "../../adapters/kube/port.ts";
 import type { Registrations } from "./registrations.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
-import { packagesReaderFor, type OrganisationIdentityReader } from "./repo-identity.ts";
+import { packagesReaderFor, type OwnerIdentityReader } from "./repo-identity.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import { appReachesRepoURL } from "./repo-identity.ts";
 
@@ -44,9 +44,9 @@ export const CATALOG_BUMP_UNIT = "catalog";
 
 export interface AppTokenRefreshDeps {
   store: Pick<CredentialStore, "list" | "open">;
-  /** The organisation identities (organisations.ts): the packages reader of a unit's organisation is
+  /** The owner identities (owners.ts): the packages reader of a unit's owner is
    *  written beside the App token on every rewrite — the entry is replaced whole. */
-  organisations: OrganisationIdentityReader;
+  owners: OwnerIdentityReader;
   registrations: Pick<Registrations, "listBuildRegistrations">;
   seeder: Pick<VaultSeeder, "refreshBuildRepoPat">;
   /** The catalog as configured (config.catalog): its bump entry is the Manager's to write from the
@@ -118,7 +118,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   const undeleted: string[] = [];
   for (const { unit, credentialId, repoURL } of units) {
     try {
-      await refreshUnitRepoPat(deps, unit, credentialId, packagesReaderFor(deps.organisations, repoURL), { purpose: "app-token-refresh" });
+      await refreshUnitRepoPat(deps, unit, credentialId, packagesReaderFor(deps.owners, repoURL), { purpose: "app-token-refresh" });
     } catch (err) {
       failed.push(unit);
       deps.logger.error({ unit, credentialId, err: err instanceof Error ? err.message : String(err) }, "the App token of this unit could not be rewritten into its build repo-pat — its next release clones with the value that stands, which dies an hour after it was minted");
@@ -139,7 +139,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   }
   if (undeleted.length > 0) deps.logger.warn({ units: undeleted }, "no kube is wired on this Manager, so the build Secrets of these units were not deleted after the rewrite — ESO keeps the Secrets it wrote before, and the next clone reads the old token");
   await refreshCatalogBumpToken(deps, buildUnits, refreshed, failed);
-  if (units.length > 0 || refreshed.includes(CATALOG_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "build repo-pat entries rewritten (App tokens minted now, PATs with their organisation's packages reader) and their build Secrets deleted");
+  if (units.length > 0 || refreshed.includes(CATALOG_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "build repo-pat entries rewritten (App tokens minted now, PATs with their owner's packages reader) and their build Secrets deleted");
   return { refreshed, failed };
 }
 

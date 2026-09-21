@@ -2,7 +2,7 @@ import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOrganisationCredential, type OnboardTargetView } from "../api.ts";
+import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOwnerCredential, type OnboardTargetView } from "../api.ts";
 import { OwnerCredentialStep } from "../components/OwnerCredentialStep.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -75,7 +75,7 @@ export function ConsumerOnboard() {
     setForm((f) => ({ ...f, consumerName: e.target.value }));
   };
 
-  // The check under the repository field: the organisation's identity lists the repository's release
+  // The check under the repository field: the owner's identity lists the repository's release
   // tags once and is not kept; what comes back is the version the onboarding will release, the place
   // it was read from, and which identity it is (#220).
   async function readRepository(): Promise<void> {
@@ -96,14 +96,14 @@ export function ConsumerOnboard() {
   // the repository is read again so the step disappears and the onboarding can be submitted.
   const readerMissing = prefill?.packagesReader !== undefined && prefill.packagesReader.recorded === null;
   const recordPackagesReader = async (owner: string, token: string): Promise<void> => {
-    await recordOrganisationCredential(owner, "packages-reader", token);
+    await recordOwnerCredential(owner, "packages-reader", token);
     setPrefill(await prefillOnboard({ repoURL: form.repoURL.trim() }));
   };
   // THE REPOSITORY PAT IS ASKED FOR WHERE THE APP DOES NOT REACH (#238): the check answers no
   // identity and names the owner; recorded, the repository is read again with it.
   const patMissing = prefill?.identity === "none" && prefill.repositoryPat !== undefined && prefill.repositoryPat.recorded === null;
   const recordRepositoryPat = async (owner: string, token: string): Promise<void> => {
-    await recordOrganisationCredential(owner, "repository-pat", token);
+    await recordOwnerCredential(owner, "repository-pat", token);
     setPrefill(await prefillOnboard({ repoURL: form.repoURL.trim() }));
   };
 

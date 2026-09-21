@@ -56,10 +56,10 @@ export class FakeGitHubConsumer implements GitHubConsumer {
    *  and asked with another token "unreadable" (readPackage). */
   readonly packages = new Map<string, string[]>();
   /** org → the tokens that read its packages (readOrgToken answers "reads" for them, "unreadable"
-   *  for any other token of a seeded organisation, "absent" for an organisation not seeded);
+   *  for any other token of a seeded owner, "absent" for an owner not seeded);
    *  `tokenInvalid` answers "invalid". The scopes half is `tokenScopes`, as readTokenScopes. */
   readonly orgPackageReaders = new Map<string, string[]>();
-  /** Every organisation readOrgToken was asked about, with the token — a test asserts the measurement. */
+  /** Every owner readOrgToken was asked about, with the token — a test asserts the measurement. */
   readonly orgReads: { org: string; token: string }[] = [];
 
   async readOrgToken(input: { org: string; token: string }): Promise<OrgTokenReading> {

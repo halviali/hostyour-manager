@@ -3,7 +3,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import { errNotConfigured, errValidation } from "../../kernel/errors.ts";
 import type { OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import { OnboardPrefillRequest, readOnboardPrefill } from "./onboard-prefill.ts";
-import { readOrganisationIdentity } from "./organisations.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import type { Db } from "../../db/client.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { ReleaseVersionDeps } from "./release-version.ts";
@@ -26,7 +26,7 @@ export function registerOnboardPrefillRoute(app: Hono<AppEnv>, deps: OnboardPref
     if (!onboardingEnabled || !github) throw errNotConfigured("onboarding is not configured on this manager — the gate-runner and git/kube/vault adapters must be wired first");
     const parsed = OnboardPrefillRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) throw errValidation(`invalid onboard prefill request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    const view = await readOnboardPrefill({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), ...(githubApp ? { githubApp } : {}), organisations: (org) => readOrganisationIdentity(db, org), store }, parsed.data, c.req.raw.signal);
+    const view = await readOnboardPrefill({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), ...(githubApp ? { githubApp } : {}), owners: (org) => readOwnerIdentity(db, org), store }, parsed.data, c.req.raw.signal);
     return c.json(view satisfies OnboardPrefillView);
   });
 }

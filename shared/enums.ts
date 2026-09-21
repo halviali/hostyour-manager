@@ -342,10 +342,10 @@ export const CREDENTIAL_KIND = ["ssh_key", "pat", "kubeconfig", "other", "github
 export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 
 // WHOSE a credential is (hostyour-manager#225): a server's (the machine the Manager reaches), an
-// organisation's (its packages reader, its repository PAT), a unit's (the identity a consumer or a
+// owner's (its packages reader, its repository PAT), a unit's (the identity a consumer or a
 // tenant's build unit was onboarded under). The subject id is the server's row id, the
-// organisation's login as GitHub spells it, the unit's name.
-export const CREDENTIAL_SUBJECT = ["server", "organisation", "unit"] as const;
+// owner's login as GitHub spells it, the unit's name.
+export const CREDENTIAL_SUBJECT = ["server", "owner", "unit"] as const;
 export type CredentialSubjectKind = (typeof CREDENTIAL_SUBJECT)[number];
 
 // WHAT a credential is for — the closed vocabulary a reader asks by, never a label to parse:
@@ -353,9 +353,9 @@ export type CredentialSubjectKind = (typeof CREDENTIAL_SUBJECT)[number];
 //   bootstrap-password  a server's first-login password, purged once the key stands (kind other)
 //   cluster-bearer      a slave cluster's ArgoCD bearer for the Manager (kind kubeconfig)
 //   reviewer-jwt        a slave cluster's Vault reviewer JWT (kind other)
-//   packages-reader     an organisation's token that reads its private npm packages (kind pat)
-//   repository-pat      an organisation's repository PAT where the App is not installed (kind pat)
-//   repository-identity a unit's own repository identity: the App's row or the organisation PAT
+//   packages-reader     an owner's token that reads its private npm packages (kind pat)
+//   repository-pat      an owner's repository PAT where the App is not installed (kind pat)
+//   repository-identity a unit's own repository identity: the App's row or the owner PAT
 //                       sealed under the unit's name (kind github-app | pat)
 export const CREDENTIAL_PURPOSE = ["ssh-key", "bootstrap-password", "cluster-bearer", "reviewer-jwt", "packages-reader", "repository-pat", "repository-identity"] as const;
 export type CredentialPurpose = (typeof CREDENTIAL_PURPOSE)[number];
@@ -435,7 +435,7 @@ export const RUN_KIND = [
   "consumer-backup", "consumer-restore", "consumer-migrate",
   "tenant-backup", "tenant-restore", "tenant-migrate",
   "tenant-create", "tenant-add-app", "tenant-remove-app",       // tenant (multi-app) onboarding
-  // The tenant's OWN apps repository: created in the customer's organisation from the catalog's
+  // The tenant's OWN apps repository: created in the customer's owner from the catalog's
   // apps bundle with the chosen apps, registered build-only and built once — before create-tenant
   // mounts the image it produces. A run kind of its own because it acts on GitHub and the build
   // plane and never on the tenant's cluster, and because a standing tenant gains an app through it
@@ -509,7 +509,7 @@ export const EPHEMERAL_STREAM = "ephemeral" as const;
 /** What a run may emit: the three persisted streams, or the live-only one. */
 export type RunOutputStream = EventStream | typeof EPHEMERAL_STREAM;
 
-export const TARGET_KIND = ["server", "cluster", "app", "tenant", "credential", "organisation", "all", "self"] as const;
+export const TARGET_KIND = ["server", "cluster", "app", "tenant", "credential", "owner", "all", "self"] as const;
 export type TargetKind = (typeof TARGET_KIND)[number];
 
 // The mutexes a run can hold. `server` is derived from the plan's own targets (server/executor/locks.ts

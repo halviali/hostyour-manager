@@ -123,7 +123,7 @@ export const subdomain = z
  *  per-tenant image: the release pipeline's bump seeds a chart's pins file from the chart's own
  *  builds[] and rewrites only the entries that stand there. Declared once, for the registration
  *  and for the tenant-create params, which carry the first two — the plan derives them from the
- *  subdomain and the GitHub App's organisation, and the run reads the tag off the release it
+ *  subdomain and the GitHub App's owner, and the run reads the tag off the release it
  *  triggers. The REGISTRATION carries all three or none (`refineAppsBundle`): an image without its
  *  tag is nothing the engines can mount. The registration defaults `appsImage` and `appsImageTag`
  *  to the empty string when the tenant has none, so the tenants ApplicationSet may read both bare

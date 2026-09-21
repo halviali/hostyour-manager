@@ -1,4 +1,4 @@
-import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "./unit-size.ts";
 import { eq } from "drizzle-orm";
@@ -52,7 +52,7 @@ let db: DbHandle;
 // starts without it — and write-registration resolves the unit's ceiling against it. Seeding here is
 // what a running Manager has done long before an onboard reaches it; without it the run fails at
 // exactly that step, which is the correct behaviour and not what these tests are about.
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 /** The manifest every fixture onboards: one declared build, so gate G18's manifest half holds. */
@@ -156,8 +156,8 @@ const REQUEST = { consumerName: "acme", repoURL: "https://github.com/x/acme.git"
 
 async function sealPat(store: CredentialStore): Promise<string> {
   const ref = await store.seal({ kind: "pat", label: "repository PAT (acme)", plaintext: Buffer.from("github_pat_journey", "utf8"), fingerprint: "sha256:test", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity" });
-  // The organisation's packages reader, a real row the seed step opens beside the unit's token (#220).
-  await store.seal({ kind: "pat", label: "packages reader (x)", plaintext: Buffer.from("ghp_packages_x", "utf8"), fingerprint: "sha256:pkg", subject: { kind: "organisation", id: "x" }, purpose: "packages-reader" });
+  // The owner's packages reader, a real row the seed step opens beside the unit's token (#220).
+  await store.seal({ kind: "pat", label: "packages reader (x)", plaintext: Buffer.from("ghp_packages_x", "utf8"), fingerprint: "sha256:pkg", subject: { kind: "owner", id: "x" }, purpose: "packages-reader" });
   return ref.id;
 }
 

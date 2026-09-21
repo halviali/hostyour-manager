@@ -293,7 +293,7 @@ describe("consumerArgocdUrl", () => {
   });
 });
 
-describe("TenantSpecSchema appsOrg (the organisation a tenant's own repository is created in)", () => {
+describe("TenantSpecSchema appsOrg (the owner a tenant's own repository is created in)", () => {
   // The smallest valid tenant block: one member carrying the IdP flag and the two per-app sources.
   const spec = (over: Record<string, unknown> = {}): unknown => ({
     members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
@@ -307,7 +307,7 @@ describe("TenantSpecSchema appsOrg (the organisation a tenant's own repository i
     expect(tenantAppsOrg(parsed)).toBeUndefined();
   });
 
-  it("carries a GitHub organisation name through, and the ONE reader answers it", () => {
+  it("carries a GitHub owner name through, and the ONE reader answers it", () => {
     expect(tenantAppsOrg(TenantSpecSchema.parse(spec({ appsOrg: "example-org" })))).toBe("example-org");
   });
 

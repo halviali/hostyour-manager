@@ -80,7 +80,7 @@ export const TEMPLATE_FILES: Record<string, string> = {
 };
 
 /** The three lines a test catalog's `tenant:` block carries so a tenant WITH apps can be planned:
- *  the organisation the App is installed in, the template's build name and its repository. */
+ *  the owner the App is installed in, the template's build name and its repository. */
 export const TEMPLATE_SPEC = `  appsOrg: ${ORG}\n  appsBundle: example-apps\n  appsRepo: ${TEMPLATE_URL}\n`;
 
 /** The tag the plan renders the unbuilt bundle at — `global.placeholderTag` off the chain. */
@@ -102,14 +102,14 @@ export function withAppsTemplate(ports: TenantOnboardPorts, files: Record<string
   };
 }
 
-/** The organisation identities a tenant test stands on (#220, #225): the App's organisation ORG
+/** The owner identities a tenant test stands on (#220, #225): the App's owner ORG
  *  records its packages reader (the App reaches every repository of it); `acme` — the owner of the
  *  test catalog's build repositories, which the App does not reach — and `x`, the owner of the
  *  consumer tests' repository, record a packages reader and a repository PAT. Rows of the store
  *  with stable ids, opening to `token-of-<id>` under a real store. */
-export function recordTestOrganisations(db: Db): void {
+export function recordTestOwners(db: Db): void {
   const pat = (id: string, org: string, purpose: "packages-reader" | "repository-pat"): void =>
-    seedCredentialRow(db, { id, kind: "pat", label: `${purpose === "packages-reader" ? "packages reader" : "repository PAT"} (${org})`, subject: { kind: "organisation", id: org }, purpose });
+    seedCredentialRow(db, { id, kind: "pat", label: `${purpose === "packages-reader" ? "packages reader" : "repository PAT"} (${org})`, subject: { kind: "owner", id: org }, purpose });
   pat("cred_pkg_org", ORG, "packages-reader");
   pat("cred_pkg_acme", "acme", "packages-reader");
   pat("cred_pat_acme", "acme", "repository-pat");

@@ -10,9 +10,9 @@ const now = sql`(unixepoch('subsec') * 1000)`;
 // reads the rows written under the previous one.
 //
 // EVERY ROW HAS AN OWNER AND A PURPOSE (hostyour-manager#225): `subject_kind` + `subject_id` say
-// whose the credential is — a server, an organisation, a unit — and `purpose` what it is for, a
+// whose the credential is — a server, an owner, a unit — and `purpose` what it is for, a
 // closed vocabulary (shared/enums.ts CREDENTIAL_PURPOSE). A reader asks by subject and purpose,
-// never by parsing a label: the label is what a person reads. The organisation's two credentials
+// never by parsing a label: the label is what a person reads. The owner's two credentials
 // (its packages reader, its repository PAT) are rows here and nothing else — the table of ids that
 // once held them (organisation_identities, #219) went with this column pair. The subject is no
 // foreign key: a server's row is taken with the server (inventory), a unit's with the unit, and the
@@ -22,7 +22,7 @@ export const credentials = sqliteTable("credentials", {
   kind: text("kind", { enum: CREDENTIAL_KIND }).notNull(),
   label: text("label").notNull(),
   subjectKind: text("subject_kind", { enum: CREDENTIAL_SUBJECT }).notNull(),
-  subjectId: text("subject_id").notNull(),                         // the server's id, the organisation's login, the unit's name
+  subjectId: text("subject_id").notNull(),                         // the server's id, the owner's login, the unit's name
   purpose: text("purpose", { enum: CREDENTIAL_PURPOSE }).notNull(),
   encryptedBlob: text("encrypted_blob").notNull(),
   fingerprint: text("fingerprint").notNull(),                      // public, non-secret identifier

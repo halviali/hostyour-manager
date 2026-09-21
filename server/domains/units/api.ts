@@ -5,7 +5,7 @@ import type { Executor } from "../../executor/executor.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import { resolveRepoIdentity, sealRepoIdentity } from "./repo-identity.ts";
-import { readOrganisationIdentity } from "./organisations.ts";
+import { readOwnerIdentity } from "./owners.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type TenantStatus, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
@@ -272,13 +272,13 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     if (!parsed.success) throw errValidation(`invalid onboard request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     // The repository's identity is chosen and sealed BEFORE the run exists: planStreamed persists
     // its raw params verbatim (params_json), so only the sealed reference may enter the executor.
-    // The identity is the organisation's (repo-identity.ts, #220): the App where its installation
-    // reaches the repository, else the organisation's repository PAT where recorded, else a refusal
-    // naming both; and the organisation's packages reader must stand, or the build could install no
+    // The identity is the owner's (repo-identity.ts, #220): the App where its installation
+    // reaches the repository, else the owner's repository PAT where recorded, else a refusal
+    // naming both; and the owner's packages reader must stand, or the build could install no
     // private package. Fail-closed: a seal failure is a thrown error, no run is created.
     const req = parsed.data;
     if (!github) throw errNotConfigured("onboarding is not configured on this manager — the GitHub client that reads a repository's release tags is not wired");
-    const identity = await resolveRepoIdentity({ repoURL: req.repoURL, githubApp, organisations: (org) => readOrganisationIdentity(db, org), store, signal: c.req.raw.signal });
+    const identity = await resolveRepoIdentity({ repoURL: req.repoURL, githubApp, owners: (org) => readOwnerIdentity(db, org), store, signal: c.req.raw.signal });
     // The version the onboarding releases: the next number after the release tags, read with the
     // identity's token before it is sealed. Nobody types it, so no onboarding can name a release that
     // already stands at another commit (hostyour-manager#139).

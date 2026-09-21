@@ -161,7 +161,7 @@ describe("github-app adapter — createRepository", () => {
     expect((err as GitHubAppError).message).toMatch(/too long/);
   });
 
-  it("surfaces a 404 — the organisation the App is not installed in — with the status", async () => {
+  it("surfaces a 404 — the owner the App is not installed in — with the status", async () => {
     const stub = stubFetch({ ...TOKEN_ROUTE, "POST /orgs/other-org/repos": { status: 404, body: { message: "Not Found" } } });
     const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
     const err = await client.createRepository({ ...input, org: "other-org" }).catch((e: unknown) => e);

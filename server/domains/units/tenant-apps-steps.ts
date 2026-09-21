@@ -33,7 +33,7 @@ import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } f
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { refreshRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { mergeAppsManifest, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
-import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OrganisationIdentityReader } from "./repo-identity.ts";
+import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "./repo-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
 
 const repoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
@@ -43,7 +43,7 @@ export const NO_GITHUB_APP = "this Manager holds no GitHub App identity: set GIT
 
 /** The four facts a plan resolves about the tenant's apps unit and both run kinds freeze. */
 export const TenantAppsUnitSchema = z.object({
-  // The organisation the App is installed in — the catalog's `tenant.appsOrg` where it names one,
+  // The owner the App is installed in — the catalog's `tenant.appsOrg` where it names one,
   // held equal to the installation's at the plan. The repository is `<org>/<bundle>-<subdomain>`.
   org: z.string().min(1),
   // The template: the catalog's `tenant.appsRepo` and `tenant.appsBundle` — the repository the tree
@@ -127,7 +127,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
  *  it (null where the catalog declares none) and has checked the App is wired. */
 export async function resolveTenantAppsUnit(
   ports: TenantOnboardPorts,
-  input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; organisations: OrganisationIdentityReader; signal: AbortSignal; log: (line: string) => void },
+  input: { subdomain: string; chosen: readonly string[]; spec: TenantSpec | null; owners: OwnerIdentityReader; signal: AbortSignal; log: (line: string) => void },
 ): Promise<{ outcome: "resolved"; unit: TenantAppsUnit } | { outcome: "refused"; why: string }> {
   const refuse = (why: string) => ({ outcome: "refused" as const, why });
   if (!input.spec) return refuse(`the catalog ${ports.catalogRepoUrl} declares no tenant fan-out in ${TENANT_MANIFEST_PATH} on ${ports.registrations.branch}`);
@@ -137,16 +137,16 @@ export async function resolveTenantAppsUnit(
   if (!template) return refuse(`the catalog declares no tenant.appsBundle and tenant.appsRepo in ${TENANT_MANIFEST_PATH} — the template a tenant's repository is created from`);
   const unit = tenantAppsUnit(template.name, input.subdomain);
   if (!consumerName.safeParse(unit).success) return refuse(`"${unit}" is not a unit name (lower-case letters, digits and hyphens, at most 40 characters) — choose a shorter subdomain`);
-  input.log(`template ${template.repo} (${template.name}), organisation ${org}, repository ${tenantAppsRepoURL(org, template.name, input.subdomain)}`);
+  input.log(`template ${template.repo} (${template.name}), owner ${org}, repository ${tenantAppsRepoURL(org, template.name, input.subdomain)}`);
   const read = await readTemplate(ports, template.repo, input.signal);
   let offered: string[];
   const unfolded: string[] = [];
   try {
     offered = parseAppsManifest(read.appsYaml).apps.map((a) => a.name);
     // The bundle's build installs what the template's .npmrc routes to GitHub Packages with the
-    // organisation's packages reader (#220, #221) — asked here, before anything is created.
+    // owner's packages reader (#220, #221) — asked here, before anything is created.
     const scopes = npmrcPackageScopes(read.npmrc);
-    if (scopes.length > 0 && !input.organisations(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes, ADD_APP_FORM));
+    if (scopes.length > 0 && !input.owners(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes, ADD_APP_FORM));
     for (const app of input.chosen) if (offered.includes(app) && !(await read.folders(app))) unfolded.push(app);
     if (!read.manifest.builds.some((b) => b.name === template.name)) return refuse(`${template.repo} declares no build named ${template.name} in its ${CONSUMER_MANIFEST_PATH} — the tenant's build takes its containerfile from that entry`);
   } finally {

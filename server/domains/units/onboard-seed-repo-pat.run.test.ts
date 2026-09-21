@@ -6,7 +6,7 @@
 import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { refreshRepoPatStep, seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { BuildOnlyOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { BUILD_TARGET_SECRETS } from "./app-token-refresh.ts";
@@ -20,7 +20,7 @@ const SHA = "a".repeat(40);
 const NS = "acme-build";
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 const DELETES = BUILD_TARGET_SECRETS.map((name) => ({ op: "delete" as const, namespace: NS, name }));
 
@@ -38,7 +38,7 @@ function ctx(logs: string[], token = "ghs_minted_now"): StepCtx {
   const opened: string[] = [];
   return {
     runId: "run_onb", stepName: "refresh-repo-pat", db: db.db,
-    // The one credential opens to the token of the moment; the organisation's packages reader to its own.
+    // The one credential opens to the token of the moment; the owner's packages reader to its own.
     creds: { open: async (id: string) => { opened.push(id); return Buffer.from(id === "cred_pkg_x" ? "ghp_packages_x" : token, "utf8"); } } as unknown as StepCtx["creds"],
     params: params(), secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
@@ -126,12 +126,12 @@ describe("onboard refresh-repo-pat step", () => {
   });
 });
 
-// The packages reader is the build's business (#221): where the organisation records none, the
+// The packages reader is the build's business (#221): where the owner records none, the
 // repository's .npmrc decides — no scope routed to GitHub Packages seeds an empty packages value,
-// a routed scope refuses naming the organisation and the scopes.
+// a routed scope refuses naming the owner and the scopes.
 describe("onboard seed-repo-pat step — the packages reader where a scope is routed", () => {
-  it("seeds an empty packages value for a repository routing no scope, and refuses one routing a scope where the organisation records no reader", async () => {
-    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
+  it("seeds an empty packages value for a repository routing no scope, and refuses one routing a scope where the owner records no reader", async () => {
+    dropCredentialRows(db.db, { kind: "owner", id: "x" });
     const prt = ports();
     const logs: string[] = [];
     await seedRepoPatStep(prt, params()).run(ctx(logs, "ghs_repo"));
@@ -139,6 +139,6 @@ describe("onboard seed-repo-pat step — the packages reader where a scope is ro
     expect(logs.some((l) => l.includes("routes no scope to GitHub Packages — no packages reader needed"))).toBe(true);
     const routed = ports({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { ".npmrc": "@x:registry=https://npm.pkg.github.com\n" } }) });
     await expect(seedRepoPatStep(routed, params()).run(ctx([], "ghs_repo")))
-      .rejects.toThrow(/organisation x records no packages reader, and x\/acme installs private npm packages of @x from GitHub Packages .* consumer wizard/);
+      .rejects.toThrow(/owner x records no packages reader, and x\/acme installs private npm packages of @x from GitHub Packages .* consumer wizard/);
   });
 });

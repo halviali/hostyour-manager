@@ -3,7 +3,7 @@
 // readStandingHost). A collision with another cluster of this installation used to surface at
 // provision-dns — after seed-tenant-crypto had written the Vault entry, made the bucket and minted a
 // live key — and nothing took those back. Here it refuses the plan, before any write.
-import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "./unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -61,7 +61,7 @@ const CLEAN_DOCS: RenderedDoc[] = [
 ];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 /** Both clusters of one installation, each with its own A record — what readStandingHost judges against. */

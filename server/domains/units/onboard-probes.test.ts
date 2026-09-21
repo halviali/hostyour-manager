@@ -1,5 +1,5 @@
 import { dropCredentialRows } from "../../security/store.fixture.ts";
-import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
@@ -17,7 +17,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 
 const REPO = "https://github.com/x/acme.git";
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function params(over: Partial<OnboardParams> = {}): DeployableOnboardParams {
@@ -73,9 +73,9 @@ describe("probePackages — one private package per scope the repository routes 
   const LOCK = "packages:\n  '@acme/components@0.1.0':\n    resolution: {integrity: sha512-x}\n";
   const repo = () => new FakeRepoReader({ resolvedSha: SHA, files: { ".npmrc": NPMRC, "pnpm-lock.yaml": LOCK } });
 
-  // The token that reads is the organisation's packages reader (#220), opened by the id the
-  // organisation record names for the owner of the repository — never the unit's own credential.
-  it("passes where the organisation's packages reader reads the package, fails by name where it cannot, and refuses an organisation without one", async () => {
+  // The token that reads is the owner's packages reader (#220), opened by the id the
+  // owner record names for the owner of the repository — never the unit's own credential.
+  it("passes where the owner's packages reader reads the package, fails by name where it cannot, and refuses an owner without one", async () => {
     const github = new FakeGitHubConsumer();
     github.packages.set("@acme/components", ["ghp_packages_x"]);
     const opened: string[] = [];
@@ -85,15 +85,15 @@ describe("probePackages — one private package per scope the repository routes 
     github.packages.set("@acme/components", ["ghp_other"]);
     expect(await probePackages(ports({ github, repo: repo() }), params(), c))
       .toMatchObject([{ status: "fail", severity: "hard", detail: "@acme/components is not readable with the packages reader of x", hint: "record a packages reader of x that also reads @acme in the consumer wizard" }]);
-    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
-    expect(await probePackages(ports({ github, repo: repo() }), params(), c)).toMatchObject([{ id: "packages", status: "fail", detail: expect.stringContaining("organisation x records no packages reader, and x/acme installs private npm packages of @acme") }]);
+    dropCredentialRows(db.db, { kind: "owner", id: "x" });
+    expect(await probePackages(ports({ github, repo: repo() }), params(), c)).toMatchObject([{ id: "packages", status: "fail", detail: expect.stringContaining("owner x records no packages reader, and x/acme installs private npm packages of @acme") }]);
   });
   it("warns where the package is not published, and passes softly where no scope is routed there", async () => {
     const github = new FakeGitHubConsumer();
     expect(await probePackages(ports({ github, repo: repo() }), params(), ctx())).toMatchObject([{ status: "warn", detail: "@acme/components is not published there" }]);
     expect(await probePackages(ports({ github }), params(), ctx())).toMatchObject([{ id: "packages", status: "pass", severity: "soft", detail: "the repository routes no scope to GitHub Packages — no packages reader needed" }]);
     // ... and no reader is asked for either (#221).
-    dropCredentialRows(db.db, { kind: "organisation", id: "x" });
+    dropCredentialRows(db.db, { kind: "owner", id: "x" });
     expect(await probePackages(ports({ github }), params(), ctx())).toMatchObject([{ id: "packages", status: "pass", severity: "soft" }]);
   });
 });

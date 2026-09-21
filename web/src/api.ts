@@ -1,4 +1,4 @@
-import type { OrganisationsListView, OrganisationCredentialInput } from "../../shared/api-types-organisations.ts";
+import type { OwnersListView, OwnerCredentialInput } from "../../shared/api-types-owners.ts";
 import type { UnitCheck } from "../../shared/preflight.ts";
 import type {
   ClustersView, ReleasesView, RunView, ServerView, HealthView,
@@ -230,14 +230,14 @@ export const createOperatorKey = (input: { label: string; publicKey: string }): 
  *  still finds the key on a host — the removal run kind needs this row to name the line it deletes. */
 export const deleteOperatorKey = (id: string): Promise<unknown> => req(`/api/operator-keys/${id}`, { method: "DELETE" });
 
-/** The organisation identities (GET /api/organisations, server domains/units/organisations.ts): what
- *  every unit of an organisation is onboarded with. A credential is recorded with one PUT carrying
+/** The owner identities (GET /api/owners, server domains/units/owners.ts): what
+ *  every unit of an owner is onboarded with. A credential is recorded with one PUT carrying
  *  the token once; only its fingerprint comes back. */
-export const listOrganisations = (): Promise<OrganisationsListView> => req("/api/organisations");
-export const recordOrganisationCredential = (org: string, which: "packages-reader" | "repository-pat", token: string): Promise<unknown> =>
-  req(`/api/organisations/${encodeURIComponent(org)}/${which}`, { method: "PUT", body: JSON.stringify({ token } satisfies OrganisationCredentialInput) });
-export const forgetOrganisationCredential = (org: string, which: "packages-reader" | "repository-pat"): Promise<unknown> =>
-  req(`/api/organisations/${encodeURIComponent(org)}/${which}`, { method: "DELETE" });
+export const listOwners = (): Promise<OwnersListView> => req("/api/owners");
+export const recordOwnerCredential = (org: string, which: "packages-reader" | "repository-pat", token: string): Promise<unknown> =>
+  req(`/api/owners/${encodeURIComponent(org)}/${which}`, { method: "PUT", body: JSON.stringify({ token } satisfies OwnerCredentialInput) });
+export const forgetOwnerCredential = (org: string, which: "packages-reader" | "repository-pat"): Promise<unknown> =>
+  req(`/api/owners/${encodeURIComponent(org)}/${which}`, { method: "DELETE" });
 /** Put ONE key in ONE host's authorized_keys. One server per run on purpose: which hosts carry a key
  *  is a per-server state, so five that took it and a sixth that refused are five runs that succeeded
  *  and one that failed, each with its own log. */
@@ -306,11 +306,11 @@ export interface OnboardInput {
   clusterId?: string;
   owner: string;
   chartPath?: string;
-  // No credential rides the request: the unit's identity is its organisation's, recorded on the
-  // Organisations page and derived from the owner of the repository URL (#220).
+  // No credential rides the request: the unit's identity is its owner's, recorded on the
+  // Owners page and derived from the owner of the repository URL (#220).
 }
 /** What the wizard's "Check the repository" sends (POST /api/consumers/prefill): the repository,
- *  whose release tags are read once with the organisation's identity and not kept. */
+ *  whose release tags are read once with the owner's identity and not kept. */
 export interface OnboardPrefillInput {
   repoURL: string;
 }

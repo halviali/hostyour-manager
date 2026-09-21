@@ -318,7 +318,7 @@ describe("GitConsumerRepo", () => {
     "opens an EMPTY origin on master whatever branch the remote names for its unborn HEAD, and the first push creates master",
     async () => {
       // A repository the GitHub App just created: no commit, no branch, only the name of the branch
-      // the remote's organisation default would put a first push on. Named `trunk` so neither a local
+      // the remote's owner default would put a first push on. Named `trunk` so neither a local
       // init.defaultBranch nor the remote's own name can pass for the platform's (#216).
       const root = newRoot();
       git(root, "init", "-q", "--bare", "-b", "trunk", "origin.git");

@@ -14,7 +14,7 @@ import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 // registration, so the tenant is its platform alone again and the next add-app creates afresh.
 //
 // ONLY WHAT THE PLATFORM CREATED IS DELETED: the repository is deleted when it stands in the App's
-// own organisation under the bundle's unit name, which is exactly and only what create-repository
+// own owner under the bundle's unit name, which is exactly and only what create-repository
 // creates. A registration pointing anywhere else (the catalog's template, a repository the tenant
 // brought) names a repository this platform never made, and that one is left standing, said in the
 // log. Idempotent on a resume: a repository already gone answers deleted:false, a registration

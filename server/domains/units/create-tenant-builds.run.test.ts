@@ -27,7 +27,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, withAppsTemplate, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const SHA = "a".repeat(40);
@@ -88,7 +88,7 @@ const TRUNK_DOCS = withImages({ jobs: "0.2.0", engine: "0.4.0" });
 const BUILT_DOCS = withImages({ jobs: "0.1.0-stable-20260101000000-abc1234", engine: "0.4.0" });
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -197,7 +197,7 @@ describe("channelReaching — the highest channel whose ceiling admits the stage
   });
 });
 
-describe("create-tenant planStream — the build units and their organisation's identity (#220)", () => {
+describe("create-tenant planStream — the build units and their owner's identity (#220)", () => {
   it("lists a build unit per missing image's repository, asks nothing at approve, and places its steps before the tenant's writes", async () => {
     seedClusters();
     const prt = withAppsTemplate(ports({ registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }) }));
@@ -213,14 +213,14 @@ describe("create-tenant planStream — the build units and their organisation's 
     expect(names.indexOf(buildUnitStepName("example-jobs"))).toBeLessThan(names.indexOf("seed-tenant-crypto"));
     expect(names.indexOf("refresh-images")).toBe(names.indexOf("ensure-images") - 1);
   });
-  it("refuses, naming the organisation and the page, a build unit whose organisation records no identity", async () => {
+  it("refuses, naming the owner and the page, a build unit whose owner records no identity", async () => {
     seedClusters();
-    dropCredentialRows(db.db, { kind: "organisation", id: "acme" });
+    dropCredentialRows(db.db, { kind: "owner", id: "acme" });
     const prt = withAppsTemplate(ports({ registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }) }));
     const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
-    expect(result.summary).toMatch(/build unit example-jobs .* has no identity: .*organisation acme records no repository PAT .* consumer wizard/);
+    expect(result.summary).toMatch(/build unit example-jobs .* has no identity: .*owner acme records no repository PAT .* consumer wizard/);
   });
   it("a registered build-only unit is re-released with its stored credential and asks for nothing", async () => {
     seedClusters();
@@ -278,7 +278,7 @@ describe("create-tenant planStream — the build units and their organisation's 
 });
 
 describe("buildUnitStep — the consumer's build-only chain, run for one unit inside the tenant run", () => {
-  it("seals the organisation's repository PAT under the unit's name, resolves version and channel, registers the unit and watches its release", async () => {
+  it("seals the owner's repository PAT under the unit's name, resolves version and channel, registers the unit and watches its release", async () => {
     seedClusters();
     const buildPlane = new FakeBuildPlane();
     buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-1", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
@@ -299,8 +299,8 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     expect(logs.some((l) => l.includes("build unit example-jobs done"))).toBe(true);
   });
   // The rule of #220 on the tenant path: a unit the App reaches is sealed under the App, one it does
-  // not under its organisation's repository PAT, and one whose organisation records nothing refuses.
-  it("seals a unit the App reaches under the App, one it does not under the organisation's repository PAT, and refuses one of an unrecorded organisation", async () => {
+  // not under its owner's repository PAT, and one whose owner records nothing refuses.
+  it("seals a unit the App reaches under the App, one it does not under the owner's repository PAT, and refuses one of an unrecorded owner", async () => {
     seedClusters();
     const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false };
     const make = () => {
@@ -309,7 +309,7 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
       return onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }), buildPlane });
     };
     const reaching = new FakeGitHubApp();
-    reaching.org = "acme"; // the App is installed in the organisation of JOBS_REPO
+    reaching.org = "acme"; // the App is installed in the owner of JOBS_REPO
     const viaApp: { kind: string; label: string }[] = [];
     await buildUnitStep(() => ({ ports: make(), githubApp: reaching }), { guid: GUID, owner: "team-acme", stage: "prod" }, unit).run(ctx(params(), [], viaApp));
     expect(viaApp).toEqual([{ kind: "github-app", label: "GitHub App (example-jobs)" }]);
@@ -319,7 +319,7 @@ describe("buildUnitStep — the consumer's build-only chain, run for one unit in
     expect(viaPat).toEqual([{ kind: "pat", label: "repository PAT (example-jobs)" }]);
     const nobody = { unit: "x", repoURL: "https://github.com/nobody/x.git", images: ["x"], registered: false };
     await expect(buildUnitStep(() => ({ ports: make(), githubApp: elsewhere }), { guid: GUID, owner: "team-acme", stage: "prod" }, nobody).run(ctx(params(), [])))
-      .rejects.toThrow(/organisation nobody records no repository PAT/);
+      .rejects.toThrow(/owner nobody records no repository PAT/);
   });
   it("refuses when the consumer onboarding is not wired, naming it", async () => {
     seedClusters();

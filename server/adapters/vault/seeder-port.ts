@@ -46,10 +46,10 @@ export interface VaultSeedInput {
 export interface BuildRepoPatSeedInput {
   consumerName: string;
   /** The repository token (opened from the sealed store by the caller; never logged): the App's
-   *  installation token or the organisation's repository PAT — property `pat`, what the clone and
+   *  installation token or the owner's repository PAT — property `pat`, what the clone and
    *  the bump read. */
   pat: string;
-  /** The organisation's packages reader (opened the same way): property `packages`, what the
+  /** The owner's packages reader (opened the same way): property `packages`, what the
    *  build's `.npmrc` reads — an App token reads no private package (#220). */
   packages: string;
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "./unit-size.ts";
-import { recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { createPublicKey } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -24,7 +24,7 @@ let db: DbHandle;
 // starts without it — and write-registration resolves the unit's ceiling against it. Seeding here is
 // what a running Manager has done long before an onboard reaches it; without it the run fails at
 // exactly that step, which is the correct behaviour and not what these tests are about.
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); }); afterEach(() => { db.sqlite.close(); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); }); afterEach(() => { db.sqlite.close(); });
 
 const BASE = {
   consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "team-acme",
@@ -292,7 +292,7 @@ describe("onboard run definition", () => {
     const step = makeOnboardDef(prt).steps(p).find((s) => s.name === "seed-repo-pat")!;
     const logs: string[] = [];
     await step.run(ctx(p, "seed-repo-pat", logs, fakeCreds(opened)));
-    expect(opened).toEqual(["cred_pat", "cred_pkg_x"]); // the repository token, then the organisation's packages reader
+    expect(opened).toEqual(["cred_pat", "cred_pkg_x"]); // the repository token, then the owner's packages reader
     expect(logs.some((l) => l.includes("secret/build/acme/repo-pat"))).toBe(true);
     expect(logs.every((l) => !l.includes("github_pat_test"))).toBe(true);
     seeder.seedBuildRepoPat = async () => { throw new Error("vault build repo-pat put failed for secret/build/acme/repo-pat (403)"); };

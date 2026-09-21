@@ -53,7 +53,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -94,9 +94,9 @@ describe("openDb — migration phase + append-only invariants", () => {
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });
 
-  // An installation that stood on 0001 recorded an organisation's identity as ids in a table of its
+  // An installation that stood on 0001 recorded an owner's identity as ids in a table of its
   // own; 0003 turns those ids into the owner and purpose of the rows themselves (#225).
-  it("carries an organisation identity recorded under 0001 into the rows' own owner and purpose", () => {
+  it("carries an owner identity recorded under 0001 into the rows' own owner and purpose", () => {
     const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
     dirs.push(dir);
     const upTo0002 = join(dir, "up-to-0002");
@@ -116,9 +116,9 @@ describe("openDb — migration phase + append-only invariants", () => {
     const h = openDb(file);
     handles.push(h);
     expect(h.sqlite.prepare("SELECT id, subject_kind, subject_id, purpose FROM credentials ORDER BY id").all()).toEqual([
-      { id: "cred_pat", subject_kind: "organisation", subject_id: "digitaplatform", purpose: "repository-pat" },
-      { id: "cred_pkg", subject_kind: "organisation", subject_id: "digitaplatform", purpose: "packages-reader" },
-      { id: "cred_pkg_only", subject_kind: "organisation", subject_id: "acme-org", purpose: "packages-reader" },
+      { id: "cred_pat", subject_kind: "owner", subject_id: "digitaplatform", purpose: "repository-pat" },
+      { id: "cred_pkg", subject_kind: "owner", subject_id: "digitaplatform", purpose: "packages-reader" },
+      { id: "cred_pkg_only", subject_kind: "owner", subject_id: "acme-org", purpose: "packages-reader" },
     ]);
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]);
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");

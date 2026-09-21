@@ -233,7 +233,7 @@ export function buildTenantOnboarding(
     ...(objectStore ? { objectStore } : {}),
     onboard,
     buildUnitRegistration,
-    // Creates a tenant's own repository in the organisation the App is installed in. Absent ⇒ the run
+    // Creates a tenant's own repository in the owner the App is installed in. Absent ⇒ the run
     // kind that needs it refuses at the plan, naming the three config keys.
     githubApp,
   };

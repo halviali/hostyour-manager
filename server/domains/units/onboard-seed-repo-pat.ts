@@ -13,12 +13,12 @@ import { probePackages } from "./onboard-probes.ts";
 import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderFor, packagesReaderMissing } from "./repo-identity.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import type { StepCtx } from "../../executor/types.ts";
-import { readOrganisationIdentity } from "./organisations.ts";
+import { readOwnerIdentity } from "./owners.ts";
 
 /** The onboard `seed-repo-pat` step: write the unit's build entry secret/build/<name>/repo-pat on
  *  the LOCAL Vault with its TWO values (#220): property `pat`, the repository token the Manager
- *  clones with (the App's, or the organisation's repository PAT), read by the clone credential and
- *  the bump; property `packages`, the organisation's packages reader by the owner of the
+ *  clones with (the App's, or the owner's repository PAT), read by the clone credential and
+ *  the bump; property `packages`, the owner's packages reader by the owner of the
  *  repository URL, read by the build's `.npmrc` — an App token reads no private package. The
  *  manager runs on the build-plane cluster, so its own Vault IS the build plane's and there is no
  *  target-cluster resolution. Stage-free: one build plane, one entry per unit.
@@ -28,12 +28,12 @@ import { readOrganisationIdentity } from "./organisations.ts";
  *  rule on data holds, and the cas conflict is the existence proof. UNCONDITIONAL in both onboard
  *  forms and fail-closed: a failed write fails the run. The value is opened from the sealed store
  *  (never re-plumbed raw through params) and zeroed after the write. */
-/** The organisation's packages reader where the repository routes a scope to GitHub Packages (its
+/** The owner's packages reader where the repository routes a scope to GitHub Packages (its
  *  `.npmrc` at the pinned commit, read the way the packages probe reads it), null where it routes
- *  none — and a refusal, naming the organisation and the scopes, where a scope is routed and the
- *  organisation records no reader (#221). */
+ *  none — and a refusal, naming the owner and the scopes, where a scope is routed and the
+ *  owner records no reader (#221). */
 async function packagesReaderOrRefuse(ports: OnboardPorts, p: OnboardParams, ctx: StepCtx): Promise<string | null> {
-  const id = packagesReaderFor((org) => readOrganisationIdentity(ctx.db, org), p.repoURL);
+  const id = packagesReaderFor((org) => readOwnerIdentity(ctx.db, org), p.repoURL);
   if (id) return id;
   const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
   let scopes: string[];
@@ -53,7 +53,7 @@ async function packagesReaderOrRefuse(ports: OnboardPorts, p: OnboardParams, ctx
 export function seedRepoPatStep(ports: OnboardPorts, p: OnboardParams): Step {
   return {
     name: "seed-repo-pat",
-    title: "Seed the unit's repository token and its organisation's packages reader into the local build Vault",
+    title: "Seed the unit's repository token and its owner's packages reader into the local build Vault",
     // What the seeded packages reader will be asked to read by the build: one private package per scope.
     probe: (ctx) => probePackages(ports, p, ctx),
     run: async (ctx) => {

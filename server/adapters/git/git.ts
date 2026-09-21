@@ -531,7 +531,7 @@ export class GitConsumerRepo implements ConsumerRepo {
         if (!m?.[1]) {
           // An EMPTY repository — created a moment ago, no commit yet — advertises no HEAD to
           // ls-remote and carries no branch to fetch. Its unborn branch is whatever the remote's
-          // organisation default says (github.com: `main`), and that name is not ours: the first
+          // owner default says (github.com: `main`), and that name is not ours: the first
           // branch of a repository this platform creates is PRODUCT_BRANCH, checked out unborn so
           // the first commitPush creates it on the remote — an empty repository's first pushed
           // branch becomes its default (tenant-apps-repo writes a tenant's tree into the

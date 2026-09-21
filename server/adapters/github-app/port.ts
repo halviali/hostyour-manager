@@ -2,19 +2,19 @@
 // two GitHub ports beside it can do that: github-consumer carries a customer's own PAT per call and
 // github-platform the operator's write PAT for the platform repository, and a person's PAT inside an
 // operator run is the wrong identity for a repository the platform owns. The App is installed ONCE
-// in the organisation the tenant repositories live in, and its three-part identity (GITHUB_APP_ID,
+// in the owner the tenant repositories live in, and its three-part identity (GITHUB_APP_ID,
 // GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY) enters the installation like every platform
 // secret (kernel/config.ts githubApp). Kept a PORT so the run steps and the boot self-check depend on
 // the abstraction; the fetch impl is github-app-http.ts, the fake is testing/fake.ts.
 //
 // Two credentials, and only one of them leaves this adapter. The App's JWT, signed with the private
 // key, authenticates the App itself and reaches only the /app/* endpoints. The INSTALLATION TOKEN,
-// minted through that JWT and short-lived, is what acts inside the organisation — and it is the one
+// minted through that JWT and short-lived, is what acts inside the owner — and it is the one
 // the existing consumer port takes per call, so a run hands it on to ensureHook or dispatchWorkflow
 // on a repository the App created.
 
 export interface CreateRepositoryInput {
-  /** The organisation the repository is created in — the one the App is installed in
+  /** The owner the repository is created in — the one the App is installed in
    *  (installationOrg), or GitHub refuses the create. */
   org: string;
   name: string;
@@ -33,8 +33,8 @@ export interface GitHubApp {
    *  which a sealed `github-app` credential carries in place of a token's fingerprint, so an audit
    *  row names WHICH App acted. */
   identityFingerprint(): string;
-  /** The organisation this installation is bound to (GET /app/installations/{id} → account.login),
-   *  read once and kept — an installation does not move between organisations. What the readiness
+  /** The owner this installation is bound to (GET /app/installations/{id} → account.login),
+   *  read once and kept — an installation does not move between owners. What the readiness
    *  row names, and what a plan holds the catalog's own `appsOrg` against. */
   installationOrg(signal?: AbortSignal): Promise<string>;
   /** IDEMPOTENT create (POST /orgs/{org}/repos): {created:true} for a new repository, {created:false}
@@ -45,7 +45,7 @@ export interface GitHubApp {
   /** MEASURED, never inferred from an owner string: whether THIS installation reaches the repository
    *  (GET /repos/{owner}/{repo}/installation with the App's JWT answers the installation that covers
    *  it, or 404). True only when that installation is this one — the App installed in a second
-   *  organisation reaches that organisation's repositories with a token this Manager never mints.
+   *  owner reaches that owner's repositories with a token this Manager never mints.
    *  The rule every repository credential follows (#194): reached ⇒ the App is its identity and no
    *  PAT is asked; not reached ⇒ the repository's own PAT, exactly as before the App existed. */
   reachesRepository(input: { owner: string; repo: string; signal?: AbortSignal }): Promise<boolean>;

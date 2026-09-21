@@ -15,7 +15,7 @@ import type { GitHubApp } from "../adapters/github-app/port.ts";
 
 export type KeystoreMode = "plaintext" | "passphrase" | "keyfile" | "vault";
 
-/** Whose a credential is (hostyour-manager#225): the server's row id, the organisation's login, the unit's name. */
+/** Whose a credential is (hostyour-manager#225): the server's row id, the owner's login, the unit's name. */
 export interface CredentialSubject {
   kind: CredentialSubjectKind;
   id: string;
@@ -119,17 +119,17 @@ export function holdsManagerKey(db: Db, serverId: string): boolean {
 }
 
 /**
- * The identity of an organisation, as its standing credential rows say (hostyour-manager#225): the
+ * The identity of an owner, as its standing credential rows say (hostyour-manager#225): the
  * id of its packages reader and of its repository PAT, each the newest unrevoked row of that
  * purpose, null where none stands. The one read behind every identity rule (repo-identity.ts),
  * synchronous like holdsManagerKey and for the same reason — presence is metadata SQLite keeps in
  * every keystore mode, and a planner asks it before anyone approves.
  */
-export function organisationIdentity(db: Db, org: string): { packagesCredentialId: string | null; repoCredentialId: string | null } | null {
+export function ownerIdentity(db: Db, org: string): { packagesCredentialId: string | null; repoCredentialId: string | null } | null {
   const rows = db
     .select({ id: credentials.id, purpose: credentials.purpose })
     .from(credentials)
-    .where(and(eq(credentials.subjectKind, "organisation"), eq(credentials.subjectId, org), isNull(credentials.revokedAt)))
+    .where(and(eq(credentials.subjectKind, "owner"), eq(credentials.subjectId, org), isNull(credentials.revokedAt)))
     .orderBy(credentials.createdAt, credentials.id)
     .all();
   if (rows.length === 0) return null;
@@ -137,12 +137,12 @@ export function organisationIdentity(db: Db, org: string): { packagesCredentialI
   return { packagesCredentialId: newest("packages-reader"), repoCredentialId: newest("repository-pat") };
 }
 
-/** Every organisation with a standing credential row, for the Organisations page. */
-export function organisationsWithIdentity(db: Db): string[] {
+/** Every owner with a standing credential row, for the Owners page. */
+export function ownersWithIdentity(db: Db): string[] {
   const rows = db
     .selectDistinct({ org: credentials.subjectId })
     .from(credentials)
-    .where(and(eq(credentials.subjectKind, "organisation"), isNull(credentials.revokedAt)))
+    .where(and(eq(credentials.subjectKind, "owner"), isNull(credentials.revokedAt)))
     .all();
   return rows.map((r) => r.org).sort();
 }

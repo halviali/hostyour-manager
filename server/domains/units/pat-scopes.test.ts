@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { REQUIRED_CONSUMER_PAT_SCOPES, missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
 
 describe("consumer PAT scope contract", () => {
-  // read:packages is the organisation's packages reader's, never the repository token's (#220).
+  // read:packages is the owner's packages reader's, never the repository token's (#220).
   it("requires exactly repo + workflow + admin:repo_hook, in canonical order", () => {
     expect([...REQUIRED_CONSUMER_PAT_SCOPES]).toEqual(["repo", "workflow", "admin:repo_hook"]);
   });

@@ -21,7 +21,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { TEMPLATE_SPEC, withAppsTemplate, ORG, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, ORG, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
 
 const SHA = "a".repeat(40);
@@ -68,7 +68,7 @@ const CLEAN_DOCS = [NS_DOC, doc("Deployment")];
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and write-pointer resolves the tenant's ceiling against it.
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -347,7 +347,7 @@ describe("add-app streaming planner", () => {
 
   // An app added after the platform pulls images no earlier run had to build (#214): the plan
   // resolves a build unit per missing image's repository exactly as create-tenant does, with its
-  // organisation's identity (#220), and places the build ahead of the image gate.
+  // owner's identity (#220), and places the build ahead of the image gate.
   it("a missing image the tenant spec's buildRepos names becomes a build unit ahead of ensure-images, nothing asked at approve", async () => {
     seedClusters();
     const PLATFORM_REPO = "https://github.com/acme/example-platform.git";

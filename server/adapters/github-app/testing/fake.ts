@@ -1,5 +1,5 @@
 // In-memory GitHubApp fake for the run and boot tests — no network, no key. The token and the
-// organisation are scripted, the repositories are a set keyed `org/name` so createRepository is
+// owner are scripted, the repositories are a set keyed `org/name` so createRepository is
 // genuinely idempotent (a seeded or already created name answers {created:false}), and every create
 // that made a repository is recorded so a test can assert what a run created and where.
 import type { GitHubApp, CreateRepositoryInput } from "../port.ts";
@@ -7,7 +7,7 @@ import type { GitHubApp, CreateRepositoryInput } from "../port.ts";
 export class FakeGitHubApp implements GitHubApp {
   /** What installationToken answers — the value a test expects to see handed on as a per-call PAT. */
   token = "ghs_fake_installation_token";
-  /** What installationOrg answers — the organisation the fake installation is bound to. */
+  /** What installationOrg answers — the owner the fake installation is bound to. */
   org = "example-org";
   /** What identityFingerprint answers — what a sealed github-app credential carries. */
   fingerprint = "sha256:fakeappidentity0";
@@ -17,8 +17,8 @@ export class FakeGitHubApp implements GitHubApp {
   /** Every repository standing in the fake, as `org/name`. */
   private readonly repos = new Set<string>();
   /** What reachesRepository answers beyond the default: the default is every repository of `org`
-   *  (an installation on all repositories of its organisation) and no other; a test that needs a
-   *  repository outside the organisation reached, or one inside it not reached, sets it here. */
+   *  (an installation on all repositories of its owner) and no other; a test that needs a
+   *  repository outside the owner reached, or one inside it not reached, sets it here. */
   readonly reachable = new Map<string, boolean>();
   /** Only the calls that actually created a repository — not the idempotent-skip calls. */
   readonly created: CreateRepositoryInput[] = [];

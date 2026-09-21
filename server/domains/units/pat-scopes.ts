@@ -8,8 +8,8 @@
 //                      a workflow file without it)
 //   admin:repo_hook  — create the build webhook (push → Tekton)
 //
-// read:packages is NOT asked of it: the build's npm install authenticates with the organisation's
-// packages reader (build/<unit>/repo-pat#packages, organisations.ts), never with this token (#220).
+// read:packages is NOT asked of it: the build's npm install authenticates with the owner's
+// packages reader (build/<unit>/repo-pat#packages, owners.ts), never with this token (#220).
 //
 // This module is the SINGLE source of truth for that set. Without the preflight-scopes gate the scopes
 // are discovered REACTIVELY — the run fails at setup-webhook for a missing admin:repo_hook, then (once
@@ -37,7 +37,7 @@ export const CONSUMER_PAT_SCOPE_REASONS: Readonly<Record<ConsumerPatScope, strin
 // rejected. `repo` and `workflow` have no narrower equivalent that still works here, so each is only
 // satisfied by itself. A granted `repo` implies its OWN sub-scopes but NEVER `workflow` or
 // `admin:repo_hook` (both are separate top-level classic scopes), so membership is the right test.
-// The build's npm install is authenticated by the organisation's packages reader, never by this
+// The build's npm install is authenticated by the owner's packages reader, never by this
 // token (repo-identity.ts, #220), so read:packages is not asked of it.
 const SATISFIED_BY: Readonly<Record<ConsumerPatScope, readonly string[]>> = {
   repo: ["repo"],

@@ -122,12 +122,12 @@ export interface GitHubConsumer {
    *  401 (the PAT is invalid/expired) and GitHubConsumerError on any other transport/HTTP fault. A
    *  fine-grained token authenticates (2xx) but returns no header ⇒ {classic:false, scopes:[]}. */
   readTokenScopes(input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<TokenScopes>;
-  /** ONE read that measures a token AGAINST AN ORGANISATION (organisations.ts, #219): GET
+  /** ONE read that measures a token AGAINST AN OWNER (owners.ts, #219): GET
    *  /orgs/{org}/packages?package_type=npm with the token. The answer carries both facts an
-   *  organisation identity is judged on — the X-OAuth-Scopes header (a classic PAT's scopes, absent
+   *  owner identity is judged on — the X-OAuth-Scopes header (a classic PAT's scopes, absent
    *  on a fine-grained token, as readTokenScopes reads it) and whether the token reads the
-   *  organisation's packages: 200 ⇒ "reads" (classic read:packages or fine-grained Packages: Read),
-   *  403 ⇒ "unreadable" (a token without it), 404 ⇒ "absent" (no such organisation, or one the
+   *  owner's packages: 200 ⇒ "reads" (classic read:packages or fine-grained Packages: Read),
+   *  403 ⇒ "unreadable" (a token without it), 404 ⇒ "absent" (no such owner, or one the
    *  token cannot see), 401 ⇒ "invalid". Any other transport/HTTP fault throws GitHubConsumerError. */
   readOrgToken(input: { org: string; token: string; signal?: AbortSignal }): Promise<OrgTokenReading>;
   /** REPLACING create: list the repo's hooks, DELETE every one that targets the EventListener path

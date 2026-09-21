@@ -28,7 +28,7 @@ export function seedCredentialRow(db: Db, row: {
   }).run();
 }
 
-/** Takes every row of one subject away — what a test does to say "this organisation records
+/** Takes every row of one subject away — what a test does to say "this owner records
  *  nothing" or "this server holds no key". */
 export function dropCredentialRows(db: Db, subject: { kind: CredentialSubjectKind; id: string }): void {
   db.delete(credentials).where(and(eq(credentials.subjectKind, subject.kind), eq(credentials.subjectId, subject.id))).run();

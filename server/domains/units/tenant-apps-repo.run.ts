@@ -12,7 +12,7 @@ import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema, type TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
-import { readOrganisationIdentity } from "./organisations.ts";
+import { readOwnerIdentity } from "./owners.ts";
 
 // The "tenant-apps-repo" Run: the tenant's OWN apps repository for a STANDING tenant — the same
 // three steps tenant-create runs on the way (tenant-apps-steps.ts), between the build plane's
@@ -129,7 +129,7 @@ export function makeTenantAppsRepoDef(ports: TenantOnboardPorts): RunDefinition<
       const refuse = (why: string) => ({ outcome: "rejected" as const, summary: `The apps repository of tenant ${req.guid} ("${req.subdomain}") was refused — ${why}`, planJson: { subdomain: req.subdomain, apps: chosen } });
       if (!ports.githubApp) return refuse(NO_GITHUB_APP);
       const master = resolveMasterCluster(ctx.db);
-      const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen, spec: await readTenantSpec(ports, ctx), organisations: (org) => readOrganisationIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen, spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") return refuse(resolved.why);
       const unit = tenantAppsUnit(resolved.unit.templateBuild, req.subdomain);
       const params: TenantAppsRepoParams = {

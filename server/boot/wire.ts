@@ -43,8 +43,8 @@ import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
-import { registerOrganisationRoutes } from "../domains/units/api-organisations.ts";
-import { readOrganisationIdentity } from "../domains/units/organisations.ts";
+import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
+import { readOwnerIdentity } from "../domains/units/owners.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
 import { migrateRegistrations } from "../domains/units/registrations-migration.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
@@ -245,7 +245,7 @@ export async function wire(): Promise<Wired> {
   // The deletion after each rewrite reaches the build namespaces over the master-local cluster
   // reader: they stand on this cluster whatever cluster a unit targets.
   const refreshAppTokensLater = registrations
-    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, organisations: (org) => readOrganisationIdentity(db.db, org) }); }
+    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, owners: (org) => readOwnerIdentity(db.db, org) }); }
     : async (): Promise<void> => undefined;
   // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a
@@ -338,9 +338,9 @@ export async function wire(): Promise<Wired> {
       registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.catalogRepoUrl ? { catalogRepoUrl: units.catalogRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
-      // The organisation identities (#219): recorded here, derived per unit by every onboarding. The
+      // The owner identities (#219): recorded here, derived per unit by every onboarding. The
       // measurement rides the consumer client where it is wired; without it nothing can be recorded.
-      if (units.github) registerOrganisationRoutes(a, { db: db.db, store, github: units.github, githubApp, actor: runActor });
+      if (units.github) registerOwnerRoutes(a, { db: db.db, store, github: units.github, githubApp, actor: runActor });
       // One tenant's own catalog, read through the same closure tenant-add-app judges against.
       registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
       registerResetRoutes(a, {

@@ -52,7 +52,7 @@ describe("probeCatalog", () => {
 
 describe("probeAppsRepository", () => {
   const unit = { org: "example-org", templateRepoURL: "https://github.com/example-org/example-apps.git", bundle: "example-apps", subdomain: "acme" };
-  it("passes where the App is installed in the apps organisation and reaches the template; fails by name otherwise", async () => {
+  it("passes where the App is installed in the apps owner and reaches the template; fails by name otherwise", async () => {
     const githubApp = new FakeGitHubApp();
     expect(await probeAppsRepository(ports({ githubApp }), unit, ctx())).toMatchObject([
       { id: "apps.org", status: "pass", detail: "the platform's GitHub App is installed in example-org" },
@@ -67,18 +67,18 @@ describe("probeAppsRepository", () => {
 
 describe("probeBuildUnit", () => {
   const base = { unit: "example-jobs", repoURL: "https://github.com/example-org/example-jobs.git", images: ["example-jobs"], registered: false };
-  // The organisation's identity, judged (#220): the App where it reaches, the organisation's
-  // repository PAT else, a refusal naming the organisation where it records nothing.
-  it("judges an unregistered unit's identity: the App where it reaches, the organisation's repository PAT else, a refusal where the organisation records nothing", async () => {
-    seedCredentialRow(db.db, { id: "cred_pkg", kind: "pat", label: "packages reader (example-org)", subject: { kind: "organisation", id: "example-org" }, purpose: "packages-reader" });
+  // The owner's identity, judged (#220): the App where it reaches, the owner's
+  // repository PAT else, a refusal naming the owner where it records nothing.
+  it("judges an unregistered unit's identity: the App where it reaches, the owner's repository PAT else, a refusal where the owner records nothing", async () => {
+    seedCredentialRow(db.db, { id: "cred_pkg", kind: "pat", label: "packages reader (example-org)", subject: { kind: "owner", id: "example-org" }, purpose: "packages-reader" });
     const githubApp = new FakeGitHubApp();
-    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "reached by the platform's GitHub App; its packages read with the organisation's packages reader" }]);
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "reached by the platform's GitHub App; its packages read with the owner's packages reader" }]);
     githubApp.reachable.set("example-org/example-jobs", false);
     expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("records no repository PAT") }]);
-    seedCredentialRow(db.db, { id: "cred_pat", kind: "pat", label: "repository PAT (example-org)", subject: { kind: "organisation", id: "example-org" }, purpose: "repository-pat" });
-    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "its organisation's repository PAT; its packages read with the organisation's packages reader" }]);
-    dropCredentialRows(db.db, { kind: "organisation", id: "example-org" });
-    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("organisation example-org records no repository PAT") }]);
+    seedCredentialRow(db.db, { id: "cred_pat", kind: "pat", label: "repository PAT (example-org)", subject: { kind: "owner", id: "example-org" }, purpose: "repository-pat" });
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "pass", detail: "its owner's repository PAT; its packages read with the owner's packages reader" }]);
+    dropCredentialRows(db.db, { kind: "owner", id: "example-org" });
+    expect(await probeBuildUnit(() => undefined, ports({ githubApp }), p(), base as BuildUnit, ctx())).toMatchObject([{ status: "fail", detail: expect.stringContaining("owner example-org records no repository PAT") }]);
   });
   it("a registered unit's stored credential reads the hooks; without admin:repo_hook it fails by name", async () => {
     const github = new FakeGitHubConsumer();

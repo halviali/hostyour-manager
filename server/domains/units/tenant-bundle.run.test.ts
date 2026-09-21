@@ -36,7 +36,7 @@ import { unitBuildNamespace } from "./build-rbac.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
 import { APP_OVERLAYS, STANDING_MEMBER_NAMES as TEST_MEMBERS, TEST_BUNDLE, testMembers } from "./tenant-members.fixture.ts";
-import { ORG, PLACEHOLDER_TAG as PLACEHOLDER, SHA, TEMPLATE_MANIFEST, TEMPLATE_SPEC, TEMPLATE_URL, TENANT_URL, UNIT, withAppsTemplate, recordTestOrganisations } from "./tenant-apps-repo.fixture.ts";
+import { ORG, PLACEHOLDER_TAG as PLACEHOLDER, SHA, TEMPLATE_MANIFEST, TEMPLATE_SPEC, TEMPLATE_URL, TENANT_URL, UNIT, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
 const GUID = "zsjs023ctne0";
@@ -85,7 +85,7 @@ const withBundle = (tag: string): RenderedDoc[] => [
 const CHAIN = [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${HOST}\n` }];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOrganisations(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -211,7 +211,7 @@ describe("tenant-create planStream — the bundle derived, and the apps-repo ste
     expect(names.indexOf("refresh-images")).toBe(names.indexOf("ensure-images") - 1);
     expect(names).toEqual(makeCreateTenantDef(ports()).steps(result.params).map((s) => s.name));
   });
-  it("derives appsRepo and appsImage from the subdomain and the App's organisation, freezes the unit's facts and never a tag, and names the repository and the apps in the summary", async () => {
+  it("derives appsRepo and appsImage from the subdomain and the App's owner, freezes the unit's facts and never a tag, and names the repository and the apps in the summary", async () => {
     seedClusters();
     const result = await planned(ports());
     expect(result.params).toMatchObject({ appsRepo: TENANT_URL, appsImage: UNIT, appsUnit: { org: ORG, templateRepoURL: TEMPLATE_URL, templateBuild: "example-apps", registered: false } });
@@ -235,7 +235,7 @@ describe("tenant-create planStream — the bundle derived, and the apps-repo ste
     const summary = await refused(bare());
     for (const key of ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"]) expect(summary).toContain(key);
   });
-  it("refuses a catalog that names no template, and one whose appsOrg is not the App's organisation", async () => {
+  it("refuses a catalog that names no template, and one whose appsOrg is not the App's owner", async () => {
     seedClusters();
     expect(await refused(ports({}, catalogManifest("")))).toMatch(/declares no tenant\.appsBundle and tenant\.appsRepo/);
     const other = ports();
@@ -291,7 +291,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     // webhook and the dispatch each opened it to the token the App mints — nothing stored.
     expect(creds.seals).toEqual([{ id: "cred_1", kind: "github-app", label: `GitHub App (${UNIT})`, plaintext: "" }]);
     expect((await onboard.registrations.readBuildRegistration(UNIT))?.entry).toMatchObject({ repoCredentialId: "cred_1", repoURL: TENANT_URL });
-    expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass", packages: "ghp_test" }]); // the organisation's packages reader opens to the store's fallback
+    expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass", packages: "ghp_test" }]); // the owner's packages reader opens to the store's fallback
     expect((onboard.github as FakeGitHubConsumer).created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect((onboard.github as FakeGitHubConsumer).dispatches.map((d) => ({ repo: d.repo, token: d.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect(buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);

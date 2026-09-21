@@ -7,7 +7,7 @@
 //
 // THE PLATFORM'S OWN LINE. Rules §17: every repository of the platform stands on ONE sequence, the
 // highest third number used anywhere is read before a release is cut. So a unit from the platform's
-// own GitHub organisation reads its next number over the whole line — its own repository, the
+// own GitHub owner reads its next number over the whole line — its own repository, the
 // platform repository and the engine's (clusters/platform/versions.yaml names it) — and a customer's
 // unit reads its own tags only.
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
@@ -18,7 +18,7 @@ import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 
 export interface ReleaseVersionDeps {
   github: GitHubConsumer;
-  /** The platform repository on GitHub — the organisation that decides who stands on the platform's
+  /** The platform repository on GitHub — the owner that decides who stands on the platform's
    *  line. Absent when the platform repo is not configured: every unit then reads its own tags only. */
   platformGitHub?: { owner: string; repo: string };
   /** The platform repo reader, for the engine's repository named in versions.yaml. */
