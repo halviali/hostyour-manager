@@ -205,8 +205,9 @@ export interface TenantLifecyclePorts {
    *  where a repository is recorded: absent ⇒ the step fails loud, never a silent skip. */
   githubApp?: GitHubApp;
   /** The build registrations (registrations/<unit>/build.yaml) the bundle's build-only onboarding
-   *  wrote — its removal goes with the repository. Optional and said when absent. */
-  buildRegistrations?: Pick<Registrations, "removeBuildRegistration">;
+   *  wrote — its removal goes with the repository, and the orphan purge (#241) reads them to say
+   *  which one nothing accounts for. Optional and said when absent. */
+  buildRegistrations?: Pick<Registrations, "removeBuildRegistration" | "readBuildRegistration" | "readUnitStages" | "listBuildRegistrations" | "branch">;
 }
 
 /** A tenant + its cluster context, resolved from the tenants row (tnt_) and its clusters row. The

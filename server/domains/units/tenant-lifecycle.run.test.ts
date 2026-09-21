@@ -272,7 +272,7 @@ describe("remove-app run", () => {
     githubApp.org = "acme-org";
     githubApp.seedRepository("acme-org", "example-apps-simetrix");
     const removedUnits: string[] = [];
-    const prt = ports(reg, { githubApp, buildRegistrations: { removeBuildRegistration: async (name) => { removedUnits.push(name); return { removed: true }; } } });
+    const prt = ports(reg, { githubApp, buildRegistrations: { removeBuildRegistration: async (name: string) => { removedUnits.push(name); return { removed: true }; } } as unknown as NonNullable<TenantLifecyclePorts["buildRegistrations"]> });
     const logs: string[] = [];
     await runAll(makeRemoveAppDef(prt).steps({ tenantId: "tnt_1", app: "web" }), "run_rma", { tenantId: "tnt_1", app: "web" }, logs);
     expect(githubApp.deleted).toEqual([]);

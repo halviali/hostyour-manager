@@ -69,7 +69,7 @@ import { resolveClusterIdByName } from "./tenant-values.ts";
  *  catalog cannot be read at all — the route turns that into a visible, fail-soft "the scan itself
  *  failed", which must never be flattened into an empty result (that would read as "no orphans", the
  *  exact opposite of the truth). */
-export async function scanOrphanTenants(deps: { db: Db; registrations: TenantRegistrations; resolver?: ClusterKubeResolver }): Promise<OrphanScan> {
+export async function scanOrphanTenants(deps: { db: Db; registrations: TenantRegistrations; resolver?: ClusterKubeResolver }): Promise<Pick<OrphanScan, "orphans" | "skipped">> {
   const { db, registrations } = deps;
   const found: OrphanTenantView[] = [];
   const skipped: SkippedTenantPointerView[] = [];

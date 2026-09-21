@@ -38,6 +38,7 @@ import { makeTenantAppsRepoDef } from "../domains/units/tenant-apps-repo.run.ts"
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
 import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
+import { makeTenantAppsRepoPurgeDef } from "../domains/units/tenant-apps-repo-purge.run.ts";
 import type { RelocationPorts } from "../domains/units/relocation.ts";
 import type { TenantRelocationPorts } from "../domains/units/relocation-world-tenant.ts";
 import { makeTenantBackupDef } from "../domains/units/backup.run.ts";
@@ -314,6 +315,7 @@ export function buildTenantOnboarding(
     // cascade) + the namespace. Same narrow port set as the other lifecycle run kinds — the teardown and the
     // two cluster-side deletes all resolve through the per-cluster resolver.
     makeTenantPurgeDef(lifecyclePorts),
+    makeTenantAppsRepoPurgeDef(lifecyclePorts),
     // tenant-backup / tenant-restore / tenant-migrate — the same ONE relocation mechanism over the
     // whole member bracket.
     makeTenantBackupDef(tenantRelocationPorts),

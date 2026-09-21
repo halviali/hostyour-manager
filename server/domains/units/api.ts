@@ -30,6 +30,7 @@ import type { Registrations } from "./registrations.ts";
 import { CreateTenantRequest } from "./create-tenant.run.ts";
 import { AddAppRequest } from "./add-app.run.ts";
 import { TenantPurgeRequest, purgeLiveRefusal } from "./tenant-purge.run.ts";
+import { scanOrphanBuilds } from "./tenant-apps-repo-purge.run.ts";
 import { assertTenantNotLive } from "./tenant-live-guard.ts";
 import { scanOrphanTenants, resolveRunTenantState } from "./tenant-orphans.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
@@ -423,6 +424,10 @@ export interface TenantApiDeps extends ConsumerApiDeps {
    *  TenantRegistrations the tenant runs commit through. Absent when tenant onboarding is not wired ⇒ the
    *  scan route answers { orphans: [], reason } instead of 501: it is a READ, and a read degrades. */
   registrations?: TenantRegistrations;
+  /** The consumer family's registrations — the build half of the orphan scan (#241): a build
+   *  registration no tenant registration names. Absent with consumer onboarding unwired; the scan then
+   *  lists no builds. */
+  buildRegistrations?: Pick<Registrations, "listBuildRegistrations" | "readUnitStages">;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo —
    *  the SAME resolver the tenant runs carry (create-tenant.run.ts TenantOnboardPorts). The invite
    *  route needs it because a tenant member is addressed at `<member>.<subdomain>.<unitApex>` and the
@@ -452,7 +457,7 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 }
 
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
-  const { executor, db, onboardingEnabled, appCatalog, resolver, catalogRepoUrl, activator, registrations, resolveUnitApex } = deps;
+  const { executor, db, onboardingEnabled, appCatalog, resolver, catalogRepoUrl, activator, registrations, buildRegistrations, resolveUnitApex } = deps;
 
   // The tenant inventory: every onboarded tenant + which cluster it fans out on (JOIN clusters for
   // domain/stage). Always live — the read path never degrades on missing config.
@@ -612,12 +617,12 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   // separate literals, so without that check a renamed field or a mistyped `reason` in any one of them
   // would reach the UI as an absent value and render as an all-clear.
   app.get("/api/tenants/orphans", async (c) => {
-    if (!registrations) return c.json({ orphans: [], skipped: [], reason: "onboarding-not-configured" } satisfies OrphanScanView);
+    if (!registrations) return c.json({ orphans: [], skipped: [], builds: [], reason: "onboarding-not-configured" } satisfies OrphanScanView);
     try {
       const { orphans, skipped } = await scanOrphanTenants({ db, registrations, ...(resolver ? { resolver } : {}) });
-      return c.json({ orphans, skipped } satisfies OrphanScanView);
+      return c.json({ orphans, skipped, builds: buildRegistrations ? await scanOrphanBuilds({ registrations, buildRegistrations }) : [] } satisfies OrphanScanView);
     } catch (e) {
-      return c.json({ orphans: [], skipped: [], error: errText(e) } satisfies OrphanScanView);
+      return c.json({ orphans: [], skipped: [], builds: [], error: errText(e) } satisfies OrphanScanView);
     }
   });
 

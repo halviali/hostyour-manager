@@ -65,6 +65,9 @@ export interface ScannedTenant {
    *  deletes one AppProject per. Read from the file rather than assumed, so a scan of a tenant of any
    *  product names the members that tenant actually has. */
   members: string[];
+  /** The unit name of the tenant's own apps bundle (`appsImage`), "" where it has none — what
+   *  accounts for a build-only registration (tenant-apps-repo-purge.run.ts scanOrphanBuilds). */
+  appsImage: string;
 }
 
 /** The three HONEST outcomes of reading ONE tenant registration, kept apart because the callers act
@@ -139,7 +142,7 @@ export class TenantRegistrations {
     }
     const r = TenantRegistrationSchema.safeParse(parsed);
     if (!r.success) return { status: "unreadable", reason: `${path} failed its schema: ${schemaWhy(r.error)}` };
-    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name) } };
+    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), appsImage: r.data.appsImage } };
   }
 
   /** The ONE scan of the registrations at a stage: scanTenantDir over every guid directory, bucketed
