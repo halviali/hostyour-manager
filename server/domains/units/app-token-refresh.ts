@@ -4,7 +4,10 @@
 // build exactly once. The entry is therefore REWRITTEN — every 45 minutes on a timer
 // (boot/refresh-app-tokens-schedule.ts, once at boot too) and before every release the Manager
 // triggers for such a unit (onboard-seed-repo-pat.ts refreshRepoPatStep). A unit whose credential is
-// a consumer's own PAT is left alone: that value does not expire and its entry is create-only.
+// a PAT is rewritten on the same ticks (hostyour-manager#230): its `pat` does not expire, but the
+// `packages` beside it is the packages reader of its organisation, recorded and replaced on the
+// Organisations page, and an entry written once at the onboarding never learns of that — which is
+// how four PAT units stood on `cannot find secret data for key: "packages"` on the first installation.
 //
 // A REWRITE ALONE REACHES NO CLONE. The pipeline's clone task reads the Secret `build-git-https`
 // in <unit>-build, and that Secret is what an ExternalSecret materialized out of Vault at ONE of two
@@ -14,9 +17,9 @@
 // on a timer). So every successful rewrite is followed by the deletion of the unit's three target
 // Secrets, which is the one act that makes ESO fetch the new value.
 //
-// WHICH units: every build registration whose repoCredentialId is a `github-app` credential of the
-// store. The registration is the one holder of the id (registrations/<unit>/build.yaml), and the
-// store's kind column says what the id is; nothing here reads a label or a name.
+// WHICH units: every build registration that names a repoCredentialId. The registration is the one
+// holder of the id (registrations/<unit>/build.yaml); what the id opens to is the store's business,
+// and nothing here reads a label, a name or a kind.
 import type { Logger } from "../../kernel/logger.ts";
 import type { CredentialStore, UseContext } from "../../security/store.ts";
 import type { VaultSeeder } from "../../adapters/vault/seeder-port.ts";
@@ -90,7 +93,7 @@ export async function readBuildSecretRefreshTimes(kube: Pick<ClusterReader, "lis
   return Object.fromEntries(BUILD_TARGET_SECRETS.map((name) => [name, rows.find((r) => r.targetSecret === name)?.refreshTime ?? ""]));
 }
 
-/** Every unit whose build registration names a `github-app` credential, refreshed one by one: a
+/** Every unit whose build registration names a credential, refreshed one by one: a
  *  unit whose open or write fails is logged with its name and the rest go on, and a registration
  *  tree that cannot be read is logged as one failure. After each rewrite the unit's three build
  *  Secrets are deleted, which is what makes ESO's `OnChange` ExternalSecrets fetch the new value —
@@ -104,13 +107,12 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   const units: { unit: string; credentialId: string; repoURL: string }[] = [];
   const buildUnits: string[] = [];
   try {
-    const appCredentials = new Set((await deps.store.list({ kind: "github-app" })).map((c) => c.id));
     for (const { unit, entry } of await deps.registrations.listBuildRegistrations()) {
       buildUnits.push(unit);
-      if (entry.repoCredentialId && appCredentials.has(entry.repoCredentialId)) units.push({ unit, credentialId: entry.repoCredentialId, repoURL: entry.repoURL });
+      if (entry.repoCredentialId) units.push({ unit, credentialId: entry.repoCredentialId, repoURL: entry.repoURL });
     }
   } catch (err) {
-    deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the App-token refresh could not read which units carry a GitHub App credential — no repo-pat was rewritten this time");
+    deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the repo-pat refresh could not read which units carry a credential — no repo-pat was rewritten this time");
     return { refreshed, failed };
   }
   const undeleted: string[] = [];
@@ -137,7 +139,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
   }
   if (undeleted.length > 0) deps.logger.warn({ units: undeleted }, "no kube is wired on this Manager, so the build Secrets of these units were not deleted after the rewrite — ESO keeps the Secrets it wrote before, and the next clone reads the old token");
   await refreshCatalogBumpToken(deps, buildUnits, refreshed, failed);
-  if (units.length > 0 || refreshed.includes(CATALOG_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "App tokens refreshed into the build repo-pat entries and their build Secrets deleted");
+  if (units.length > 0 || refreshed.includes(CATALOG_BUMP_UNIT)) deps.logger.info({ refreshed, failed }, "build repo-pat entries rewritten (App tokens minted now, PATs with their organisation's packages reader) and their build Secrets deleted");
   return { refreshed, failed };
 }
 

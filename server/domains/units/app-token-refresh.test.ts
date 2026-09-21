@@ -1,7 +1,8 @@
-// The App-token refresh (app-token-refresh.ts): every unit whose build registration names a
-// github-app credential has its build repo-pat rewritten with the value the store opens to now and
-// its three build Secrets deleted behind the rewrite; a pat unit is left alone; one unit's failure
-// is logged and the rest go on; nothing rejects.
+// The repo-pat refresh (app-token-refresh.ts): every unit whose build registration names a
+// credential has its build repo-pat rewritten with the value the store opens to now — a token minted
+// for the App, the PAT itself for a pat unit — beside its organisation's packages reader, and its
+// three build Secrets deleted behind the rewrite (#230); one unit's failure is logged and the rest go
+// on; nothing rejects.
 import { describe, it, expect } from "vitest";
 import type { Logger } from "../../kernel/logger.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -92,7 +93,7 @@ describe("refreshAppTokens — the catalog bump credential from the App", () => 
     const githubApp = new FakeGitHubApp();
     githubApp.token = "ghs_catalog_now";
     const r = await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, kube, logger, catalog: catalogOf(githubApp.org), githubApp });
-    expect(r.refreshed).toEqual(["acme-apps", "beta-apps", CATALOG_BUMP_UNIT]);
+    expect(r.refreshed).toEqual(["acme-apps", "shop", "beta-apps", CATALOG_BUMP_UNIT]);
     expect(written.at(-1)).toEqual({ consumerName: "catalog", pat: "ghs_catalog_now", packages: "" }); // the bump entry installs nothing
     const bumpDeletes = kube.secretWrites.filter((w) => w.name === "bump-git-https").map((w) => w.namespace);
     expect(bumpDeletes.slice(-3)).toEqual(["acme-apps-build", "shop-build", "beta-apps-build"]);
@@ -105,7 +106,7 @@ describe("refreshAppTokens — the catalog bump credential from the App", () => 
     const { logger, errors } = fakeLogger();
     const githubApp = new FakeGitHubApp();
     const withPat = await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, kube: new FakeClusterReader(), logger, catalog: catalogOf("other-org", "ghp_x"), githubApp });
-    expect(withPat.refreshed).toEqual(["acme-apps", "beta-apps"]);
+    expect(withPat.refreshed).toEqual(["acme-apps", "shop", "beta-apps"]);
     expect(written.some((w) => w.consumerName === "catalog")).toBe(false);
     const unreached = await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, kube: new FakeClusterReader(), logger, catalog: catalogOf("other-org"), githubApp });
     expect(unreached.failed).toEqual([CATALOG_BUMP_UNIT]);
@@ -114,29 +115,32 @@ describe("refreshAppTokens — the catalog bump credential from the App", () => 
 });
 
 describe("refreshAppTokens", () => {
-  it("rewrites the repo-pat of every unit whose build registration names a github-app credential with the value opened NOW, deletes its three build Secrets behind the rewrite, and skips the pat unit", async () => {
+  it("rewrites the repo-pat of every unit whose build registration names a credential with the value opened NOW — the pat unit's PAT included — and deletes its three build Secrets behind the rewrite", async () => {
     const minted = { value: "ghs_minted_at_tick_1" };
     const { store, opened } = fakeStore(minted);
     const { seeder, written } = fakeSeeder();
     const { logger, errors, warns, infos } = fakeLogger();
     const kube = new FakeClusterReader();
     const reg = await registrations();
-    expect(await refreshAppTokens({ store, organisations, registrations: reg, seeder, kube, logger })).toEqual({ refreshed: ["acme-apps", "beta-apps"], failed: [] });
-    expect(written).toEqual([{ consumerName: "acme-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" }, { consumerName: "beta-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" }]);
-    expect(opened).toEqual(["cred_app", "cred_pkg", "cred_app", "cred_pkg"]); // the App token and the organisation's packages reader, per unit
-    // The three target Secrets of each App unit, by name, in ITS build namespace; the pat unit's
-    // shop-build is not touched. None of them stood in the fake — an absent Secret is done, not an
-    // error, exactly as the live port treats a 404.
-    expect(kube.secretWrites).toEqual([...deletesOf("acme-apps"), ...deletesOf("beta-apps")]);
+    expect(await refreshAppTokens({ store, organisations, registrations: reg, seeder, kube, logger })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
+    expect(written).toEqual([
+      { consumerName: "acme-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" },
+      { consumerName: "shop", pat: "github_pat_shop", packages: "ghp_packages_acme" }, // the PAT itself, and the reader of its organisation (#230)
+      { consumerName: "beta-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" },
+    ]);
+    expect(opened).toEqual(["cred_app", "cred_pkg", "cred_pat", "cred_pkg", "cred_app", "cred_pkg"]); // the unit's credential and the organisation's packages reader, per unit
+    // The three target Secrets of each unit, by name, in ITS build namespace. None of them stood in
+    // the fake — an absent Secret is done, not an error, exactly as the live port treats a 404.
+    expect(kube.secretWrites).toEqual([...deletesOf("acme-apps"), ...deletesOf("shop"), ...deletesOf("beta-apps")]);
     expect(errors).toEqual([]);
     expect(warns).toEqual([]);
-    expect(infos.some((l) => l.includes("App tokens refreshed"))).toBe(true);
+    expect(infos.some((l) => l.includes("build repo-pat entries rewritten"))).toBe(true);
     // The next tick writes the token of that hour — the value is never remembered between ticks —
     // and deletes the Secrets again, because ESO reads Vault at no other moment.
     minted.value = "ghs_minted_at_tick_2";
     await refreshAppTokens({ store, organisations, registrations: reg, seeder, kube, logger });
     expect(written.at(-1)).toEqual({ consumerName: "beta-apps", pat: "ghs_minted_at_tick_2", packages: "ghp_packages_acme" });
-    expect(kube.secretWrites).toHaveLength(12);
+    expect(kube.secretWrites).toHaveLength(18);
   });
 
   it("logs the unit whose write fails, with its name, deletes none of its Secrets, and refreshes the others", async () => {
@@ -144,11 +148,11 @@ describe("refreshAppTokens", () => {
     const { seeder, written } = fakeSeeder(["acme-apps"]);
     const { logger, errors } = fakeLogger();
     const kube = new FakeClusterReader();
-    expect(await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, kube, logger })).toEqual({ refreshed: ["beta-apps"], failed: ["acme-apps"] });
-    expect(written.map((w) => w.consumerName)).toEqual(["beta-apps"]);
+    expect(await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, kube, logger })).toEqual({ refreshed: ["shop", "beta-apps"], failed: ["acme-apps"] });
+    expect(written.map((w) => w.consumerName)).toEqual(["shop", "beta-apps"]);
     // A Secret deleted behind a write that did not happen would make ESO materialize the DEAD value
     // again — nothing is gained, so nothing is deleted.
-    expect(kube.secretWrites).toEqual(deletesOf("beta-apps"));
+    expect(kube.secretWrites).toEqual([...deletesOf("shop"), ...deletesOf("beta-apps")]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('"unit":"acme-apps"');
     expect(errors[0]).toContain("repo-pat put failed");
@@ -160,14 +164,15 @@ describe("refreshAppTokens", () => {
     const { seeder, written } = fakeSeeder();
     const { logger, errors } = fakeLogger();
     const kube = new FakeClusterReader({ throwOnDeleteSecret: new Error("delete Secret acme-apps-build/build-git-https: secrets is forbidden (403)") });
-    expect(await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, kube, logger })).toEqual({ refreshed: [], failed: ["acme-apps", "beta-apps"] });
-    // Both Vault writes happened: the failure is behind the write, and the second unit was reached.
-    expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "beta-apps"]);
-    expect(errors).toHaveLength(2);
+    expect(await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, kube, logger })).toEqual({ refreshed: [], failed: ["acme-apps", "shop", "beta-apps"] });
+    // Every Vault write happened: the failure is behind the write, and the next unit was reached.
+    expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps"]);
+    expect(errors).toHaveLength(3);
     expect(errors[0]).toContain('"unit":"acme-apps"');
     expect(errors[0]).toContain('"namespace":"acme-apps-build"');
     expect(errors[0]).toContain("could not be deleted");
-    expect(errors[1]).toContain('"unit":"beta-apps"');
+    expect(errors[1]).toContain('"unit":"shop"');
+    expect(errors[2]).toContain('"unit":"beta-apps"');
     for (const l of errors) expect(l).not.toContain("ghs_x");
   });
 
@@ -175,12 +180,12 @@ describe("refreshAppTokens", () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors, warns } = fakeLogger();
-    expect(await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, logger })).toEqual({ refreshed: ["acme-apps", "beta-apps"], failed: [] });
-    expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "beta-apps"]);
+    expect(await refreshAppTokens({ store, organisations, registrations: await registrations(), seeder, logger })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
+    expect(written.map((w) => w.consumerName)).toEqual(["acme-apps", "shop", "beta-apps"]);
     expect(errors).toEqual([]);
     expect(warns).toHaveLength(1);
     expect(warns[0]).toContain("no kube is wired");
-    expect(warns[0]).toContain('"units":["acme-apps","beta-apps"]');
+    expect(warns[0]).toContain('"units":["acme-apps","shop","beta-apps"]');
   });
 
   it("logs, writes nothing and does not reject when the registration tree cannot be read", async () => {
@@ -196,13 +201,12 @@ describe("refreshAppTokens", () => {
     expect(errors[0]).toContain("could not read which units");
   });
 
-  it("does nothing, and says nothing, on an installation without an App-credentialed unit", async () => {
+  it("does nothing, and says nothing, on an installation without a credentialed build unit", async () => {
     const { store } = fakeStore({ value: "ghs_x" });
     const { seeder, written } = fakeSeeder();
     const { logger, errors, warns, infos } = fakeLogger();
     const kube = new FakeClusterReader();
-    const reg = new Registrations(new FakePlatformRepo());
-    await reg.commitRegistration({ unit: { name: "shop", repoURL: "https://github.com/acme/shop.git", repoCredentialId: "cred_pat", owner: "acme", onboardedAt: "2026-01-01T00:00:00Z", suspended: false, quiesced: false }, builds: ["shop-api"], runId: "run_1" });
+    const reg = new Registrations(new FakePlatformRepo()); // no build registration at all
     expect(await refreshAppTokens({ store, organisations, registrations: reg, seeder, kube, logger })).toEqual({ refreshed: [], failed: [] });
     expect(written).toEqual([]);
     expect(kube.secretWrites).toEqual([]);
