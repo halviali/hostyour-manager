@@ -184,6 +184,14 @@ function residueRepo(): Fixture {
   return f;
 }
 
+/** A release whose tag's push never landed: the tag stands on HEAD here and origin lacks it (#227). */
+function owedPushRepo(): Fixture {
+  const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
+  const tag = run("git", ["tag", "-a", "1.2.3-stable-20200101000000", "-m", "owed"], f.cwd);
+  if (tag.status !== 0) throw new Error(`git tag failed: ${tag.stderr}`);
+  return f;
+}
+
 /** Every ref origin holds, with its commit — the whole of what a release may move. */
 const originRefs = (f: Fixture): string => run("git", ["ls-remote", "origin"], f.cwd).stdout;
 const head = (f: Fixture): string => run("git", ["rev-parse", "HEAD"], f.cwd).stdout.trim();
@@ -393,6 +401,20 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       expect(tags).toHaveLength(1);
       expect(tags[0]).not.toBe("1.2.3-stable-20200101000000");
       expect(originRefs(f)).toContain(`refs/tags/${tags[0]}\n`);
+      expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/deploy/dev\n`);
+    }
+  });
+
+  it("pushes a tag that stands on HEAD here and is missing on origin, then reuses it — the push a cut run still owed (#227)", RUNS, () => {
+    const o = bothSpellings(() => owedPushRepo(), ["1.2.3", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(0);
+    expect(stdout).toContain("release: 1.2.3-stable-<ts14> stands on this machine only, on the commit being released - its push never reached origin; pushed now\n");
+    expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on dev rebuilds nothing\n");
+    expect(stdout).not.toContain("minted");
+    for (const f of [o.sh, o.ps1]) {
+      expect(releaseTags(f)).toEqual(["1.2.3-stable-20200101000000"]);
+      expect(originRefs(f)).toContain("refs/tags/1.2.3-stable-20200101000000\n");
       expect(originRefs(f)).toContain(`${head(f)}\trefs/heads/deploy/dev\n`);
     }
   });

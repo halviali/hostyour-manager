@@ -329,6 +329,15 @@ try {
 
   if ($existing.Count -gt 0) {
     $tag = $existing[-1]
+    # A TAG ON HEAD THAT NEVER REACHED ORIGIN IS THE RELEASE WITH ITS PUSH STILL OWED (#227): the mint
+    # pushed HEAD and the run was cut before the tag's own push landed. Reusing it silently would fire
+    # no build and pin nothing; it is pushed now, and the rest of the run proceeds as a reuse.
+    git ls-remote --exit-code --tags origin "refs/tags/$tag" *> $null
+    if ($LASTEXITCODE -ne 0) {
+      Say "$tag stands on this machine only, on the commit being released - its push never reached origin; pushed now"
+      git push origin HEAD
+      git push origin "refs/tags/$tag"
+    }
     Say "reusing the existing release $tag - one release per version+channel, so putting it on $Stage rebuilds nothing"
   }
   else {
