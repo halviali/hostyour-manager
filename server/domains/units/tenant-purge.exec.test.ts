@@ -77,6 +77,7 @@ type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; proj
 class FakePurgeSeeder implements VaultSeeder {
   readonly deletedCrypto: TenantCryptoDeleteInput[] = [];
   async seed(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds"); }
+  async patchApp(): Promise<void> {}
   async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds postgres"); }
   async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds mongodb"); }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds a repo pat"); }

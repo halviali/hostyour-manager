@@ -39,6 +39,7 @@ import { makeAdoptConsumerDef } from "../domains/units/adopt-consumer.run.ts";
 import { makeSuspendDef, makeResumeDef } from "../domains/units/suspend-resume.run.ts";
 import { makeRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
 import { makeSetSizeDef } from "../domains/units/set-size.run.ts";
+import { makeSetSecretsDef, type SetSecretsPorts } from "../domains/units/set-secrets.run.ts";
 import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
@@ -542,6 +543,10 @@ function buildConsumerOnboarding(
     // set-size writes the size table's CURRENT figures into the unit's registration — the only path
     // by which a table edit reaches something already deployed.
     makeSetSizeDef(lifecyclePorts),
+    // The one path that changes a declared secret of a standing consumer (#245): the onboarding's
+    // seed is create-only, so nothing else can. It reads the consumer's manifest through the owner's
+    // identity, which is why it takes the GitHub client and the credential store beside the seeder.
+    makeSetSecretsDef({ ...lifecyclePorts, seeder, github, store } satisfies SetSecretsPorts),
     // backup / restore / migrate — ONE relocation mechanism over the Storage Box. The
     // provisioning writers ride along because a move re-arms the unit's isolation on the target,
     // and the DNS provider because a move is a content update of the unit's one record.

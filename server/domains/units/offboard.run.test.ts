@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { RecordingTeardownSeeder } from "./teardown.fixture.ts";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -16,7 +17,7 @@ import { AppError } from "../../kernel/errors.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput, MongodbSecretDeleteInput } from "./vault-seeder.ts";
+import type { VaultSeeder } from "./vault-seeder.ts";
 
 const SHA = "a".repeat(40);
 
@@ -42,23 +43,6 @@ async function seedRegistration(reg: Registrations): Promise<void> {
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
 // remove-repo-pat and remove-app-secrets drive the seeder's two deletes — a recording no-op fake by default.
-class FakeSeeder implements VaultSeeder {
-  deleted: BuildRepoPatDeleteInput[] = [];
-  deletedApp: AppSecretsDeleteInput[] = [];
-  deletedPostgres: PostgresSecretDeleteInput[] = [];
-  deletedMongodb: MongodbSecretDeleteInput[] = [];
-  async seed(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds"); }
-  async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds postgres"); }
-  async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds mongodb"); }
-  async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds a repo pat"); }
-  async refreshBuildRepoPat(): Promise<void> { throw new Error("offboard never refreshes a repo pat"); }
-  async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deleted.push(i); }
-  async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
-  async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
-  async deleteMongodb(i: MongodbSecretDeleteInput): Promise<void> { this.deletedMongodb.push(i); }
-  async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
-  async deleteTenantCrypto(): Promise<void> {}
-}
 
 /** A VaultSeeder whose four deletes are all no-ops, with ONE of them overridden per test. Every seed
  *  method answers `created: true` and is never reached — an offboard removes, it never seeds. Written
@@ -66,7 +50,7 @@ class FakeSeeder implements VaultSeeder {
  *  of the same seven members is what obscured that. */
 function seederWith(over: Partial<VaultSeeder>): VaultSeeder {
   return {
-    seed: async () => ({ created: true }),
+    seed: async () => ({ created: true }), patchApp: async () => undefined,
     seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }),
     seedBuildRepoPat: async () => ({ created: true }),
     refreshBuildRepoPat: async () => {},
@@ -89,7 +73,7 @@ function ports(reg: Registrations, over: Partial<OffboardPorts> & FakeKube = {})
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
-    argoWatchTimeoutMs: 1000, seeder: new FakeSeeder(), dns: new FakeDnsProvider(), githubApp: appWith("x"),
+    argoWatchTimeoutMs: 1000, seeder: new RecordingTeardownSeeder(), dns: new FakeDnsProvider(), githubApp: appWith("x"),
     // The offboard target s1.example is BUILT BY another cluster, so the hook this teardown looks
     // for stands at that cluster's host — never at the one being torn down.
     ...portOver,
@@ -276,7 +260,7 @@ describe("offboard run definition", () => {
 
   it("remove-repo-pat deletes the local build-tier entry and revokes NO credential — the unit never had a row of its own (#226)", async () => {
     seedApp();
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const revoked: Array<{ id: string; reason: string }> = [];
     const creds = credsWith({ revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as Partial<CredentialStore>);
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-repo-pat")!;
@@ -338,7 +322,7 @@ describe("offboard run definition", () => {
 
   it("remove-app-secrets deletes the consumer-tier entry so a re-onboard cannot inherit the old keys", async () => {
     seedApp();
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-app-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-app-secrets", logs));
@@ -382,7 +366,7 @@ describe("offboard run definition", () => {
 
   it("remove-database-secrets metadata-deletes the consumer-tier postgres leaf so a re-onboard cannot inherit the old superuser password", async () => {
     seedApp();
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps({ appId: "app_1" }).find((s) => s.name === "remove-database-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-database-secrets", logs));

@@ -52,6 +52,32 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
+  async patchApp(input: VaultSeedInput): Promise<void> {
+    // The MERGE write (#245). `application/merge-patch+json` against the data path: Vault reads the
+    // stored entry, merges these keys into it and writes the new version — the manager hands over
+    // only what it changes and learns nothing about the rest, which is what keeps this leaf
+    // write-only for it. 404 is NOT idempotent here: patching a consumer that has no entry would
+    // write a partial one that the pods then read as if it were whole.
+    const { addr, token } = await this.login();
+    try {
+      const path = `${input.stage}/consumer/${input.consumerName}/app`;
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
+        method: "PATCH",
+        headers: { "x-vault-token": token, "content-type": "application/merge-patch+json" },
+        body: JSON.stringify({ data: input.data }),
+      });
+      if (res.ok) return;
+      throw new VaultError(
+        res.status === 404
+          ? `vault patch found no entry at ${KV_MOUNT}/${path} — this consumer's secrets were never seeded, so there is nothing to change`
+          : `vault patch failed for ${KV_MOUNT}/${path} (${res.status})${res.status === 403 ? " — the manager policy carries no `patch` on this leaf; run deploy-platform-services on the master" : ""}`,
+        res.status,
+      );
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
   async seedPostgres(input: PostgresSeedInput): Promise<VaultSeedOutcome> {
     // Same create-only (cas=0) shape as `seed`, but a SEPARATE leaf (<stage>/consumer/<name>/postgres,
     // property postgres-password) so a consumer that adds services:[postgresql] on a later re-pin

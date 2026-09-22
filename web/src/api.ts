@@ -389,6 +389,11 @@ export const updateUnitSize = (component: string, name: string, size: Omit<UnitS
   put<{ size: UnitSizeView }>(`/api/unit-sizes/${component}/${name}`, size as unknown as Record<string, unknown>);
 /** Put a consumer on a size — and, when it is the size it already has, onto that size's CURRENT
  *  figures. This is the only path by which a table edit reaches something already deployed. */
+/** Change a standing consumer's declared secrets (#245). Plans through the streaming planner — the
+ *  repository's manifest is read while the run sits in `planning` — and returns a { runId } whose
+ *  approve card offers every declared key, each optional: what you fill is what changes. */
+export const setConsumerSecrets = (appId: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/consumers/${appId}/secrets`);
 export const setConsumerSize = (appId: string, size: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${appId}/size`, { size });
 /** Backup: close access, dump every store into the Storage Box folder, verify it, reopen — the

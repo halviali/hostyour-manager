@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { RecordingTeardownSeeder } from "./teardown.fixture.ts";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -15,7 +16,6 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput, MongodbSecretDeleteInput } from "./vault-seeder.ts";
 
 // The SCOPE half of offboard — split from offboard.run.test.ts, whose fixtures are all single-stage.
 // An offboard removes ONE STAGE of a unit, and a unit deployed at two stages is two of some things and
@@ -39,23 +39,6 @@ afterEach(() => { db.sqlite.close(); });
 const REPO = "https://github.com/x/acme.git";
 const KIT_PATHS = ["release/release.sh", ".github/workflows/release.yml"];
 
-class FakeSeeder implements VaultSeeder {
-  deleted: BuildRepoPatDeleteInput[] = [];
-  deletedApp: AppSecretsDeleteInput[] = [];
-  deletedPostgres: PostgresSecretDeleteInput[] = [];
-  deletedMongodb: MongodbSecretDeleteInput[] = [];
-  async seed(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds"); }
-  async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds postgres"); }
-  async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds mongodb"); }
-  async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds a repo pat"); }
-  async refreshBuildRepoPat(): Promise<void> { throw new Error("offboard never refreshes a repo pat"); }
-  async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deleted.push(i); }
-  async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
-  async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
-  async deleteMongodb(i: MongodbSecretDeleteInput): Promise<void> { this.deletedMongodb.push(i); }
-  async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
-  async deleteTenantCrypto(): Promise<void> {}
-}
 
 /** Commit acme at BOTH stages: prod on s1 and dev on s2, each with the build.yaml both share. */
 async function seedTwoStages(reg: Registrations): Promise<void> {
@@ -141,7 +124,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     github.seedHook("x", "acme", BUILD_HOOK_URL);
     const consumerRepo = new FakeConsumerRepo();
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const dns = new FakeDnsProvider();
     dns.seed("acme.s1.example", "A", "203.0.113.10"); // prod's own host
     dns.seed("acme.dev.s2.example", "A", "203.0.113.20"); // dev's — under the OTHER cluster's apex
@@ -197,7 +180,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     github.seedHook("x", "acme", BUILD_HOOK_URL); // both stages' onboards resolved this one host, so there is one hook
     const consumerRepo = new FakeConsumerRepo();
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const creds = {
       list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),

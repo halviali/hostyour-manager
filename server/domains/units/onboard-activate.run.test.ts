@@ -74,6 +74,7 @@ class FakeSeeder implements VaultSeeder {
   seeded: VaultSeedInput[] = [];
   created = true;
   async seed(i: VaultSeedInput): Promise<VaultSeedOutcome> { this.seeded.push(i); return { created: this.created }; }
+  async patchApp(): Promise<void> {}
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { return { created: true }; }

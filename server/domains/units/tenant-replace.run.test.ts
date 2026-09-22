@@ -121,6 +121,7 @@ function makeRegistrations(): TenantRegistrations {
 function fakeTenantSeeder(): VaultSeeder {
   return {
     seed: () => Promise.reject(new Error("a tenant run never seeds a consumer entry")),
+    patchApp: async () => undefined,
     seedPostgres: () => Promise.reject(new Error("a tenant run never seeds postgres")),
     seedMongodb: () => Promise.reject(new Error("a tenant run never seeds mongodb")),
     seedBuildRepoPat: () => Promise.reject(new Error("a tenant run never seeds a repo pat")),

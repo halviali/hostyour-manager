@@ -36,6 +36,7 @@ afterEach(() => { db.sqlite.close(); });
 
 class FakeSeeder implements VaultSeeder {
   async seed(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds"); }
+  async patchApp(): Promise<void> {}
   async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds postgres"); }
   async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds mongodb"); }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds a repo pat"); }

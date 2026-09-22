@@ -427,6 +427,11 @@ export const RUN_KIND = [
   // not a no-op but the re-apply — which is why the run kind is named for the act (set a size) and not for
   // a change (resize), and why editing the table alone moves nothing.
   "consumer-set-size", "tenant-set-size",
+  // Change a declared secret of a STANDING consumer (#245): merge the values into its Vault entry,
+  // delete the rendered Secrets so the operator's store writes them again, roll the workloads. The
+  // onboarding's seed is create-only by design, so without this nothing could change a value at all,
+  // and a key a manifest gained later reached a standing consumer not at all.
+  "consumer-set-secrets",
   // The relocation run kinds — ONE mechanism over the Hetzner Storage Box, three slices of it:
   // backup = close access, dump every store, verify, reopen (the box folder stays); restore = provide
   // the target and rebuild the unit from a folder; migrate = both halves plus the repoint and the
@@ -476,7 +481,7 @@ export const RUN_FAMILY = {
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
     "mail-dns-publish", "dns-remove", "mail-dns-unpublish",
   ],
-  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-backup", "consumer-restore", "consumer-migrate"],
+  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-secrets", "consumer-backup", "consumer-restore", "consumer-migrate"],
   tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-apps-repo-purge", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;

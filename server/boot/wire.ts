@@ -42,6 +42,7 @@ import { registerConsumerRoutes, registerTenantRoutes } from "../domains/units/a
 import { registerUnitSizeRoutes } from "../domains/units/api-unit-sizes.ts";
 import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefill.ts";
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
+import { registerConsumerSecretsRoute } from "../domains/units/api-consumer-secrets.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
 import { ensureAppIdentityRow } from "../domains/units/repo-identity.ts";
 import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
@@ -341,6 +342,8 @@ export async function wire(): Promise<Wired> {
       registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: units.tenantEnabled, ...(units.tenantResolver ? { resolver: units.tenantResolver } : {}), ...(units.catalogRepoUrl ? { catalogRepoUrl: units.catalogRepoUrl } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.activator ? { activator: units.activator } : {}), ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.orphanBuilds ? { orphanBuilds: units.orphanBuilds } : {}), ...(units.resolveUnitApex ? { resolveUnitApex: units.resolveUnitApex } : {}) });
       // The tenant's own apps repository: the run that creates and builds it, gated like the tenant routes.
       registerTenantAppsRepoRoute(a, { executor, tenantEnabled: units.tenantEnabled });
+      // The secrets of a standing consumer (#245) — gated like the other consumer triggers.
+      registerConsumerSecretsRoute(a, { executor, onboardingEnabled: units.enabled });
       // The owner identities (#219): recorded here, derived per unit by every onboarding. The
       // measurement rides the consumer client where it is wired; without it nothing can be recorded.
       if (units.github) registerOwnerRoutes(a, { db: db.db, store, github: units.github, githubApp, actor: runActor });

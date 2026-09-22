@@ -201,6 +201,12 @@ export interface VaultSeeder {
    *  false`); rotating or extending it is a separate, explicit action, never a side effect of
    *  re-running an onboard. */
   seed(input: VaultSeedInput): Promise<VaultSeedOutcome>;
+  /** MERGE the given keys into a STANDING consumer's application entry — the one write that changes
+   *  a secret after the onboarding (hostyour-manager#245). Vault merges server-side (KV v2
+   *  merge-patch), so only the keys handed over travel and the values not named stay as they are:
+   *  the manager still never reads the entry, and the leaf stays one it cannot look at. THROWS where
+   *  no entry stands (404): a consumer whose secrets were never seeded is onboarded, not patched. */
+  patchApp(input: VaultSeedInput): Promise<void>;
   /** Create the per-consumer PostgreSQL instance-superuser entry — ONCE (cas=0). Written iff the
    *  consumer claims `postgresql`; an existing entry is never overwritten (`created: false`), so a
    *  re-onboard onto a surviving PGDATA re-uses the same password. */

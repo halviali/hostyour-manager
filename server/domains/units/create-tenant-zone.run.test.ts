@@ -76,7 +76,7 @@ function seedClusters(dns: FakeDnsProvider): void {
 
 function seeder(): VaultSeeder {
   const no = () => Promise.reject(new Error("not in this test"));
-  return { seed: no, seedPostgres: no, seedMongodb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} };
+  return { seed: no, patchApp: no, seedPostgres: no, seedMongodb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), deleteTenantCrypto: async () => {} };
 }
 
 function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()): TenantOnboardPorts {

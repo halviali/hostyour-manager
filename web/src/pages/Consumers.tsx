@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
 import {
-  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer,
+  listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, setConsumerSecrets,
   scanDetectedConsumers, adoptConsumer, backupConsumer, restoreConsumer, migrateConsumer, listRuns, setConsumerSize,
   type ConsumerView, type PurgeInput,
 } from "../api.ts";
@@ -14,6 +14,7 @@ import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/ConsumerLifecycleDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
+import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
 import { LiveReconFacts } from "../components/LiveReconFacts.tsx";
@@ -307,50 +308,15 @@ export function Consumers() {
                   ) : null;
                 })()}
 
-                <div className="actions">
-                  {c.status === "active" && (
-                    <button type="button" className="btn" onClick={() => setLifecycle({ c, action: "suspend" })}>
-                      Suspend
-                    </button>
-                  )}
-                  {c.status === "suspended" && (
-                    <button type="button" className="btn btn--primary" onClick={() => setLifecycle({ c, action: "resume" })}>
-                      Resume
-                    </button>
-                  )}
-                  {/* Offered whatever the status: a ceiling is a property of the namespace, and a
-                      suspended consumer still owns one — sizing it before resuming is the sane order. */}
-                  {c.status !== "offboarded" && (
-                    <button type="button" className="btn" onClick={() => setSizeFor(c)}>
-                      Set size…
-                    </button>
-                  )}
-                  {/* Only on a RUNNING consumer: a suspended one renders no pod, so there is nothing
-                      holding a stale value and nothing to roll. */}
-                  {c.status === "active" && (
-                    <button type="button" className="btn" onClick={() => setLifecycle({ c, action: "restart-workloads" })}>
-                      Restart workloads
-                    </button>
-                  )}
-                  <button type="button" className="btn" onClick={() => setBackupFor(c)}>
-                    Back up
-                  </button>
-                  {c.status === "active" && (
-                    <button type="button" className="btn" onClick={() => setRelocFor({ c, kind: "move" })}>
-                      Move…
-                    </button>
-                  )}
-                  {c.status !== "offboarded" && (
-                    <button type="button" className="btn btn--danger" onClick={() => setConfirmTarget(c)}>
-                      Offboard
-                    </button>
-                  )}
-                  {c.lastRunId && (
-                    <Link className="btn" to={`/runs/${c.lastRunId}`}>
-                      Last run →
-                    </Link>
-                  )}
-                </div>
+                <ConsumerActions
+                  consumer={c}
+                  onLifecycle={(action) => setLifecycle({ c, action })}
+                  onSetSize={() => setSizeFor(c)}
+                  onSetSecrets={() => void act(setConsumerSecrets, c.id)}
+                  onBackup={() => setBackupFor(c)}
+                  onMove={() => setRelocFor({ c, kind: "move" })}
+                  onOffboard={() => setConfirmTarget(c)}
+                />
               </li>
             ))}
           </ul>

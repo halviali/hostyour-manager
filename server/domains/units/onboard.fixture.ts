@@ -66,6 +66,14 @@ export class FakeSeeder implements VaultSeeder {
   async seedBuildRepoPat(i: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> { this.buildRepoPats.push(i); return { created: this.created }; }
   async refreshBuildRepoPat(i: BuildRepoPatSeedInput): Promise<void> { this.refreshedRepoPats.push(i); }
   async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deletedBuildRepoPats.push(i); }
+  /** Every merge write, in order — what a set-secrets run handed over (#245). */
+  patchedApps: VaultSeedInput[] = [];
+  /** Set to make the next patchApp throw, the way a missing entry or policy gap does. */
+  patchAppFails: Error | null = null;
+  async patchApp(i: VaultSeedInput): Promise<void> {
+    if (this.patchAppFails) throw this.patchAppFails;
+    this.patchedApps.push(i);
+  }
   async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
   async deletePostgres(): Promise<void> {}
   async deleteMongodb(): Promise<void> {}

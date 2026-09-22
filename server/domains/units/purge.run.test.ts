@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { RecordingTeardownSeeder } from "./teardown.fixture.ts";
 import { seedQuota } from "../../../shared/unit-size.ts";
 import { eq, and } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
@@ -17,7 +18,6 @@ import { AppError } from "../../kernel/errors.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput, MongodbSecretDeleteInput } from "./vault-seeder.ts";
 
 // purge (force-offboard by NAME) tests — mirrors offboard.run.test.ts conventions (the same fake
 // kube/vault/git clients, the same in-memory DB). The load-bearing NEW properties purge must have and
@@ -46,23 +46,6 @@ async function seedRegistration(reg: Registrations): Promise<void> {
 
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
-class FakeSeeder implements VaultSeeder {
-  deleted: BuildRepoPatDeleteInput[] = [];
-  deletedApp: AppSecretsDeleteInput[] = [];
-  deletedPostgres: PostgresSecretDeleteInput[] = [];
-  deletedMongodb: MongodbSecretDeleteInput[] = [];
-  async seed(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds"); }
-  async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds postgres"); }
-  async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds mongodb"); }
-  async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds a repo pat"); }
-  async refreshBuildRepoPat(): Promise<void> { throw new Error("purge never refreshes a repo pat"); }
-  async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deleted.push(i); }
-  async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
-  async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
-  async deleteMongodb(i: MongodbSecretDeleteInput): Promise<void> { this.deletedMongodb.push(i); }
-  async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
-  async deleteTenantCrypto(): Promise<void> {}
-}
 
 function ports(reg: Registrations, over: Partial<PurgePorts> & FakeKube = {}): PurgePorts {
   const { argo, cluster, projects, ...portOver } = over;
@@ -76,7 +59,7 @@ function ports(reg: Registrations, over: Partial<PurgePorts> & FakeKube = {}): P
       argoNamespace: "argocd",
     }),
     argoWatchTimeoutMs: 1000,
-    seeder: new FakeSeeder(),
+    seeder: new RecordingTeardownSeeder(),
     dns: new FakeDnsProvider(),
     githubApp: appWith("x"),
     ...portOver,
@@ -170,7 +153,7 @@ describe("purge run definition", () => {
     await seedRegistration(reg);
     const buildRbac = new FakeBuildRbacWriter();
     await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
 
     const logs: string[] = [];
@@ -260,7 +243,7 @@ describe("purge run definition", () => {
 
   it("remove-repo-pat deletes the local build-tier entry by NAME and revokes NO credential — the unit never had a row of its own (#226)", async () => {
     seedApp();
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const revoked: Array<{ id: string; reason: string }> = [];
     const creds = credsWith({ revoke: (id: string, reason: string) => { revoked.push({ id, reason }); return Promise.resolve(); } } as unknown as Partial<CredentialStore>);
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
@@ -272,7 +255,7 @@ describe("purge run definition", () => {
 
   it("remove-repo-pat still deletes the build-tier entry when there is NO row", async () => {
     seedCluster(); // no app row → no sealed credential id recorded
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-repo-pat")!;
     const logs: string[] = [];
     await step.run(ctx("remove-repo-pat", logs)); // must not need creds.revoke
@@ -357,7 +340,7 @@ describe("purge run definition", () => {
 
   it("remove-app-secrets deletes the consumer-tier entry so a re-onboard cannot inherit the old keys", async () => {
     seedCluster();
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-app-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-app-secrets", logs));
@@ -368,7 +351,7 @@ describe("purge run definition", () => {
 
   it("remove-database-secrets metadata-deletes the consumer-tier postgres leaf by NAME (unconditional, 404-tolerant no-op for a non-postgres consumer)", async () => {
     seedCluster(); // works even for a true orphan (no app row) — keyed on name+stage+cluster
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { seeder })).steps(PARAMS).find((s) => s.name === "remove-database-secrets")!;
     const logs: string[] = [];
     await step.run(ctx("remove-database-secrets", logs));
@@ -384,7 +367,7 @@ describe("purge run definition", () => {
     seedApp();
     const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const logs: string[] = [];
     await runAll(ports(reg, { seeder }), logs);
     // Second full pass: registration already gone, namespace/appproject already gone, row already offboarded.
@@ -414,7 +397,7 @@ describe("purge run definition", () => {
     github.seedHook("x", "acme", BUILD_HOOK_URL);
     const consumerRepo = new FakeConsumerRepo();
     consumerRepo.seed("https://github.com/x/acme.git", "release/release.sh", "kit");
-    const seeder = new FakeSeeder();
+    const seeder = new RecordingTeardownSeeder();
     const creds = {
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
       revoke: () => Promise.resolve(),

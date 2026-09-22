@@ -37,6 +37,7 @@ export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
   "consumer-purge": [],
   "consumer-restart-workloads": [],
   "consumer-set-size": [],
+  "consumer-set-secrets": [],
   "consumer-adopt": [],
   "consumer-backup": [],
   "consumer-restore": [],
