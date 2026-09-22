@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 interface Props {
   /** Whose credential, as the server measured the need; rendered only while none is recorded. */
@@ -16,14 +16,18 @@ interface Props {
  *  consumer wizard (#237, #238) alike: shown only while the measurement demands it (a scope routed to
  *  GitHub Packages with no reader recorded; a repository the App does not reach with no PAT
  *  recorded); asked once per owner, shown and replaced under Settings afterwards. The token goes to
- *  the record call and nowhere else. */
+ *  the record call and nowhere else.
+ *
+ *  NOT A FORM (#242): the consumer wizard mounts this step inside its own form, and a submit of a
+ *  nested form bubbles to the wizard's, which then posts the onboarding. Record is a plain button,
+ *  and Enter in the field records as well. */
 export function OwnerCredentialStep({ owner, need, onRecord, subject }: Props) {
   const [token, setToken] = useState("");
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const record = async (e: FormEvent) => {
-    e.preventDefault();
+  const record = async () => {
+    if (recording || token.trim() === "") return;
     setRecording(true);
     setError(null);
     try {
@@ -42,25 +46,31 @@ export function OwnerCredentialStep({ owner, need, onRecord, subject }: Props) {
       ? `${subject} installs private npm packages of ${need.scopes.map((s) => `@${s}`).join(", ")} from GitHub Packages, and ${owner} records no token that reads them yet. Asked once, here: a classic PAT with read:packages, or a fine-grained PAT with Packages: Read for ${owner}.`
       : `The platform's GitHub App does not reach ${subject.toLowerCase()}, and ${owner} records no repository PAT yet. Asked once, here: a classic PAT with repo, workflow and admin:repo_hook, which every repository of ${owner} is onboarded with.`;
 
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault(); // the wizard's form must not submit on this field
+    void record();
+  };
+
   return (
-    <form className="field" onSubmit={record}>
+    <div className="field">
       <label className="field__label" htmlFor={`owner-credential-${need.kind}`}>
         {label}
       </label>
       <span className="field__hint">
         {hint} Measured against GitHub before it is sealed; only its fingerprint is kept, and it is shown and replaced under Settings afterwards.
       </span>
-      <input id={`owner-credential-${need.kind}`} className="input" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_… or github_pat_…" disabled={recording} />
+      <input id={`owner-credential-${need.kind}`} className="input" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={onKeyDown} placeholder="ghp_… or github_pat_…" disabled={recording} />
       {error && (
         <p role="alert" className="alert alert--danger">
           {error}
         </p>
       )}
       <div className="actions">
-        <button type="submit" className="btn btn--primary" disabled={recording || token.trim() === ""}>
+        <button type="button" className="btn btn--primary" disabled={recording || token.trim() === ""} onClick={() => void record()}>
           Record
         </button>
       </div>
-    </form>
+    </div>
   );
 }

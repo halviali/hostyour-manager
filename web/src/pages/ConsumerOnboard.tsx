@@ -48,6 +48,8 @@ export function ConsumerOnboard() {
   // What the repository itself said when it was read (POST /api/consumers/prefill): the version and
   // the channel, each with its source, so the hint under the field names where the number came from.
   const [prefill, setPrefill] = useState<OnboardPrefillView | null>(null);
+  /** The URL `prefill` answers for — a blur on an unchanged URL reads nothing again. */
+  const [readURL, setReadURL] = useState("");
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,13 +79,17 @@ export function ConsumerOnboard() {
 
   // The check under the repository field: the owner's identity lists the repository's release
   // tags once and is not kept; what comes back is the version the onboarding will release, the place
-  // it was read from, and which identity it is (#220).
+  // it was read from, and which identity it is (#220). It runs when the URL field is left as well
+  // (#242): every consumer is a foreign repository, so the owner's PAT — asked for by this check where
+  // none is recorded — is wanted as soon as the URL names the owner, not after a further click.
   async function readRepository(): Promise<void> {
+    if (!canRead) return;
     setReading(true);
     setError(null);
     try {
       const view = await prefillOnboard({ repoURL: form.repoURL.trim() });
       setPrefill(view);
+      setReadURL(form.repoURL.trim());
       setForm((f) => ({ ...f, channel: view.channel, stage: "" }));
     } catch (err) {
       setError(msg(err));
@@ -137,6 +143,11 @@ export function ConsumerOnboard() {
   const noTargets = targets !== null && activeTargets.length === 0;
   const targetChosen = buildOnly || form.clusterId !== "";
   const canRead = form.repoURL.trim() !== "" && !reading && !busy;
+  /** Leaving the URL field reads the repository, unless the URL is the one already read. */
+  const onRepoBlur = (): void => {
+    if (prefill !== null && form.repoURL.trim() === readURL) return;
+    void readRepository();
+  };
   const namespace = form.consumerName && form.stage ? `${form.consumerName}-${form.stage}` : "<name>-<stage>";
 
   return (
@@ -170,7 +181,7 @@ export function ConsumerOnboard() {
         <div className="form-grid">
           <label className="field">
             <span className="field__label">Repository URL</span>
-            <input value={form.repoURL} onChange={onRepo} placeholder="https://github.com/acme/app.git" required />
+            <input value={form.repoURL} onChange={onRepo} onBlur={onRepoBlur} placeholder="https://github.com/acme/app.git" required />
             <span className="field__hint">
               The repository name IS the unit: the manifest&apos;s name, the chart&apos;s name and the consumer name below must all
               equal it (G1).
@@ -185,9 +196,10 @@ export function ConsumerOnboard() {
               A check, not a step of the onboarding: lists the repository&apos;s release tags with the identity the
               onboarding will run with — the owner&apos;s, by the owner of the URL: the platform&apos;s GitHub App where it
               reaches the repository, else the owner&apos;s repository PAT — so that identity is proven to read the repository,
-              and shows the version the onboarding will release under Version. Where the App does not reach the repository,
-              the owner&apos;s repository PAT is asked for below, once; where the repository installs private npm packages,
-              the owner&apos;s packages reader likewise. Nothing is cloned and nothing is kept.
+              and shows the version the onboarding will release under Version. It runs when the URL field is left, and again on
+              this button. Where the App does not reach the repository, the owner&apos;s repository PAT is asked for below, once;
+              where the repository installs private npm packages, the owner&apos;s packages reader likewise. Nothing is cloned
+              and nothing is kept.
               {prefill ? ` Identity: ${prefill.identity === "github-app" ? "the platform's GitHub App" : prefill.identity === "pat" ? "the owner's repository PAT" : "none yet — the owner's repository PAT is asked for below"}.` : ""}
             </span>
           </div>
