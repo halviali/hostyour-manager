@@ -106,6 +106,9 @@ export interface Plan {
   warnings: string[];
   estimateSeconds?: number;
   requiredSecrets: string[];
+  /** Per secret key of this plan, the sentence its declaration gives it, for the approve form
+   *  (#244). Optional: a plan that says nothing shows the keys alone. */
+  secretHints?: Record<string, string>;
   /** What the steps' probes measured before the approve (executor/probe.ts), in step order. Written
    *  by the planner, never by a definition; frozen into plan_json and rendered on the approve card. */
   findings?: PreflightCheck[];

@@ -649,6 +649,14 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       // freezing them into params_json is safe.
       const secretSpecs = outcome.report.manifest?.secrets ?? [];
       const requiredSecrets = secretSpecs.filter((s) => !s.generate && s.required).map((s) => `consumer-secret:${s.key}`);
+      // WHAT EACH VALUE IS, IN THE MANIFEST'S OWN WORDS (#244). A key name says what a value is
+      // called, never what it is: "SMTP_URL" does not say that a user, a password, a host and a port
+      // ride in one URL, and "S3_ACCESS_KEY_ID" does not say the customer's own object-storage
+      // account issues it. The manifest's `description` says exactly that, and without this it
+      // reached nobody: the operator typed into a list of bare key names.
+      const secretHints = Object.fromEntries(
+        secretSpecs.filter((s) => !s.generate && s.required && s.description).map((s) => [`consumer-secret:${s.key}`, s.description as string]),
+      );
       // A manifest-declared activation adds a final `activate` step + asks the operator for its
       // dynamic args at approve (the prompt fields become NON-secret `requiredInputs`, collected in the
       // clear, below in the plan); the activation SHAPE is frozen into params so the step has it. Both
@@ -714,6 +722,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         ],
         warnings: [],
         requiredSecrets,
+        ...(Object.keys(secretHints).length > 0 ? { secretHints } : {}),
         ...(outcome.report.manifest?.activation?.prompt.length ? { requiredInputs: outcome.report.manifest.activation.prompt.map((pr) => ({ field: pr.field, label: pr.label })) } : {}),
       };
       return { outcome: "planned", params, plan };

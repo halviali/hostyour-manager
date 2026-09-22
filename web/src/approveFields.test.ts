@@ -32,3 +32,18 @@ describe("secretFieldHint — what the credential is spent on", () => {
     expect(secretFieldHint("tenant-storage:key")).toBeNull();
   });
 });
+
+// What a value IS comes from its declaration, never from its key (#244): the manifest's
+// `description` of a consumer secret rides the plan and is shown under the field.
+describe("secretFieldHint — the sentence the plan carries for a key", () => {
+  const hints = { "consumer-secret:SMTP_URL": "SMTP URL of the customer's own mail account, e.g. smtp://user%40example.com:password@mail.example.com:587" };
+  it("shows the plan's sentence for a consumer secret", () => {
+    expect(secretFieldHint("consumer-secret:SMTP_URL", hints)).toMatch(/smtp:\/\/user%40example\.com/);
+  });
+  it("says nothing for a key the plan carries no sentence for", () => {
+    expect(secretFieldHint("consumer-secret:S3_REGION", hints)).toBeNull();
+  });
+  it("keeps the machine password's own sentence, whatever a plan says", () => {
+    expect(secretFieldHint(MACHINE_PASSWORD_SECRET, { [MACHINE_PASSWORD_SECRET]: "nonsense" })).toMatch(/raised with it/);
+  });
+});

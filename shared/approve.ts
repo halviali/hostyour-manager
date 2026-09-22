@@ -33,6 +33,13 @@ export interface OperatorInput {
 
 /** What a run's view carries about its approve: what a person supplies, and what was measured before
  *  they are asked (RunView extends this, shared/api-types.ts). */
+/** What a run's view carries about ONE asked secret beyond its key: the sentence its declaration
+ *  gives it. For a consumer's own secret that is the `description` of its `secrets[]` entry in the
+ *  manifest (#244) — the only place that says what the value IS, which key names never can
+ *  ("SMTP_URL" does not say that a user, a password, a host and a port ride in one URL). Absent for
+ *  a key whose declaration carries none. */
+export type SecretHints = Record<string, string>;
+
 export interface RunApproveView {
   /** The plan's operator-supplied secret keys (executor `requiredSecrets`). The approve
    *  ceremony renders one input per entry and passes them to /approve; empty for most runs
@@ -49,6 +56,9 @@ export interface RunApproveView {
    *  every run whose consumer declares no `activation:` block. Rendered as plaintext fields in the
    *  approve ceremony and carried in the approve payload under `activation-input:<field>` keys. */
   requiredInputs: OperatorInput[];
+  /** Per secret key, the sentence its declaration gives it (#244). A key the plan said nothing
+   *  about is absent, and the form then shows the key alone, as before. */
+  secretHints: SecretHints;
 }
 
 /** Whether what a person has typed is enough to approve the run.

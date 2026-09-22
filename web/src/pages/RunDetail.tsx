@@ -244,6 +244,7 @@ export function RunDetail() {
             requiredSecrets={run.requiredSecrets}
             optionalSecrets={run.optionalSecrets}
             requiredInputs={run.requiredInputs}
+            secretHints={run.secretHints}
             onApprove={(payload) => act(() => approveRun(runId, payload))}
             onDelete={() => setConfirmDelete(true)}
           />

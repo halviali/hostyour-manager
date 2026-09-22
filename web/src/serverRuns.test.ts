@@ -21,6 +21,7 @@ const run = (over: { id?: string; kind?: RunKind; status?: RunStatus; targetId?:
   deletedAt: null,
   cleanupsRegistered: false,
   aborted: false,
+  secretHints: {},
 });
 
 describe("relevantRun — the ONE run a server's card surfaces", () => {

@@ -36,7 +36,8 @@ export function secretFieldLabel(key: string): string {
 /** What the person reads under the box, or null where the key says the whole of it. It states what
  *  the credential is used for and nothing about how long it lives: both forms already carry that
  *  sentence once, under the fields, for every credential on the card at once. */
-export function secretFieldHint(key: string): string | null {
+export function secretFieldHint(key: string, hints: Readonly<Record<string, string>> = {}): string | null {
   if (key === MACHINE_PASSWORD_SECRET) return "Every command this run sends to root is raised with it, and the run stops rather than going on without it.";
-  return null;
+  // What the plan said about THIS key — for a consumer's own secret, its manifest description (#244).
+  return hints[key] ?? null;
 }

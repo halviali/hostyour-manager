@@ -24,6 +24,7 @@ const run = (id: string, kind: RunView["kind"], status: RunView["status"]): RunV
   deletedAt: null,
   cleanupsRegistered: false,
   aborted: false,
+  secretHints: {},
 });
 
 const target: PurgeTenantTarget = { guid: "zsfk0m57xp87", subdomain: "simetrix", stage: "prod", clusterId: "cls_1" };
