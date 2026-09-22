@@ -306,6 +306,8 @@ export interface OnboardInput {
   clusterId?: string;
   owner: string;
   chartPath?: string;
+  /** The namespace ceiling the unit is sold — the operator's answer, never the manifest's (G24). */
+  size: UnitSize;
   // No credential rides the request: the unit's identity is its owner's, recorded on the
   // Owners page and derived from the owner of the repository URL (#220).
 }

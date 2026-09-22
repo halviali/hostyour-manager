@@ -4,6 +4,7 @@ import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-
 import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOwnerCredential, type OnboardTargetView } from "../api.ts";
 import { OwnerCredentialStep } from "../components/OwnerCredentialStep.tsx";
+import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "../../../shared/unit-size.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -36,7 +37,7 @@ function deriveConsumerName(repoURL: string): string {
 
 export function ConsumerOnboard() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ consumerName: "", repoURL: "", channel: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart" });
+  const [form, setForm] = useState({ consumerName: "", repoURL: "", channel: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart", size: DEFAULT_UNIT_SIZE as string });
   // Deployable (the manifest declares a chart → pick a cluster) vs build-only (no chart → the stage
   // alone says where the one triggered release run puts the release). The server checks the choice
   // against the manifest's own shape.
@@ -132,6 +133,7 @@ export function ConsumerOnboard() {
         ...(buildOnly ? {} : { clusterId: form.clusterId }),
         owner: form.owner.trim(),
         ...(form.chartPath.trim() ? { chartPath: form.chartPath.trim() } : {}),
+        size: form.size as UnitSize,
       });
       nav(`/runs/${runId}`); // the Run screen streams the live gate report + the approve card
     } catch (err) {
@@ -294,6 +296,23 @@ export function ConsumerOnboard() {
             <span className="field__label">Owner</span>
             <input value={form.owner} onChange={set("owner")} placeholder="team-acme" required />
           </label>
+          {!buildOnly && (
+            <label className="field">
+              <span className="field__label">Size</span>
+              <select value={form.size} onChange={set("size")} required>
+                {UNIT_SIZE.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <span className="field__hint">
+                The ceiling the unit&apos;s namespace gets — your answer, never the manifest&apos;s. A unit that brings database units
+                of its own (postgresql among its services, or a mongodb mode other than shared) may not stand at {DEFAULT_UNIT_SIZE}:
+                gate G24 refuses it. What each size means on this installation is the size table.
+              </span>
+            </label>
+          )}
           {!buildOnly && (
             <label className="field">
               <span className="field__label">
