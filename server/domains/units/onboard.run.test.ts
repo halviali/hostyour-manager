@@ -317,9 +317,8 @@ describe("onboard run definition", () => {
     (prt.dns as FakeDnsProvider).seed("s2.example", "A", "203.0.113.20");
     const steps = makeOnboardDef(prt).steps(p);
     const byName = (n: string) => steps.find((s) => s.name === n)!;
-    await byName("attest-target").run(ctx(p, "attest-target", []));
-    await byName("watch-deployment").run(ctx(p, "watch-deployment", []));
-    await byName("smoke").run(ctx(p, "smoke", []));
+    // watch-release-build rides along: it records the minted tag the deployment watch holds the branch to (#246).
+    for (const name of ["attest-target", "watch-release-build", "watch-deployment", "smoke"]) await byName(name).run(ctx(p, name, []));
     // The resolver is what routes every remaining step at a slave-hosted unit — the deployment watch
     // reads the per-slave ArgoCD namespace, the smoke the slave's own cluster. Nothing writes a
     // project there any more: the AppProject is rendered into that same namespace by the reconciler

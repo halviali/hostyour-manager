@@ -373,7 +373,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     // — the proof of the injection — and read its results back stage by stage.
     triggerReleaseStep(ports, p),
     watchReleaseBuildStep(ports, p, release),
-    watchDeploymentStep(ports, p),
+    watchDeploymentStep(ports, p, release),
     smokeStep(ports, p),
     recordInventoryStep(ports, p),
   ];

@@ -57,7 +57,7 @@ const creds: CredentialStore = { open: () => Promise.resolve(Buffer.from("github
 const ctx = (logs: string[]): StepCtx =>
   ({
     runId: "run_rc", creds, signal: new AbortController().signal,
-    log: (_s: string, t: string) => logs.push(t), checkpoint: () => undefined, registerCleanup: () => undefined,
+    log: (_s: string, t: string) => logs.push(t), checkpoint: () => undefined, readCheckpoint: () => undefined, registerCleanup: () => undefined,
   }) as unknown as StepCtx;
 
 describe("trigger-release", () => {
@@ -122,10 +122,45 @@ describe("watch-deployment", () => {
   it("reads the tag the bump wrote off deploy/<stage> and holds the Application to that branch head", async () => {
     const prt = portsWith();
     const logs: string[] = [];
-    await watchDeploymentStep(prt, deployable()).run(ctx(logs));
+    await watchDeploymentStep(prt, deployable(), { releaseTag: MINTED_TAG }).run(ctx(logs));
     expect((prt.repo as FakeRepoReader).clones).toEqual([expect.objectContaining({ ref: "deploy/prod" })]);
     expect(logs.some((l) => l.includes(`the bump wrote ${MINTED_TAG}-abc1234`))).toBe(true);
     expect(logs.some((l) => l.includes("Synced + Healthy"))).toBe(true);
+  });
+
+  // #246: the plan's version is what the WIZARD read; the cycle mints the next free number when it
+  // runs, and a customer may release in between. swissbookai was planned at 0.1.3 and delivered
+  // 0.1.6, and this step waited for a pin that could never appear.
+  it("holds the branch to the tag the CYCLE minted, whatever version the plan froze", async () => {
+    const prt = portsWith({
+      repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": `builds:
+  - name: acme-api
+    image: acme-api
+    tag: "9.9.9-stable-20260922141253-ebed5a1"
+` } }),
+    });
+    const logs: string[] = [];
+    // The params still say 1.0.0 — only the minted tag decides.
+    await watchDeploymentStep(prt, deployable(), { releaseTag: "9.9.9-stable-20260922141253" }).run(ctx(logs));
+    expect(logs.some((l) => l.includes("the bump wrote 9.9.9-stable-20260922141253-ebed5a1"))).toBe(true);
+  });
+
+  it("refuses to watch at all where no minted tag was recorded — nothing would say which release to wait for", async () => {
+    await expect(watchDeploymentStep(portsWith(), deployable(), {}).run(ctx([]))).rejects.toThrow(/recorded no minted tag/);
+  });
+
+  // #246: the delivery is what this run owes. A chart whose pods do not come up is the consumer
+  // repository's bug, and holding the onboarding red over it says the platform failed when it did not.
+  it("ends GREEN on Synced with a health that is not Healthy, and names that health", async () => {
+    const argo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Degraded", message: "CrashLoopBackOff" } });
+    const prt = portsWith({
+      resolver: new FakeClusterKubeResolver({
+        clusterReader: new FakeClusterReader(), argoReader: argo, projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
+      }) as unknown as OnboardPorts["resolver"],
+    });
+    const logs: string[] = [];
+    await watchDeploymentStep(prt, deployable(), { releaseTag: MINTED_TAG }).run(ctx(logs));
+    expect(logs.some((l) => l.includes("the delivery is done") && l.includes("Degraded") && l.includes("consumer repository's to fix"))).toBe(true);
   });
 
   it("fails when the delivery branch never carries the release's pins (the bump commit is not visible)", async () => {
@@ -133,7 +168,7 @@ describe("watch-deployment", () => {
       repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "0.0.0-placeholder"\n' } }),
       deployRefVisibleMs: 30,
     });
-    await expect(watchDeploymentStep(prt, deployable()).run(ctx([]))).rejects.toThrow(/bump commit is not visible/);
+    await expect(watchDeploymentStep(prt, deployable(), { releaseTag: MINTED_TAG }).run(ctx([]))).rejects.toThrow(/bump commit is not visible/);
   });
 
   it("fails on a terminally FAILED sync operation and names the phase (fail-fast, never the whole budget)", async () => {
@@ -143,7 +178,7 @@ describe("watch-deployment", () => {
         clusterReader: new FakeClusterReader(), argoReader: argo, projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }) as unknown as OnboardPorts["resolver"],
     });
-    await expect(watchDeploymentStep(prt, deployable()).run(ctx([]))).rejects.toThrow(/phase=Failed/);
+    await expect(watchDeploymentStep(prt, deployable(), { releaseTag: MINTED_TAG }).run(ctx([]))).rejects.toThrow(/phase=Failed/);
     const ff = argo.lastWatchOpts?.failFast;
     expect(ff).toBeDefined();
     expect(ff!({ syncRevision: null, targetRevision: null, sync: "OutOfSync", health: "Progressing", opPhase: "Running" } as ArgoAppStatus)).toBe(false); // in flight — keep waiting
@@ -166,6 +201,6 @@ describe("watch-deployment", () => {
         clusterReader: new FakeClusterReader(), argoReader: argo, projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }) as unknown as OnboardPorts["resolver"],
     });
-    await expect(watchDeploymentStep(prt, deployable()).run(ctx([]))).rejects.toThrow(/did not reach Synced/);
+    await expect(watchDeploymentStep(prt, deployable(), { releaseTag: MINTED_TAG }).run(ctx([]))).rejects.toThrow(/was not Synced/);
   });
 });

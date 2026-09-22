@@ -405,8 +405,14 @@ export function provisionDnsStep(ports: OnboardPorts, p: DeployableOnboardParams
   };
 }
 
-/** smoke: verify the consumer namespace on the target cluster (namespace + workloads available +
- *  ExternalSecrets Ready). */
+/** smoke: verify what the PLATFORM put in the consumer namespace on the target cluster — the
+ *  namespace itself and the ExternalSecrets that carry the unit's own secrets into it. Both are ours,
+ *  and either missing means the onboarding did not finish.
+ *
+ *  A WORKLOAD THAT IS NOT AVAILABLE IS REPORTED, NOT REFUSED (#246), for the same reason the watch
+ *  before it settles on Synced: whether the customer's images come up is their repository's
+ *  business, and a run that fails on it says the platform failed when it delivered exactly what was
+ *  asked. The names and the reasons are in the log and the checkpoint, so nothing is hidden. */
 export function smokeStep(ports: OnboardPorts, p: DeployableOnboardParams): Step {
   return {
     name: "smoke",
@@ -416,15 +422,17 @@ export function smokeStep(ports: OnboardPorts, p: DeployableOnboardParams): Step
       const { clusterReader } = await ports.resolver.resolve(p.clusterId);
       const smoke = await clusterReader.smoke(p.namespace);
       if (!smoke.namespaceExists) throw errValidation(`namespace ${p.namespace} does not exist after sync`);
-      const failing = smoke.workloads.filter((w) => !w.available);
-      if (failing.length) {
-        throw errValidation(`workloads not available in ${p.namespace}: ${failing.map((w) => `${w.kind}/${w.name}${w.message ? ` (${w.message})` : ""}`).join(", ")}`);
-      }
       if (!smoke.externalSecretsReady) {
         throw errValidation(`ExternalSecrets are not all Ready in ${p.namespace} — the consumer's secrets did not materialize`);
       }
-      ctx.checkpoint({ namespaceExists: true, workloads: smoke.workloads.length, externalSecretsReady: true });
-      ctx.log("meta", `smoke ok — ${smoke.workloads.length} workload(s) available, external secrets ready`);
+      const failing = smoke.workloads.filter((w) => !w.available);
+      ctx.checkpoint({ namespaceExists: true, workloads: smoke.workloads.length, unavailable: failing.map((w) => `${w.kind}/${w.name}`), externalSecretsReady: true });
+      ctx.log(
+        "meta",
+        failing.length === 0
+          ? `smoke ok — ${smoke.workloads.length} workload(s) available, external secrets ready`
+          : `smoke — the namespace stands and its external secrets are ready; ${failing.length} of ${smoke.workloads.length} workload(s) are not available yet: ${failing.map((w) => `${w.kind}/${w.name}${w.message ? ` (${w.message})` : ""}`).join(", ")} — that is the consumer repository's to fix, and the onboarding is done`,
+      );
     },
   };
 }
