@@ -510,7 +510,7 @@ export class Registrations {
       const { fqdn, apiHost } = await resolveClusterMarkingIn(books, next.cluster);
       // G29 refuses such a sender at the onboarding; a move onto such a cluster is refused here.
       if (apiHost === undefined) {
-        throw errValidation(`${name} carries the SMTP entry of ${stage}, and ${clusterMapPath(fqdn)} carries no global.apiHost — the tailnet address the relay reaches the entry on, written by deploy-slave for a slave and by tailnet-join-self for a master`);
+        throw errValidation(`${name} carries the SMTP entry of ${stage}, and ${clusterMapPath(fqdn)} carries no global.apiHost — the tailnet address the relay reaches the entry on, written by deploy-slave for a slave and by tailnet-record-address for a master`);
       }
       return { write: [{ path, content: relayValues(name, stage, apiHost, next.smtpEntry.port) }], remove: [] };
     }

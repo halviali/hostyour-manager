@@ -220,6 +220,9 @@ const TAG = "1.2.0-stable-20260728120000";
 const FULL_MAP = [
   "stage: prod", "role: master", "booksCluster: m1.example.com", `release: ${TAG}`, "",
   "global:",
+  // THE MASTER'S OWN TAILNET ADDRESS, which the map template carries through every rewrite from the
+  // answers and tailnet-record-address writes after the join (hostyour-cloud#242).
+  "  apiHost: 100.64.0.1",
   "  domain: m1.example.com",
   "  clusterName: m1",
   "  booksCluster: m1.example.com",

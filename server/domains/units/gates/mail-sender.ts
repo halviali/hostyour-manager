@@ -32,7 +32,7 @@ export function gateMailSender(input: { unitName: string; stage: Stage; senders:
       ...base,
       status: "fail",
       found: `the map of ${input.cluster} carries no global.apiHost`,
-      reason: `the relay reaches ${input.unitName}'s SMTP entry only on the tailnet address of ${input.cluster}, which its map does not carry — deploy-slave writes it for a slave and tailnet-join-self for a master`,
+      reason: `the relay reaches ${input.unitName}'s SMTP entry only on the tailnet address of ${input.cluster}, which its map does not carry — deploy-slave writes it for a slave and tailnet-record-address for a master`,
       detail: "the cluster's map carries no tailnet address",
     };
   }

@@ -40,7 +40,7 @@
 //                the master's per-slave ArgoCD instance, Vault on every ESO login, the shared
 //                dashboard's kubeconfig, and this process's per-slave kube client, which writes.
 //                A master's map carries apiHost alone: its own tailnet address, which the catalogue's
-//                tailnet-join-self records and the fence of a mail sender's SMTP entry admits
+//                tailnet-record-address records and the fence of a mail sender's SMTP entry admits
 //                (hostyour-cloud#242). The slaves ApplicationSet selects on role, so it stays out.
 //   unit-apex    the public apex units (consumers and tenants) serve under, <name>.<unit-apex>.
 //   platform-domain  the installation's business domain — the mail sender identity and the relay's

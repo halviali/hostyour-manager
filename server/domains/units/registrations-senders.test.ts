@@ -95,7 +95,7 @@ describe("the relay target of a stage follows its mail sender, in the commit tha
     const { repo, reg } = books();
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ smtpEntry: entry }), runId: "run_1" });
     const before = repo.commits.length;
-    await expect(reg.setCluster("prod", "acme", "m1", "run_2")).rejects.toThrow(/clusters\/active\/m1\.example\.com\.yaml carries no global\.apiHost.*deploy-slave for a slave and by tailnet-join-self for a master/);
+    await expect(reg.setCluster("prod", "acme", "m1", "run_2")).rejects.toThrow(/clusters\/active\/m1\.example\.com\.yaml carries no global\.apiHost.*deploy-slave for a slave and by tailnet-record-address for a master/);
     expect(repo.commits).toHaveLength(before);
   });
 });

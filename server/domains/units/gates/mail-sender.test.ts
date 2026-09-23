@@ -25,6 +25,6 @@ describe("G29 mail sender (hard) — one stage, one unit carrying an SMTP entry,
     expect(g.status).toBe("fail");
     expect(g.found).toBe("the map of s1.example carries no global.apiHost");
     expect(g.reason).toContain("tailnet address of s1.example");
-    expect(g.reason).toContain("deploy-slave writes it for a slave and tailnet-join-self for a master");
+    expect(g.reason).toContain("deploy-slave writes it for a slave and tailnet-record-address for a master");
   });
 });
