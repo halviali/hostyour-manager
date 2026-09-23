@@ -127,6 +127,42 @@ describe("ConsumerManifestSchema fqdn (the declared extra public FQDN)", () => {
   });
 });
 
+describe("smtpEntry (the unit's declared and attested SMTP submission entry)", () => {
+  const manifest = {
+    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",
+    envs: ["prod"], chart: { path: "deploy/chart" },
+  } as const;
+  const stage = {
+    name: "acme", repoURL: "https://github.com/x/acme.git",
+    chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+  };
+  const entry = { service: "acme-mta", port: 2525 };
+
+  it("is declared by a deployable manifest and stays undefined when absent", () => {
+    expect(ConsumerManifestSchema.parse({ ...manifest, smtpEntry: entry }).smtpEntry).toEqual(entry);
+    expect(ConsumerManifestSchema.parse(manifest).smtpEntry).toBeUndefined();
+  });
+
+  it("refuses a Service name that is no DNS label and a port outside 1..65535", () => {
+    for (const bad of [{ service: "Acme_MTA", port: 2525 }, { service: "acme-mta", port: 0 }, { service: "acme-mta", port: 70000 }]) {
+      expect(ConsumerManifestSchema.safeParse({ ...manifest, smtpEntry: bad }).success).toBe(false);
+    }
+  });
+
+  it("refuses smtpEntry on a manifest without a chart — only a deployable unit runs the MTA its Service names", () => {
+    const r = ConsumerManifestSchema.safeParse({ ...manifest, chart: undefined, builds: [{ name: "acme-api", containerfile: "Containerfile" }], smtpEntry: entry });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.some((i) => i.path.join(".") === "smtpEntry")).toBe(true);
+  });
+
+  it("is carried by a stage registration and refused in build.yaml", () => {
+    expect(ConsumerRegistrationSchema.parse({ ...stage, smtpEntry: entry }).smtpEntry).toEqual(entry);
+    const r = ConsumerRegistrationSchema.safeParse({ name: "acme", repoURL: "https://github.com/x/acme.git", builds: [], smtpEntry: entry });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.some((i) => i.path.join(".") === "smtpEntry")).toBe(true);
+  });
+});
+
 describe("ConsumerRegistrationSchema fqdn (the ATTESTED extra FQDN)", () => {
   const stage = {
     name: "acme", repoURL: "https://github.com/x/acme.git",

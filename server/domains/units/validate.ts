@@ -22,7 +22,8 @@ import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import { sandboxProvenance } from "../../../shared/gates.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import { consumerHostLabel } from "../../../shared/consumer.ts";
+import { consumerHostLabel, type SmtpEntry } from "../../../shared/consumer.ts";
+import { gateMailSender } from "./gates/mail-sender.ts";
 import { AppError } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
@@ -95,6 +96,12 @@ export interface AttestedFqdnReader {
   listAttestedHostLabels(stage: Stage, except: { unit: string }): Promise<{ unit: string; host: string }[]>;
 }
 
+/** Every unit whose stage registration at [stage] carries an attested SMTP entry, with its cluster —
+ *  the stage's mail sender, which G29 holds a candidate declaring an entry against. */
+export interface AttestedSmtpSenderReader {
+  listSmtpSenders(stage: Stage): Promise<{ unit: string; cluster: string; entry: SmtpEntry }[]>;
+}
+
 /** Every subdomain a TENANT stands at, over every stage — TenantRegistrations.listTenantSubdomains over
  *  the catalog pointers. It is a second repo and therefore a dep of its own, not a method on
  *  the consumer registrations above. G23 holds the candidate unit name against it: the two spaces compose
@@ -107,7 +114,7 @@ export interface ValidateDeps {
   runner: GateRunner;
   /** The registration reader the uniqueness gates (G16 builds, G19 fqdn) are held against. Not
    *  optional: a gate that cannot read the other units' claims would have nothing to check. */
-  registrations: AttestedBuildReader & AttestedFqdnReader;
+  registrations: AttestedBuildReader & AttestedFqdnReader & AttestedSmtpSenderReader;
   /** The tenant subdomains G23's host clause is held against (see TenantSubdomainReader). */
   tenantSubdomains: TenantSubdomainReader;
   /** Gate-line sink -> events rows (append-only). Called once per gate as it lands. */
@@ -312,6 +319,10 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       const host = consumerUnitHost(hostLabel, target.stage, hostApex);
       const standing = deps.standingHost ? await deps.standingHost(host, target.domain) : null;
       managerGates.push(gateUnitHost({ host, unitName: req.consumerName, clusterFqdn: target.domain, standing }));
+    }
+    // G29 judges only a unit that declares an SMTP entry: it becomes its stage's mail sender.
+    if (manifest.smtpEntry !== undefined) {
+      managerGates.push(gateMailSender({ unitName: req.consumerName, stage: target.stage, senders: await deps.registrations.listSmtpSenders(target.stage) }));
     }
     for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
 

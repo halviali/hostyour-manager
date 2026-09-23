@@ -28,7 +28,7 @@
 // them. Never the trunk — a registration there would belong to every installation cut from it.
 import type { z } from "zod";
 import { parse as parseYaml } from "yaml";
-import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
+import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "../../../shared/consumer.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import { readClusterValueChain } from "../inventory/cluster-value-chain.ts";
 import type { UnitQuota } from "../../../shared/unit-size.ts";
@@ -258,7 +258,7 @@ export interface RegistrationCommit {
   /** The deploy group of ONE stage, plus the OPTIONAL attested fqdn — the manifest's declared extra
    *  FQDN, copied here by the onboard run kind after G19 refused every name the platform already serves.
    *  Absent ⇒ a build-only unit: build.yaml is written, no stage file. */
-  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string };
+  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string; smtpEntry?: SmtpEntry };
 }
 
 export class Registrations {
@@ -376,6 +376,30 @@ export class Registrations {
     });
   }
 
+  /** Every unit whose stage registration at [stage] carries an attested SMTP entry, with the cluster
+   *  it stands on — the stage's mail sender. G29 holds a candidate that declares an entry against it
+   *  (one sender per stage), and the Mail page detects the sender by it. THROWS on a stage file that
+   *  does not read or validate, naming it, for the listAttestedFqdns reason: a skipped file would
+   *  hide a sender and let a second one in. */
+  async listSmtpSenders(stage: Stage): Promise<{ unit: string; cluster: string; entry: SmtpEntry }[]> {
+    return this.repo.withBranch(this.branch, async (books) => {
+      const senders: { unit: string; cluster: string; entry: SmtpEntry }[] = [];
+      for (const unit of await books.listDir("registrations")) {
+        const path = stagePath(stage, unit);
+        const raw = await books.readFile(path);
+        if (raw === null) continue;
+        let entry: ConsumerRegistration;
+        try {
+          entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
+        } catch (e) {
+          throw errValidation(`${path} is not a readable stage registration, so the stage's mail sender cannot be read: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        if (entry.smtpEntry !== undefined && entry.cluster !== undefined) senders.push({ unit, cluster: entry.cluster, entry: entry.smtpEntry });
+      }
+      return senders;
+    });
+  }
+
   /** The host LABEL every OTHER unit stands on at [stage], off the stage registrations — G23's input
    *  for the one-zone-one-name-space clause. A registration without `host` (none is written without
    *  one any more) stands on its name. */
@@ -488,6 +512,7 @@ export class Registrations {
           mongodb: deploy.mongodb,
           quota: deploy.quota,
           ...(deploy.fqdn !== undefined ? { fqdn: deploy.fqdn } : {}),
+          ...(deploy.smtpEntry !== undefined ? { smtpEntry: deploy.smtpEntry } : {}),
         }),
       });
       message = `register(${unit.name}): ${deploy.stage} on ${deploy.cluster} ${trailer(runId)}`;

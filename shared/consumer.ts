@@ -48,6 +48,18 @@ const chartPath = z.string().regex(/^[^/].*$/);
  *  into the admission policy's CEL string literals. */
 const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/);
 
+/** A unit's SMTP submission entry: the ClusterIP Service of the MTA the unit brings, and the port it
+ *  takes submissions on. Declared in the manifest and ATTESTED into the stage registration by the
+ *  onboarding (gate G29 holds it to one sender per stage). The unit carrying it at a stage is that
+ *  stage's mail sender: hostyour-cloud opens the entry on the unit's cluster, on that cluster's
+ *  tailnet address only, and points the installation's own relay at it; the Mail page measures the
+ *  address mail leaves from there (hostyour-cloud#242, hostyour-manager#249). */
+export const SmtpEntrySchema = z.object({
+  service: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/),
+  port: z.number().int().min(1).max(65535),
+});
+export type SmtpEntry = z.infer<typeof SmtpEntrySchema>;
+
 /** The manifest `tenant:` fan-out block — declared by a build-only fan-out repo
  *  (catalog) so the manager renders/validates the whole tenant package instead of one
  *  chart. Kept INLINE here (never in shared/tenant.ts) because ConsumerManifestSchema references it
@@ -341,6 +353,9 @@ export const ConsumerManifestSchema = z.object({
   // manifest naming a foreign FQDN gets nothing. The platform never verifies domain control and
   // creates no DNS record for it — the customer points their DNS here, or the name does not resolve.
   fqdn: publicFqdn.optional(),
+  // The OPTIONAL SMTP submission entry of the MTA this unit brings (SmtpEntrySchema above). Declaring
+  // it makes the unit its stage's mail sender, attested at onboarding, and one per stage (G29).
+  smtpEntry: SmtpEntrySchema.optional(),
   builds: z
     .array(
       z.object({
@@ -403,6 +418,10 @@ export const ConsumerManifestSchema = z.object({
     // declared name that could never serve would sit unread forever.
     if (m.fqdn !== undefined && !m.chart) {
       ctx.addIssue({ code: "custom", path: ["fqdn"], message: "fqdn requires a chart — only a self-contained (deployable) unit has an Ingress of its own to serve a second FQDN" });
+    }
+    // The entry names a Service of the unit's own chart, so only a unit that deploys one can declare it.
+    if (m.smtpEntry !== undefined && !m.chart) {
+      ctx.addIssue({ code: "custom", path: ["smtpEntry"], message: "smtpEntry requires a chart — only a self-contained (deployable) unit runs the MTA whose Service it names" });
     }
     // a declared activation must point its tokenSecret at a REQUIRED declared secret. seed-secrets
     // keeps that secret's value in-run memory for the activation call; if it named an absent or optional
@@ -569,6 +588,11 @@ export const ConsumerRegistrationSchema = z
     // OPTIONAL even in the stage form (most units serve only `<label>.<stage apex>`), so it stands
     // OUTSIDE the deploy group's stands-or-falls rule; never in build.yaml (checked below).
     fqdn: publicFqdn.optional(),
+    // The ATTESTED SMTP submission entry — the onboard run kind copies the manifest's `smtpEntry`
+    // here after G29 held the stage to one sender. hostyour-cloud renders the entry and the relay's
+    // forward from THIS value, and the Mail page detects the stage's sender by it. Optional in the
+    // stage form, like `fqdn`, and never in build.yaml.
+    smtpEntry: SmtpEntrySchema.optional(),
     // ---- build.yaml only ----
     // The ATTESTED build names of this unit — what the build fan-out renders one pipeline per, and the
     // set G16 holds a candidate unit's declared builds against. A build name IS the image name (flat,
@@ -599,6 +623,9 @@ export const ConsumerRegistrationSchema = z
       }
       if (e.fqdn !== undefined) {
         ctx.addIssue({ code: "custom", path: ["fqdn"], message: "fqdn belongs in a stage registration — build.yaml describes no serving surface" });
+      }
+      if (e.smtpEntry !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["smtpEntry"], message: "smtpEntry belongs in a stage registration — build.yaml describes no serving surface" });
       }
       return;
     }

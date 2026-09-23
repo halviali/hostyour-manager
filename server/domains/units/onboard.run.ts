@@ -8,7 +8,7 @@ import { clusters } from "../../db/schema/inventory.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
 import { GateReportSchema, UngatedOnboardSchema } from "../../../shared/gates.ts";
-import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
+import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, SmtpEntrySchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
 import type { Activator } from "../../adapters/activation/port.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { BuildPlane } from "../../adapters/build-plane/port.ts";
@@ -169,6 +169,10 @@ export const DeployableOnboardParams = OnboardParamsBase.extend({
   // apply-admission-policy admits it beside `<label>.<stage apex>`. Absent ⇒ the unit serves only its
   // platform address.
   fqdn: z.string().optional(),
+  // The manifest's declared SMTP entry, frozen at plan AFTER G29 held the stage to one mail sender.
+  // write-registration copies it into the stage registration — the attest the relay's forward and
+  // the Mail page read.
+  smtpEntry: SmtpEntrySchema.optional(),
   // The manifest-declared secrets (seed-secrets): full specs, not bare keys — the step must know
   // per key whether the Manager MINTS it (generate) or the operator supplied it (required).
   secretSpecs: z.array(ConsumerSecretSpecSchema).default([]),
@@ -697,6 +701,8 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         ...(outcome.report.manifest?.activation ? { activation: outcome.report.manifest.activation } : {}),
         // The G19-checked declared fqdn — approving this plan is the operator's grant of it.
         ...(outcome.report.manifest?.fqdn ? { fqdn: outcome.report.manifest.fqdn } : {}),
+        // The G29-checked SMTP entry — approving this plan makes the unit its stage's mail sender.
+        ...(outcome.report.manifest?.smtpEntry ? { smtpEntry: outcome.report.manifest.smtpEntry } : {}),
       };
       const stepDefs = onboardSteps(ports, params);
       const plan: Plan = {
