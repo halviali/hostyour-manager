@@ -56,6 +56,8 @@ const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0
  *  address mail leaves from there (hostyour-cloud#242, hostyour-manager#249). */
 export const SmtpEntrySchema = z.object({
   service: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/),
+  // The port the MTA's pods listen on, which the Service exposes under the same number: the unit
+  // fence admits the relay on it, and a NetworkPolicy port is the pod's, never the Service's.
   port: z.number().int().min(1).max(65535),
   // The declared secret the unit's MTA signs the platform domain's mail with — a `generate: rsa2048`
   // key of the same manifest. The Manager mints it at onboarding like every generated secret, seeds

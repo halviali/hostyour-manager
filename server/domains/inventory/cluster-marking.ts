@@ -73,7 +73,7 @@ import { AppError, errValidation } from "../../kernel/errors.ts";
 import { SERVER_ROLE, STAGE, type ServerRole, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_TAG_RE } from "../../../shared/release.ts";
 import { CLUSTER_MAP_DIR, clusterMapPath } from "../../../shared/cluster-values.ts";
-import type { PlatformRepo } from "../../adapters/git/port.ts";
+import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 
 /** The ONE derivation of a cluster's short name — the first label of its FQDN.
  *  `m1.example.com` -> `m1`. Every reader of a short name in this repo goes through here;
@@ -315,7 +315,11 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
  *  the SAME short name. Silently keeping the last one read would hand a caller the wrong cluster's
  *  role and stage, so the collision is a typed error naming both files. */
 async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, ClusterMarking>; byName: Map<string, ClusterMarking> }> {
-  return repo.withBranch(repo.booksBranch, async (books) => {
+  return repo.withBranch(repo.booksBranch, indexMarkingsIn);
+}
+
+/** indexMarkings inside a turn the caller already holds on the books branch. */
+async function indexMarkingsIn(books: BranchScope): Promise<{ byFqdn: Map<string, ClusterMarking>; byName: Map<string, ClusterMarking> }> {
   const byFqdn = new Map<string, ClusterMarking>();
   const byName = new Map<string, ClusterMarking>();
   for (const entry of await books.listDir(CLUSTER_MAP_DIR)) {
@@ -334,7 +338,6 @@ async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, 
     byName.set(marking.name, marking);
   }
   return { byFqdn, byName };
-  });
 }
 
 /** Resolve ONE cluster's marking, named either by its FQDN (`s1.example.com`) or by its
@@ -342,11 +345,18 @@ async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, 
  *  A cluster with no map is a typed error, not a default: role/stage/build plane have no safe
  *  fallback, and every install path writes the map before the cluster is ever reachable. */
 export async function resolveClusterMarking(repo: PlatformRepo, cluster: string): Promise<ClusterMarking> {
-  const { byFqdn, byName } = await indexMarkings(repo);
+  return repo.withBranch(repo.booksBranch, (books) => resolveClusterMarkingIn(books, cluster));
+}
+
+/** resolveClusterMarking inside a turn the caller already holds on the books branch. Turns on one
+ *  branch run one at a time, so a writer that commits in its turn cannot open a second one to read a
+ *  map (registrations.ts writes the relay target of a stage from its sender's map). */
+export async function resolveClusterMarkingIn(books: BranchScope, cluster: string): Promise<ClusterMarking> {
+  const { byFqdn, byName } = await indexMarkingsIn(books);
   const found = byFqdn.get(cluster) ?? byName.get(cluster);
   if (!found) {
     throw errValidation(
-      `no cluster map for "${cluster}" — expected ${clusterMapPath(cluster)} on ${repo.booksBranch}; every cluster is marked when it is installed (the branch programs for a master, mark-slave for a slave), so a missing map means the install never completed or the map was removed by hand`,
+      `no cluster map for "${cluster}" — expected ${clusterMapPath(cluster)} on ${books.branch}; every cluster is marked when it is installed (the branch programs for a master, mark-slave for a slave), so a missing map means the install never completed or the map was removed by hand`,
     );
   }
   return found;

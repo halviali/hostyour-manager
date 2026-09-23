@@ -15,8 +15,13 @@
 // branches they name. That branch is this installation's BOOKS (shared/branches.ts): the install
 // branch of the cluster holding the master role, which is where the generators are stamped to read
 // them. Never the trunk — a registration there would belong to every installation cut from it.
+//
+// ONE FILE OUTSIDE registrations/** is written here as well: installation/values/postfix-<stage>.yaml,
+// the relay target the relay of a stage loads. It follows the stage's mail sender — the one unit whose
+// SMTP entry is attested there (G29) — in the very commit that changes the sender's registration
+// (relayTarget below), so the relay and the books never disagree about where the stage's mail goes.
 import { ConsumerRegistrationSchema, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "../../../shared/consumer.ts";
-import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
+import { clusterMapPath, type ClusterValueFile } from "../../../shared/cluster-values.ts";
 import { readClusterValueChain } from "../inventory/cluster-value-chain.ts";
 import type { UnitQuota } from "../../../shared/unit-size.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
@@ -27,7 +32,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { SkippedConsumerPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
+import { clusterShortName, resolveClusterMarkingIn } from "../inventory/cluster-marking.ts";
 import { makeRegistrationGuard, migrateRegistrationFiles, parseRegistration, schemaWhy, serializePointer, trailer, type RegistrationMigration } from "./registration-laws.ts";
 
 const REGISTRATION_GUARD = /^registrations\/[a-z0-9-]+\/(dev|test|prod|build)\.yaml$/;
@@ -36,8 +41,27 @@ const REGISTRATION_GUARD = /^registrations\/[a-z0-9-]+\/(dev|test|prod|build)\.y
 const buildPath = (name: string): string => `registrations/${name}/build.yaml`;
 /** registrations/<unit>/<stage>.yaml — a DEPLOYABLE unit's per-stage registration. */
 const stagePath = (stage: Stage, name: string): string => `registrations/${name}/${stage}.yaml`;
+/** installation/values/postfix-<stage>.yaml — the relay target of a stage, an optional values file of
+ *  the relay (hostyour-cloud#242). */
+const relayPath = (stage: Stage): string => `installation/values/postfix-${stage}.yaml`;
+
+/** The relay target's bytes: the relay of [stage] hands its mail to [unit]'s SMTP entry at the
+ *  tailnet address of the cluster the unit stands on. The value is JSON-encoded, serializePointer's
+ *  rule: valid YAML, and it cannot smuggle a key. */
+function relayValues(unit: string, stage: Stage, apiHost: string, port: number): string {
+  return [
+    `# Written by the Manager from the registration of ${unit} at ${stage}, the one unit whose SMTP entry is`,
+    "# attested there: the relay of this stage hands its mail to that entry over the tailnet. Removed when",
+    "# no unit of the stage declares one.",
+    "postfix:",
+    "  config:",
+    "    general:",
+    `      RELAYHOST: ${JSON.stringify(`[${apiHost}]:${port}`)}`,
+  ].join("\n") + "\n";
+}
 
 const guard = makeRegistrationGuard(REGISTRATION_GUARD, "registrations/<unit>/(dev|test|prod|build).yaml");
+const relayGuard = makeRegistrationGuard(/^installation\/values\/postfix-(dev|test|prod)\.yaml$/, "installation/values/postfix-(dev|test|prod).yaml");
 
 export interface RegistrationRead {
   entry: ConsumerRegistration;
@@ -323,7 +347,11 @@ export class Registrations {
       });
       message = `register(${unit.name}): ${deploy.stage} on ${deploy.cluster} ${trailer(runId)}`;
     }
-    return this.repo.withBranch(this.branch, (books) => books.commit({ message, write }));
+    return this.repo.withBranch(this.branch, async (books) => {
+      if (!deploy) return books.commit({ message, write });
+      const relay = await this.relayTarget(books, deploy.stage, unit.name, deploy);
+      return books.commit({ message, write: [...write, ...relay.write], remove: relay.remove });
+    });
   }
 
   /** Flip the stage registration's `suspended` field — a FIELD flip, not a move between directories:
@@ -374,15 +402,15 @@ export class Registrations {
     const current = await this.readRegistration(stage, name);
     if (!current) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
     const leaving = current.entry.cluster;
-    return this.repo.withBranch(this.branch, (books) =>
-      books.commit({
+    const next = { ...current.entry, cluster, ...(leaving !== undefined && leaving !== cluster ? { leaving } : {}) };
+    return this.repo.withBranch(this.branch, async (books) => {
+      const relay = await this.relayTarget(books, stage, name, next);
+      return books.commit({
         message: `migrate(${name}): ${leaving} -> ${cluster} ${trailer(runId)}`,
-        write: [{
-          path: guard(stagePath(stage, name)),
-          content: serializePointer(ConsumerRegistrationSchema, { ...current.entry, cluster, ...(leaving !== undefined && leaving !== cluster ? { leaving } : {}) }),
-        }],
-      }),
-    );
+        write: [{ path: guard(stagePath(stage, name)), content: serializePointer(ConsumerRegistrationSchema, next) }, ...relay.write],
+        remove: relay.remove,
+      });
+    });
   }
 
   /** Take `leaving` off the stage registration — the last GitOps act of a move, once the source
@@ -411,9 +439,10 @@ export class Registrations {
       // turn this commit runs in, so the decision and the commit see one tree.
       const unitRemoved = (await this.stagesIn(books, name)).every((standing) => standing === stage);
       if (unitRemoved) remove.push(guard(buildPath(name)));
+      const relay = await this.relayTarget(books, stage, name, null);
       const { commit } = await books.commit({
         message: `offboard(${name}): ${stage}${unitRemoved ? " + build" : ""} ${trailer(runId)}`,
-        remove,
+        remove: [...remove, ...relay.remove],
       });
       return { commit, unitRemoved };
     });
@@ -458,6 +487,31 @@ export class Registrations {
       if ((await books.readFile(stagePath(stage, name))) !== null) standing.push(stage);
     }
     return standing;
+  }
+
+  /** THE RELAY TARGET OF [stage] once [name]'s stage file becomes [next] (null: the file goes) — what
+   *  joins the registration's own commit. G29 keeps ONE unit per stage carrying an SMTP entry, so the
+   *  unit's own file decides: carrying one, the relay of the stage hands its mail to that entry at the
+   *  tailnet address (`global.apiHost`) of the map of the cluster the unit stands on; having carried
+   *  one and no longer, the file goes and the relay delivers directly; neither, and the file is another
+   *  unit's or nobody's. Read in the caller's turn, so both files commit from one tree.
+   *
+   *  Whether the standing file carried an entry is asked of its keys, not through the schema: that is
+   *  the whole question, and a file the schema refuses is exactly what a re-onboard writes over. */
+  private async relayTarget(
+    books: BranchScope, stage: Stage, name: string, next: Pick<ConsumerRegistration, "cluster" | "smtpEntry"> | null,
+  ): Promise<{ write: { path: string; content: string }[]; remove: string[] }> {
+    const path = relayGuard(relayPath(stage));
+    if (next?.smtpEntry !== undefined && next.cluster !== undefined) {
+      const { fqdn, apiHost } = await resolveClusterMarkingIn(books, next.cluster);
+      // G29 refuses such a sender at the onboarding; a move onto such a cluster is refused here.
+      if (apiHost === undefined) {
+        throw errValidation(`${name} carries the SMTP entry of ${stage}, and ${clusterMapPath(fqdn)} carries no global.apiHost — the tailnet address the relay reaches the entry on, written by deploy-slave for a slave and by tailnet-join-self for a master`);
+      }
+      return { write: [{ path, content: relayValues(name, stage, apiHost, next.smtpEntry.port) }], remove: [] };
+    }
+    const raw = await books.readFile(stagePath(stage, name));
+    return { write: [], remove: raw !== null && parseRegistration(raw).smtpEntry !== undefined ? [path] : [] };
   }
 
   /** The read-modify-write behind setSuspended/setQuiesced: re-emit the WHOLE registration with one

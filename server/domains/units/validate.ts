@@ -20,7 +20,7 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import { sandboxProvenance } from "../../../shared/gates.ts";
-import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
+import { clusterMapPath, type ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { consumerHostLabel, type SmtpEntry } from "../../../shared/consumer.ts";
 import { gateMailSender } from "./gates/mail-sender.ts";
@@ -320,9 +320,12 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
       const standing = deps.standingHost ? await deps.standingHost(host, target.domain) : null;
       managerGates.push(gateUnitHost({ host, unitName: req.consumerName, clusterFqdn: target.domain, standing }));
     }
-    // G29 judges only a unit that declares an SMTP entry: it becomes its stage's mail sender.
-    if (manifest.smtpEntry !== undefined) {
-      managerGates.push(gateMailSender({ unitName: req.consumerName, stage: target.stage, senders: await deps.registrations.listSmtpSenders(target.stage) }));
+    // G29 judges only a deployable unit that declares an SMTP entry: it becomes its stage's mail sender
+    // on the target cluster. A build-only target stands on no cluster — a manifest carrying the entry
+    // declares a chart, and the form check refuses it there.
+    if (manifest.smtpEntry !== undefined && target.chartPath !== undefined) {
+      const senders = await deps.registrations.listSmtpSenders(target.stage);
+      managerGates.push(gateMailSender({ unitName: req.consumerName, stage: target.stage, senders, cluster: target.domain, apiHost: apiHostFromChain(target.clusterValueFiles, target.domain) }));
     }
     for (const g of managerGates) deps.log(`${g.id} ${g.status} — ${g.detail}`);
 
@@ -337,6 +340,15 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
   } finally {
     await deps.repo.dispose(cloned.workdir);
   }
+}
+
+/** The target cluster's tailnet address — `global.apiHost` of its OWN map in the chain — or null where
+ *  the map states none. The map alone, because the map is what the relay target of the stage is
+ *  written from (registrations.ts relayTarget). */
+function apiHostFromChain(files: readonly ClusterValueFile[], domain: string): string | null {
+  const map = files.find((f) => f.path === clusterMapPath(domain));
+  const apiHost = map === undefined ? undefined : (parseYaml(map.content) as { global?: { apiHost?: unknown } } | null)?.global?.apiHost;
+  return typeof apiHost === "string" && apiHost.length > 0 ? apiHost : null;
 }
 
 /** The apex the chain states, or null where it states none — the tolerant read G27 takes, because a
