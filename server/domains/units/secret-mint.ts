@@ -94,6 +94,9 @@ function assertMintComplexity(key: string, kind: string, value: string): void {
 export interface MintedSecretData {
   /** key -> value, ready for ONE Vault put. */
   data: Record<string, string>;
+  /** generate:"rsa2048" key -> the SPKI PEM public half of the pair minted for it. Not a secret: it is
+   *  what a DKIM key is published as, and the caller keeps it where it needs to publish one. */
+  publicKeys: Record<string, string>;
   /** Value-FREE summary of what was platform-generated (for the run log; never a secret value). */
   minted: string[];
 }
@@ -162,7 +165,8 @@ export function buildConsumerSecretData(
     }
     data[spec.key] = v;
   }
-  return { data, minted };
+  const publicKeys = Object.fromEntries([...keypairs].map(([key, pair]) => [key, pair.publicPem]));
+  return { data, minted, publicKeys };
 }
 
 /** {@link buildConsumerSecretData} plus the one derivation that needs an external credential: a

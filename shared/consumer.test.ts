@@ -155,6 +155,16 @@ describe("smtpEntry (the unit's declared and attested SMTP submission entry)", (
     expect(r.error?.issues.some((i) => i.path.join(".") === "smtpEntry")).toBe(true);
   });
 
+  it("dkimKey must name a declared generate:\"rsa2048\" secret — the Manager mints the signing key as that secret", () => {
+    const withKey = (secrets: object[]) => ConsumerManifestSchema.safeParse({ ...manifest, secrets, smtpEntry: { ...entry, dkimKey: "MAIL_DKIM_PRIVATE_KEY" } });
+    expect(withKey([{ key: "MAIL_DKIM_PRIVATE_KEY", generate: "rsa2048" }]).success).toBe(true);
+    for (const secrets of [[], [{ key: "MAIL_DKIM_PRIVATE_KEY", generate: "hex32" }], [{ key: "OTHER", generate: "rsa2048" }]]) {
+      const r = withKey(secrets);
+      expect(r.success).toBe(false);
+      expect(r.error?.issues.some((i) => i.path.join(".") === "smtpEntry.dkimKey")).toBe(true);
+    }
+  });
+
   it("is carried by a stage registration and refused in build.yaml", () => {
     expect(ConsumerRegistrationSchema.parse({ ...stage, smtpEntry: entry }).smtpEntry).toEqual(entry);
     const r = ConsumerRegistrationSchema.safeParse({ name: "acme", repoURL: "https://github.com/x/acme.git", builds: [], smtpEntry: entry });

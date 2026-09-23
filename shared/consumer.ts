@@ -57,6 +57,12 @@ const publicFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0
 export const SmtpEntrySchema = z.object({
   service: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/),
   port: z.number().int().min(1).max(65535),
+  // The declared secret the unit's MTA signs the platform domain's mail with — a `generate: rsa2048`
+  // key of the same manifest. The Manager mints it at onboarding like every generated secret, seeds
+  // the private half into the unit's Vault entry, and keeps the PUBLIC half on the unit's row, which
+  // is what the Mail page publishes under `<stage>._domainkey.<platform domain>`. Absent, the unit
+  // signs nothing for the platform domain and the page says so.
+  dkimKey: z.string().regex(/^[A-Z][A-Z0-9_]*$/).optional(),
 });
 export type SmtpEntry = z.infer<typeof SmtpEntrySchema>;
 
@@ -422,6 +428,11 @@ export const ConsumerManifestSchema = z.object({
     // The entry names a Service of the unit's own chart, so only a unit that deploys one can declare it.
     if (m.smtpEntry !== undefined && !m.chart) {
       ctx.addIssue({ code: "custom", path: ["smtpEntry"], message: "smtpEntry requires a chart — only a self-contained (deployable) unit runs the MTA whose Service it names" });
+    }
+    // The DKIM key is minted as a declared secret, so it must be one: a generate:"rsa2048" key here.
+    const dkimKey = m.smtpEntry?.dkimKey;
+    if (dkimKey !== undefined && !m.secrets.some((s) => s.key === dkimKey && s.generate === "rsa2048")) {
+      ctx.addIssue({ code: "custom", path: ["smtpEntry", "dkimKey"], message: `smtpEntry.dkimKey "${dkimKey}" names no generate:"rsa2048" secret in secrets[] — the Manager mints the signing key as that declared secret` });
     }
     // a declared activation must point its tokenSecret at a REQUIRED declared secret. seed-secrets
     // keeps that secret's value in-run memory for the activation call; if it named an absent or optional

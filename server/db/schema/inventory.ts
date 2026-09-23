@@ -167,6 +167,11 @@ export const apps = sqliteTable("apps", {
   // What the scheduled check last measured on this unit (shared/preflight.ts UnitCheck): the probes
   // of its onboarding, run again. Null until the first check lands — never "fine" by default.
   checkJson: text("check_json", { mode: "json" }).$type<UnitCheck>(),
+  // The PUBLIC half (SPKI PEM) of the DKIM key a mail sender signs the platform domain with — the
+  // secret its SMTP entry names as `dkimKey`, minted at the onboarding that created its Vault entry.
+  // The private half lives in Vault only; this half is what the Mail page publishes. Null for every
+  // unit that is no mail sender, and for a sender whose entry stood before it named a key.
+  dkimPublicKey: text("dkim_public_key"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
   // When a writer last moved this row (status, cluster, last run, the measured check) — the
   // column tenants carries, written by EVERY update of an apps row (hostyour-manager#224).

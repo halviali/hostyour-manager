@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { createPublicKey } from "node:crypto";
 import { buildConsumerSecretData, mintPostgresSuperuserPassword } from "./secret-mint.ts";
 import type { ConsumerSecretSpec } from "../../../shared/consumer.ts";
 
@@ -59,5 +60,17 @@ describe("buildConsumerSecretData — deploy-git-credentials (repo-PAT derived)"
     );
     expect(data["SESSION_SECRET"]).toHaveLength(64);
     expect(data["SUPPLIED"]).toBe("operator-value");
+  });
+});
+
+describe("buildConsumerSecretData — the public halves of the minted key pairs", () => {
+  it("hands back the SPKI public half of every rsa2048 key, matching the private half it put into data", () => {
+    const specs: ConsumerSecretSpec[] = [
+      { key: "MAIL_DKIM_PRIVATE_KEY", required: true, generate: "rsa2048" },
+      { key: "TOKEN", required: true, generate: "hex32" },
+    ];
+    const { data, publicKeys } = buildConsumerSecretData(specs, () => undefined);
+    expect(Object.keys(publicKeys)).toEqual(["MAIL_DKIM_PRIVATE_KEY"]);
+    expect(publicKeys["MAIL_DKIM_PRIVATE_KEY"]).toBe(createPublicKey(data["MAIL_DKIM_PRIVATE_KEY"]!).export({ type: "spki", format: "pem" }).toString());
   });
 });

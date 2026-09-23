@@ -50,6 +50,13 @@
       "when": 1790016220600,
       "tag": "0006_apps-no-repo-credential",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790158046683,
+      "tag": "0007_apps-dkim-public-key",
+      "breakpoints": true
     }
   ]
 }

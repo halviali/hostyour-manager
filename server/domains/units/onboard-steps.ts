@@ -270,7 +270,7 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
       // excludes it); a required non-generate key MUST have been supplied at approve (fail closed);
       // an optional non-generate key is seeded only when supplied. All of it — including the RSA
       // keypair pairing + the complexity verification — is buildConsumerSecretData (secret-mint.ts).
-      const { data, minted } = await buildConsumerSecretDataWithDerivations(
+      const { data, minted, publicKeys } = await buildConsumerSecretDataWithDerivations(
         p.secretSpecs,
         (key) => ctx.secrets.get(`consumer-secret:${key}`)?.toString("utf8"),
         () => ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:seed-secrets:deploy-git-credentials", runId: ctx.runId }),
@@ -308,6 +308,14 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
       // (the manifest schema requires tokenSecret to name a declared secret, so `data` always has it here).
       if (p.activation && runtime) runtime.bootstrapToken = data[p.activation.tokenSecret];
       ctx.log("meta", `seeded ${keys.length} secret(s) write-only into ${path}` + (minted.length ? `; platform-generated + verified: ${minted.join(", ")}` : ""));
+      // A mail sender's DKIM key: the public half stays on the unit's row for the Mail page to publish
+      // — only here, on the create that put its private half into Vault, so the two always match.
+      const dkimKey = p.smtpEntry?.dkimKey;
+      const dkimPublicKey = dkimKey !== undefined ? publicKeys[dkimKey] : undefined;
+      if (dkimPublicKey !== undefined) {
+        ctx.db.update(apps).set({ dkimPublicKey, updatedAt: new Date() }).where(and(eq(apps.name, p.consumerName), eq(apps.stage, p.stage))).run();
+        ctx.log("meta", `the public half of ${dkimKey} is kept on ${p.consumerName}'s row — the Mail page publishes it as the DKIM key of the platform domain`);
+      }
     },
   };
 }
