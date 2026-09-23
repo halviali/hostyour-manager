@@ -1,6 +1,6 @@
-// A unit's ArgoCD repository access, kept by ONE rule for every writer: the onboarding's
-// provision-repo-credential, the relocation's provision-target, and the sweep the App-token refresh
-// timer runs (repo-credential-sweep.ts).
+// A unit's ArgoCD repository access, written by ONE rule wherever a run provisions it: the
+// onboarding's provision-repo-credential and the relocation's provision-target. The App-token refresh
+// tick holds the App half of the rule on every live unit (repo-credential-sweep.ts).
 import type { CredentialStore, UseContext } from "../../security/store.ts";
 import type { RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -17,8 +17,8 @@ export type KeptRepoCredential = { identity: "github-app"; removed: boolean } | 
  *  master.digitacloud.app, where digita-post's Application fell into ComparisonError an hour after its
  *  onboarding — so a standing one is taken away.
  *
- *  A PAT: a unit of a foreign owner is fetched with that owner's PAT, written into its repository
- *  Secret on every call, so a deleted Secret stands again on the next one. */
+ *  A PAT: a repository the App does not reach is fetched with its owner's PAT, written into the
+ *  unit's repository Secret — replaced in place where one stands. */
 export async function keepUnitRepoCredential(
   deps: { store: Pick<CredentialStore, "list" | "open">; repoCredential: Pick<RepoCredentialWriter, "applyRepoCredential" | "deleteRepoCredential"> },
   unit: { name: string; stage: Stage; repoURL: string; credentialId: string; argoNamespace: string },
