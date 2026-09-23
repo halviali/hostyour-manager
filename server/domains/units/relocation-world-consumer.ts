@@ -18,7 +18,8 @@ import type { Registrations } from "./registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { } from "./build-rbac.ts";
-import { renderConsumerRepoCredential, consumerRepoCredentialName } from "./repo-credential.ts";
+import { consumerRepoCredentialName } from "./repo-credential.ts";
+import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { consumerUnitHost } from "./unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
@@ -124,6 +125,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // can never sync there. A public repo (no sealed credential) simply has none to carry over.
         const repoURLOfRow = ctx.db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get()?.repoUrl;
         const credentialId = await unitRepoCredentialId({ repoURL: repoURLOfRow, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
+        let access = "";
         if (credentialId) {
           if (!ports.repoCredential) throw errValidation(`provision-target for "${ac.name}" requires the repository-credential writer but none is wired — ArgoCD on the target could never fetch the private consumer repo`);
           // ABSENT is a state here — a migrate may run this step after the source registration was
@@ -137,12 +139,14 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
             : (await ports.registrations.readRegistration(ac.stage, ac.name))?.entry ?? null;
           const repoURL = reg?.repoURL ?? ctx.db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, appId)).get()?.repoUrl;
           if (repoURL === undefined || repoURL === null) throw errValidation(`consumer "${ac.name}" has no repo URL on record — the credential would be sealed against a repository nobody can name`);
-          const pat = await c.creds.open(credentialId, { purpose: "relocation:provision-target", runId: c.runId });
-          try {
-            await ports.repoCredential.applyRepoCredential(renderConsumerRepoCredential({ consumerName: ac.name, stage: ac.stage, argoNamespace, repoURL, pat: pat.toString("utf8") }));
-          } finally {
-            pat.fill(0);
-          }
+          const kept = await keepUnitRepoCredential(
+            { store: c.creds, repoCredential: ports.repoCredential },
+            { name: ac.name, stage: ac.stage, repoURL, credentialId, argoNamespace },
+            { purpose: "relocation:provision-target", runId: c.runId },
+          );
+          access = kept.identity === "github-app"
+            ? `its repository through the App's credential template in ${argoNamespace}; `
+            : `repository credential in ${argoNamespace}; `;
         }
         // The mark below is set on DEPARTURE and says "this unit is leaving this cluster". A namespace
         // that already stands here can therefore carry one from an earlier move OFF this cluster — a
@@ -153,7 +157,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         if ((await clusterReader.smoke(namespace)).namespaceExists) {
           await clusterReader.annotateNamespace(namespace, { [CLAIM_RELOCATING_ANNOTATION]: null });
         }
-        c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${credentialId ? `repository credential in ${argoNamespace}; ` : ""}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
+        c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${access}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
       },
       repoint: async (c, target) => {
         // The mark FIRST, on the SOURCE namespace, because the flip below IS a delete on the source:

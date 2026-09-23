@@ -54,7 +54,8 @@ export async function boot(): Promise<void> {
   scheduleCatalogCarry(wired.carryCatalogTrunk, logger);
   // The App tokens behind the build repo-pat entries: rewritten once now, behind the listener, and
   // then every 45 minutes — a token lives 60, so a unit whose credential is the platform's GitHub
-  // App can release at any hour, not only the one after its onboarding (#184).
+  // App can release at any hour, not only the one after its onboarding (#184). The same tick keeps
+  // every live unit's ArgoCD repository access (repo-credential-sweep.ts).
   void wired.refreshAppTokens();
   scheduleAppTokenRefresh(wired.refreshAppTokens, logger);
 

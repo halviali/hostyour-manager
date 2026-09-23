@@ -48,6 +48,7 @@ import { ensureAppIdentityRow } from "../domains/units/repo-identity.ts";
 import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
 import { readOwnerIdentity } from "../domains/units/owners.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
+import { keepRepoCredentials } from "../domains/units/repo-credential-sweep.ts";
 import { migrateRegistrations } from "../domains/units/registrations-migration.ts";
 import { registerResetRoutes } from "../domains/reset/api.ts";
 import { registerSpa, spaDistDir } from "../http/spa.ts";
@@ -248,9 +249,20 @@ export async function wire(): Promise<Wired> {
   // registration (wire-units.ts carryTrunkToBooksBranch); every tenant plan carries it again.
   const carryCatalogTrunk = carryCatalogTrunkLater(units.carryTrunkToBooksBranch, logger);
   // The deletion after each rewrite reaches the build namespaces over the master-local cluster
-  // reader: they stand on this cluster whatever cluster a unit targets.
+  // reader: they stand on this cluster whatever cluster a unit targets. The same tick keeps every live
+  // unit's ArgoCD repository access (repo-credential-sweep.ts), so a deleted Secret stands again within
+  // one period.
+  const { resolver: unitResolver, repoCredential } = units;
   const refreshAppTokensLater = registrations
-    ? async (): Promise<void> => { await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, owners: (org) => readOwnerIdentity(db.db, org) }); }
+    ? async (): Promise<void> => {
+        try {
+          await refreshAppTokens({ store, registrations, seeder: units.seeder, kube: masterKube.clusterReader, logger, catalog: config.catalog, githubApp, owners: (org) => readOwnerIdentity(db.db, org) });
+        } finally {
+          if (unitResolver && repoCredential) {
+            await keepRepoCredentials({ db: db.db, store, githubApp, owners: (org) => readOwnerIdentity(db.db, org), resolver: unitResolver, repoCredential, logger });
+          }
+        }
+      }
     : async (): Promise<void> => undefined;
   // The size table (domains/units/unit-size.ts): fill in any of the three sizes this database
   // does not carry yet, and touch none that it does. Create-only, so an installation that edited a

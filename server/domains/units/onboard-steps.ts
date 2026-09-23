@@ -19,7 +19,8 @@ import type { AppProvenance, AppStatus, Stage } from "../../../shared/enums.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "./build-rbac.ts";
 import { buildConsumerSecretDataWithDerivations } from "./secret-mint.ts";
-import { renderConsumerRepoCredential, consumerRepoCredentialName } from "./repo-credential.ts";
+import { consumerRepoCredentialName } from "./repo-credential.ts";
+import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "./unit-dns.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 
@@ -320,12 +321,12 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
   };
 }
 
-/** provision-repo-credential: write the unit's ArgoCD repository Secret (its repo URL + its ONE PAT)
- *  into the target's ArgoCD namespace, imperatively, and register the delete inverse. Without it the
- *  generated Application cannot fetch the private consumer repo at all — the PAT lives only in the
- *  sealed store and the local build Vault, neither of which the target's ESO reads. Idempotent (the
- *  writer replaces the Secret in place on a resume, so a re-onboard rotates the credential to the
- *  freshly sealed PAT). */
+/** provision-repo-credential: keep the unit's ArgoCD repository access in the target's ArgoCD
+ *  namespace by the one rule of repo-credential-keep.ts. A repository the owner's GitHub App reaches is
+ *  fetched through the App's credential template (repo-creds-owner) and gets no Secret of its own; any
+ *  other is fetched with its owner's PAT, written into the unit's repository Secret — the PAT lives only
+ *  in the sealed store and the local build Vault, neither of which the target's ESO reads. Idempotent:
+ *  a resume replaces the Secret in place. */
 export function provisionRepoCredentialStep(ports: OnboardPorts, p: DeployableOnboardParams): Step {
   return {
     name: "provision-repo-credential",
@@ -337,18 +338,19 @@ export function provisionRepoCredentialStep(ports: OnboardPorts, p: DeployableOn
       // The delete inverse is already armed: write-registration registered the WHOLE ordered rollback
       // (onboard-abort.ts) before the first mutation, so no step here arms its own piece any more.
       const { argoNamespace } = await ports.resolver.resolve(p.clusterId);
-      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:provision-repo-credential", runId: ctx.runId });
-      let created: boolean;
-      try {
-        ({ created } = await ports.repoCredential.applyRepoCredential(
-          renderConsumerRepoCredential({ consumerName: p.consumerName, stage: p.stage, argoNamespace, repoURL: p.repoURL, pat: pat.toString("utf8") }),
-        ));
-      } finally {
-        pat.fill(0);
-      }
       const name = consumerRepoCredentialName(p.consumerName, p.stage);
-      ctx.checkpoint({ repoCredential: name, created });
-      ctx.log("meta", `ArgoCD repository credential ${name} ${created ? "created" : "replaced"} in ${argoNamespace} — the generated Application can fetch ${p.repoURL}`);
+      const kept = await keepUnitRepoCredential(
+        { store: ctx.creds, repoCredential: ports.repoCredential },
+        { name: p.consumerName, stage: p.stage, repoURL: p.repoURL, credentialId: p.repoCredentialId, argoNamespace },
+        { purpose: "consumer-onboard:provision-repo-credential", runId: ctx.runId },
+      );
+      if (kept.identity === "github-app") {
+        ctx.checkpoint({ repoCredential: name, created: false });
+        ctx.log("meta", `${p.repoURL} is reached by the owner's GitHub App — the generated Application fetches it through the App's credential template repo-creds-owner in ${argoNamespace}; ${name} ${kept.removed ? "stood with a token and is removed" : "is not written"}`);
+        return;
+      }
+      ctx.checkpoint({ repoCredential: name, created: kept.created });
+      ctx.log("meta", `ArgoCD repository credential ${name} ${kept.created ? "created" : "replaced"} in ${argoNamespace} — the generated Application fetches ${p.repoURL} with its owner's PAT`);
     },
   };
 }

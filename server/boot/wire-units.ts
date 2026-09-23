@@ -19,7 +19,7 @@ import { type Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
 import { readChannelStages } from "../domains/inventory/channel-stages.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
-import type { ClusterKubeResolver } from "../adapters/kube/port.ts";
+import type { ClusterKubeResolver, RepoCredentialWriter } from "../adapters/kube/port.ts";
 import { masterKubeInput, type MasterKubeClients } from "./master-kube.ts";
 import { TektonGateRunner } from "../adapters/gate-runner/gate-runner-tekton.ts";
 import { TektonBuildPlane } from "../adapters/build-plane/build-plane-tekton.ts";
@@ -101,6 +101,10 @@ export interface UnitsWiring {
    *  cluster + ArgoCD. Undefined when consumer onboarding is not configured — the live endpoint
    *  then degrades to SQL-only. */
   resolver?: ClusterKubeResolver;
+  /** The writer of the units' ArgoCD repository Secrets, for the sweep the App-token refresh timer
+   *  runs over every live unit (repo-credential-keep.ts). Undefined when consumer onboarding is not
+   *  configured. */
+  repoCredential?: RepoCredentialWriter;
   /** The TENANT family's per-cluster kube resolver, threaded to registerTenantRoutes so the per-tenant
    *  live reconciliation read (GET /api/tenants/:id/live) can reach the target cluster + ArgoCD.
    *  Undefined when tenant onboarding is not configured — the live endpoint then degrades to SQL-only. */
@@ -313,6 +317,7 @@ export function buildUnits(
     enabled: consumer.enabled,
     tenantEnabled: tenant.enabled,
     ...(consumer.resolver ? { resolver: consumer.resolver } : {}),
+    ...(consumer.onboardPorts?.repoCredential ? { repoCredential: consumer.onboardPorts.repoCredential } : {}),
     ...(consumer.registrations ? { registrations: consumer.registrations } : {}),
     seeder,
     ...(consumer.repoReader ? { repoReader: consumer.repoReader } : {}),

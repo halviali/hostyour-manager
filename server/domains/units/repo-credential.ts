@@ -1,4 +1,5 @@
-// The per-unit ArgoCD repository credential, provisioned at onboard — rendered here and applied beside the
+// The per-unit ArgoCD repository credential of a repository the owner's GitHub App does not reach
+// (repo-credential-keep.ts decides), provisioned at onboard — rendered here and applied beside the
 // AppProject, the admission policy and the build grants. The generated Application fetches the
 // consumer's PRIVATE chart repo (its delivery branch deploy/<stage>), and ArgoCD authenticates that
 // fetch through a Secret labeled `argocd.argoproj.io/secret-type: repository` in its own namespace.
