@@ -16,6 +16,7 @@ class TwoEndpointActivator implements Activator {
     }
     return this.byPath.invite;
   }
+  async reaches(): Promise<boolean> { return true; }
 }
 
 const created = (json: unknown): ActivationResponse => ({ status: 201, ok: true, json, bodyText: JSON.stringify(json) });

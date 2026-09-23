@@ -8,9 +8,19 @@ export class FakeActivator implements Activator {
    *  the operator fields were passed (and separately that neither reached the pointer/DB/params). */
   readonly calls: ActivationRequest[] = [];
 
+  /** Every URL `reaches` was asked about, in order. */
+  readonly probed: string[] = [];
+
+  /** `unreachableFor`: how many `reaches` answer false before the host answers — a unit whose DNS
+   *  record or certificate is still on its way. */
   constructor(
-    private scripted: { response?: ActivationResponse; throwOn?: Error } = {},
+    private scripted: { response?: ActivationResponse; throwOn?: Error; unreachableFor?: number } = {},
   ) {}
+
+  async reaches(url: string): Promise<boolean> {
+    this.probed.push(url);
+    return this.probed.length > (this.scripted.unreachableFor ?? 0);
+  }
 
   /** Script the response the next call returns (default: 201 with an activate_url). */
   setResponse(response: ActivationResponse): void {

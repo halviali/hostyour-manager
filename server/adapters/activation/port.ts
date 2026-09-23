@@ -37,4 +37,10 @@ export interface Activator {
   /** Make the declared call. A transport error (DNS/TLS/timeout) rejects; an HTTP response — including
    *  a non-2xx — resolves so the step can render the status + body in its failure message. */
   invoke(input: ActivationRequest): Promise<ActivationResponse>;
+  /** Whether the host of [url] answers over HTTPS now: any HTTP response, whatever its status, is an
+   *  answer (true); a transport error — no name yet, no certificate yet, nothing listening — is none
+   *  (false). The onboard `activate` step waits on it: the unit's DNS record and its certificate are
+   *  minutes old when the activation comes, and a call sent before both stand fails with nothing
+   *  reached. Never rejects. */
+  reaches(url: string, signal?: AbortSignal): Promise<boolean>;
 }

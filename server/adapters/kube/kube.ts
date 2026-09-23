@@ -22,6 +22,8 @@ import {
   mapArgoStatus,
   mapApplicationSet,
   MISSING_APP_STATUS,
+  deploymentRolledOut,
+  statefulSetRolledOut,
   mapDeployment,
   mapStatefulSet,
   mapDaemonSet,
@@ -491,6 +493,14 @@ export class KubeClusterReader implements ClusterReader {
    *  annotations — see the port for why the template and not the workload. DaemonSets are
    *  deliberately not included: a unit runs none, and the ones on the platform belong to the base
    *  layer, which this call must never reach into. NEEDS a live cluster. */
+  async workloadsRolledOut(namespace: string): Promise<boolean> {
+    const [deployments, statefulSets] = await Promise.all([
+      this.list("Deployments", namespace, () => this.apps.listNamespacedDeployment({ namespace })),
+      this.list("StatefulSets", namespace, () => this.apps.listNamespacedStatefulSet({ namespace })),
+    ]);
+    return deployments.items.every(deploymentRolledOut) && statefulSets.items.every(statefulSetRolledOut);
+  }
+
   async restartWorkloads(namespace: string, stampedAt: string): Promise<number> {
     const body = { spec: { template: { metadata: { annotations: { [RESTART_ANNOTATION]: stampedAt } } } } };
     const opts = setHeaderOptions("Content-Type", PatchStrategy.MergePatch);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KubeConfig } from "@kubernetes/client-node";
 import { buildKubeConfig, KubeMasterArgoReader } from "./kube.ts";
-import { mapArgoStatus } from "./kube-map.ts";
+import { deploymentRolledOut, mapArgoStatus, statefulSetRolledOut } from "./kube-map.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "./testing/fake.ts";
 import type { ArgoAppStatus, ResolvedClusterKube } from "./port.ts";
 
@@ -228,5 +228,24 @@ describe("FakeClusterKubeResolver", () => {
     expect(await r.resolve("cls_s1")).toBe(slave);
     expect(await r.resolve("cls_other")).toBe(master); // unscripted falls back
     expect(r.resolved).toEqual(["cls_s1", "cls_other"]);
+  });
+});
+
+describe("a rollout is done when kubectl rollout status would say so", () => {
+  it("a Deployment is done only once the newest generation is seen and every replica runs it, with no old one left", () => {
+    const done = { metadata: { generation: 4 }, spec: { replicas: 1 }, status: { observedGeneration: 4, updatedReplicas: 1, replicas: 1, availableReplicas: 1 } };
+    expect(deploymentRolledOut(done)).toBe(true);
+    // A restart just stamped: the controller has not seen the new generation yet.
+    expect(deploymentRolledOut({ ...done, status: { ...done.status, observedGeneration: 3 } })).toBe(false);
+    // The new pod runs beside the old one, which the availability smoke already counts as ready.
+    expect(deploymentRolledOut({ ...done, status: { ...done.status, replicas: 2 } })).toBe(false);
+    expect(deploymentRolledOut({ ...done, status: { ...done.status, updatedReplicas: 0 } })).toBe(false);
+  });
+
+  it("a StatefulSet is done once its current revision is the update revision and every replica is ready", () => {
+    const done = { metadata: { generation: 2 }, spec: { replicas: 1 }, status: { observedGeneration: 2, currentRevision: "r2", updateRevision: "r2", readyReplicas: 1 } };
+    expect(statefulSetRolledOut(done)).toBe(true);
+    expect(statefulSetRolledOut({ ...done, status: { ...done.status, currentRevision: "r1" } })).toBe(false);
+    expect(statefulSetRolledOut({ ...done, status: { ...done.status, readyReplicas: 0 } })).toBe(false);
   });
 });

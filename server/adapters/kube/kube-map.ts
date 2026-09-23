@@ -177,15 +177,32 @@ export function mapApplications(rawItems: readonly unknown[]): ArgoApplicationRo
 // ---- Workloads (apps/v1) -------------------------------------------------------------------
 
 export interface RawDeployment {
-  metadata?: { name?: string };
+  metadata?: { name?: string; generation?: number };
   spec?: { replicas?: number };
-  status?: { availableReplicas?: number; conditions?: RawCondition[] };
+  status?: { availableReplicas?: number; conditions?: RawCondition[]; observedGeneration?: number; updatedReplicas?: number; replicas?: number };
 }
 
 export interface RawStatefulSet {
-  metadata?: { name?: string };
+  metadata?: { name?: string; generation?: number };
   spec?: { replicas?: number };
-  status?: { readyReplicas?: number; conditions?: RawCondition[] };
+  status?: { readyReplicas?: number; conditions?: RawCondition[]; observedGeneration?: number; currentRevision?: string; updateRevision?: string };
+}
+
+/** A Deployment done rolling out its current template — what `kubectl rollout status` waits for:
+ *  the controller has seen the newest generation, every replica runs that template, no old one is
+ *  left, and all are available. A restarted Deployment reads false while an old pod still serves,
+ *  which the availability `smoke` counts as ready. */
+export function deploymentRolledOut(d: RawDeployment): boolean {
+  const want = d.spec?.replicas ?? 1;
+  const s = d.status;
+  return (s?.observedGeneration ?? 0) >= (d.metadata?.generation ?? 0) && (s?.updatedReplicas ?? 0) >= want && (s?.replicas ?? 0) <= want && (s?.availableReplicas ?? 0) >= want;
+}
+
+/** The same for a StatefulSet: its current revision is the update revision, and every replica is ready. */
+export function statefulSetRolledOut(s: RawStatefulSet): boolean {
+  const want = s.spec?.replicas ?? 1;
+  const st = s.status;
+  return (st?.observedGeneration ?? 0) >= (s.metadata?.generation ?? 0) && st?.currentRevision === st?.updateRevision && (st?.readyReplicas ?? 0) >= want;
 }
 
 export interface RawDaemonSet {

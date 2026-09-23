@@ -84,3 +84,14 @@ describe("HttpActivator", () => {
     expect(res.bodyText).toContain("admin_exists");
   });
 });
+
+describe("HttpActivator.reaches", () => {
+  it("any HTTP answer from the origin is an answer, whatever its status; a transport error is none", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => { asked.push(url); return new Response("not here", { status: 404 }); }));
+    expect(await new HttpActivator().reaches("https://auth.example/api/v1/bootstrap/invite-admin")).toBe(true);
+    expect(asked).toEqual(["https://auth.example/"]); // the origin alone: the declared path takes a token
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+    expect(await new HttpActivator().reaches("https://auth.example/api/v1/bootstrap/invite-admin")).toBe(false);
+  });
+});

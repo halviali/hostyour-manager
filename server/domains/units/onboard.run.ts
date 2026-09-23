@@ -276,6 +276,9 @@ export interface OnboardPorts {
    *  consumer without one never touches this port. Absent while a consumer DOES declare activation
    *  ⇒ the step fails loud (a wiring gap, never a silent skip). */
   activator?: Activator;
+  /** How long and how often the `activate` step waits: for the unit's host to answer over HTTPS, and
+   *  after a token rotation for the workloads to roll. Default 10 minutes, every 10 seconds. */
+  activationWait?: { budgetMs: number; intervalMs: number };
   /** The per-call consumer-PAT GitHub client: the PAT scope preflight, the build webhook
    *  (setup-webhook / remove-webhook), the release workflow dispatch (trigger-release) and the
    *  workflow watch. Optional but UNCONDITIONALLY needed by onboard — absent ⇒ those steps fail loud

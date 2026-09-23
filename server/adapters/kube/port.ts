@@ -375,6 +375,11 @@ export interface ClusterReader {
    *  Returns the count so the run can say what it actually touched; a namespace with no workloads
    *  answers 0 rather than failing, which is the honest answer for a suspended unit. */
   restartWorkloads(namespace: string, stampedAt: string): Promise<number>;
+  /** Whether every Deployment and StatefulSet of [namespace] has finished rolling out its current
+   *  template (kube-map.ts deploymentRolledOut / statefulSetRolledOut). A caller that restarted the
+   *  workloads so their pods read new env waits on it: until it answers true, an old pod may still
+   *  answer with the old values. */
+  workloadsRolledOut(namespace: string): Promise<boolean>;
   /** A namespace's current annotations, or null when the namespace is absent. The read half of
    *  annotateNamespace, and what tenant-purge asks before it reaps: a member namespace carrying
    *  {@link CLAIM_RELOCATING_ANNOTATION} belongs to a move in flight, and purging it would drop the

@@ -52,4 +52,22 @@ export class HttpActivator implements Activator {
       if (input.signal) input.signal.removeEventListener("abort", onOuterAbort);
     }
   }
+
+  async reaches(url: string, signal?: AbortSignal): Promise<boolean> {
+    const timer = new AbortController();
+    const t = setTimeout(() => timer.abort(), this.opts.timeoutMs ?? 30_000);
+    const onOuterAbort = (): void => timer.abort();
+    signal?.addEventListener("abort", onOuterAbort, { once: true });
+    try {
+      // The origin alone and a GET: the declared path takes a token this probe never carries.
+      const res = await fetch(`${new URL(url).origin}/`, { method: "GET", signal: timer.signal, redirect: "manual" });
+      await res.body?.cancel();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(t);
+      signal?.removeEventListener("abort", onOuterAbort);
+    }
+  }
 }

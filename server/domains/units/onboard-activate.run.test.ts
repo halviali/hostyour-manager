@@ -74,7 +74,8 @@ class FakeSeeder implements VaultSeeder {
   seeded: VaultSeedInput[] = [];
   created = true;
   async seed(i: VaultSeedInput): Promise<VaultSeedOutcome> { this.seeded.push(i); return { created: this.created }; }
-  async patchApp(): Promise<void> {}
+  patched: VaultSeedInput[] = [];
+  async patchApp(i: VaultSeedInput): Promise<void> { this.patched.push(i); }
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { return { created: true }; }
@@ -129,14 +130,14 @@ function params(over: Partial<DeployableOnboardParams> = {}): DeployableOnboardP
 
 const fakeCreds: CredentialStore = { open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")) } as unknown as CredentialStore;
 
-function ctx(p: OnboardParams, stepName: string, logs: string[], runSecrets: Record<string, string> = {}): StepCtx {
+function ctx(p: OnboardParams, stepName: string, logs: string[], runSecrets: Record<string, string> = {}, slot: { cp?: unknown } = {}): StepCtx {
   return {
     runId: "run_onb", stepName, db: db.db, creds: fakeCreds, params: p,
     secrets: { get: (n: string) => (runSecrets[n] === undefined ? undefined : Buffer.from(runSecrets[n]!, "utf8")), wipe: () => undefined },
     signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
-    log: (_s, t) => logs.push(t), checkpoint: () => undefined, readCheckpoint: () => undefined, registerCleanup: () => undefined,
+    log: (_s, t) => logs.push(t), checkpoint: (d) => { slot.cp = d; }, readCheckpoint: <T,>() => slot.cp as T | undefined, registerCleanup: () => undefined,
   };
 }
 
@@ -279,5 +280,81 @@ describe("onboard post-onboard activation step", () => {
     expect(res.plan.steps.at(-1)?.name).toBe("activate");
     expect(res.plan.requiredInputs).toEqual([{ field: "email", label: "First administrator email" }]);
     expect(res.plan.requiredSecrets).toEqual([]); // the bootstrap token is minted, so no operator secret
+  });
+});
+
+describe("the activation waits for the unit's host, and a retry activates with a new token", () => {
+  const WAIT = { budgetMs: 1000, intervalMs: 1 };
+  const EMAIL = { "activation-input:email": "admin@acme.test" };
+
+  it("asks the host until it answers over HTTPS, then makes the one call", async () => {
+    const activator = new FakeActivator({ unreachableFor: 2 });
+    const p = params({ activation: AUTH_ACTIVATION, secretSpecs: [BOOTSTRAP_SPEC] });
+    const steps = makeOnboardDef(ports({ seeder: new FakeSeeder(), activator, activationWait: WAIT })).steps(p);
+    const logs: string[] = [];
+    await steps.find((s) => s.name === "seed-secrets")!.run(ctx(p, "seed-secrets", logs));
+    await steps.find((s) => s.name === "activate")!.run(ctx(p, "activate", logs, EMAIL));
+    expect(activator.probed).toHaveLength(3);
+    expect(activator.calls).toHaveLength(1);
+    expect(logs.some((l) => l.includes("waiting for https://acme.example.com to answer over HTTPS"))).toBe(true);
+  });
+
+  it("a host that never answers within the budget is refused by name, and nothing is sent", async () => {
+    const activator = new FakeActivator({ unreachableFor: 1_000_000 });
+    const p = params({ activation: AUTH_ACTIVATION, secretSpecs: [BOOTSTRAP_SPEC] });
+    const steps = makeOnboardDef(ports({ seeder: new FakeSeeder(), activator, activationWait: { budgetMs: 5, intervalMs: 1 } })).steps(p);
+    await steps.find((s) => s.name === "seed-secrets")!.run(ctx(p, "seed-secrets", []));
+    await expect(steps.find((s) => s.name === "activate")!.run(ctx(p, "activate", [], EMAIL))).rejects.toThrow(/did not answer over HTTPS/);
+    expect(activator.calls).toHaveLength(0);
+  });
+
+  it("a retry after a failed first attempt mints a new token, rolls the unit, waits for the rollout and activates with it", async () => {
+    const seeder = new FakeSeeder();
+    const clusterReader = new FakeClusterReader({
+      deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
+      externalSecretsByNamespace: { acme: [{ name: "acme-app", ready: true, reason: "", targetSecret: "acme-app-env", refreshTime: "" }] },
+      rollingFor: 2,
+    });
+    const resolver = new FakeClusterKubeResolver({ clusterReader, argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });
+    const p = params({ activation: AUTH_ACTIVATION, secretSpecs: [BOOTSTRAP_SPEC] });
+    const slot: { cp?: unknown } = {};
+
+    // The first attempt: the token is in memory, the call fails in transport.
+    const first = new FakeActivator({ throwOn: new Error("fetch failed") });
+    const attempt = makeOnboardDef(ports({ seeder, resolver, activator: first, activationWait: WAIT })).steps(p);
+    await attempt.find((s) => s.name === "seed-secrets")!.run(ctx(p, "seed-secrets", []));
+    await expect(attempt.find((s) => s.name === "activate")!.run(ctx(p, "activate", [], EMAIL, slot))).rejects.toThrow(/fetch failed/);
+    expect(slot.cp).toEqual({ minted: true }); // the fact, never the token
+
+    // The retry: the executor rebuilds the steps, so the token of the first attempt is gone.
+    const second = new FakeActivator();
+    const retry = makeOnboardDef(ports({ seeder, resolver, activator: second, activationWait: WAIT })).steps(p);
+    const logs: string[] = [];
+    await retry.find((s) => s.name === "activate")!.run(ctx(p, "activate", logs, EMAIL, slot));
+
+    const firstToken = seeder.seeded[0]!.data["AUTH_BOOTSTRAP_TOKEN"]!;
+    const newToken = seeder.patched[0]!.data["AUTH_BOOTSTRAP_TOKEN"]!;
+    expect(newToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(newToken).not.toBe(firstToken);
+    expect(seeder.patched).toEqual([{ stage: "prod", consumerName: "acme", data: { AUTH_BOOTSTRAP_TOKEN: newToken } }]);
+    expect(clusterReader.secretWrites).toEqual([{ op: "delete", namespace: "acme", name: "acme-app-env" }]);
+    expect(clusterReader.restarted.map((r) => r.namespace)).toEqual(["acme"]);
+    expect(clusterReader.rolloutsAsked).toHaveLength(3); // twice still rolling, then done
+    expect(second.calls.map((c) => c.token)).toEqual([newToken]);
+    for (const l of logs) expect(l).not.toContain(newToken);
+  });
+
+  it("a re-onboard over secrets that stood before the run minted nothing and keeps the one-time skip", async () => {
+    const seeder = new FakeSeeder();
+    seeder.created = false;
+    const activator = new FakeActivator();
+    const p = params({ activation: AUTH_ACTIVATION, secretSpecs: [BOOTSTRAP_SPEC] });
+    const steps = makeOnboardDef(ports({ seeder, activator, activationWait: WAIT })).steps(p);
+    const logs: string[] = [];
+    await steps.find((s) => s.name === "seed-secrets")!.run(ctx(p, "seed-secrets", logs));
+    await steps.find((s) => s.name === "activate")!.run(ctx(p, "activate", logs, EMAIL));
+    expect(activator.calls).toHaveLength(0);
+    expect(seeder.patched).toHaveLength(0);
+    expect(logs.some((l) => l.includes("the consumer's secrets stood before this run"))).toBe(true);
   });
 });

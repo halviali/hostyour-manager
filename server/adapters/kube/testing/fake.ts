@@ -129,6 +129,9 @@ export class FakeClusterReader implements ClusterReader {
        *  gets. A run that could not roll the pods must FAIL rather than report a delivery that only
        *  got as far as the Secret. */
       throwOnRestart?: Error;
+      /** How many `workloadsRolledOut` answer false before the rollout is done — the old pods of a
+       *  restart still serving. Unscripted, every rollout is done at once. */
+      rollingFor?: number;
       /** Makes listNamespaces THROW, modelling the cluster this Manager cannot read at all: a slave
        *  that is down, a harvested bearer that expired, a kube API refusing the list. The
        *  cluster-orphan scan has to carry that OUT as an unscanned cluster rather than report the
@@ -266,6 +269,14 @@ export class FakeClusterReader implements ClusterReader {
    *  the unit's workloads, and with which stamp. The count answers from `workloadsPerNamespace`, so a
    *  test can model both a unit with workloads and a suspended one that has none. */
   readonly restarted: { namespace: string; stampedAt: string }[] = [];
+
+  /** Every namespace `workloadsRolledOut` was asked about, in order. */
+  readonly rolloutsAsked: string[] = [];
+
+  async workloadsRolledOut(namespace: string): Promise<boolean> {
+    this.rolloutsAsked.push(namespace);
+    return this.rolloutsAsked.length > (this.scripted.rollingFor ?? 0);
+  }
 
   async restartWorkloads(namespace: string, stampedAt: string): Promise<number> {
     if (this.scripted.throwOnRestart) throw this.scripted.throwOnRestart;
