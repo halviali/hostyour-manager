@@ -46,8 +46,9 @@ const stagePath = (stage: Stage, name: string): string => `registrations/${name}
 const relayPath = (stage: Stage): string => `installation/values/postfix-${stage}.yaml`;
 
 /** The relay target's bytes: the relay of [stage] hands its mail to [unit]'s SMTP entry at the
- *  tailnet address of the cluster the unit stands on. The value is JSON-encoded, serializePointer's
- *  rule: valid YAML, and it cannot smuggle a key. */
+ *  tailnet address of the cluster the unit stands on — RELAYHOST for the relay itself, and the same
+ *  target as `relayTarget` for the relay's own NetworkPolicy, which opens exactly that destination.
+ *  Each value is JSON-encoded, serializePointer's rule: valid YAML, and it cannot smuggle a key. */
 function relayValues(unit: string, stage: Stage, apiHost: string, port: number): string {
   return [
     `# Written by the Manager from the registration of ${unit} at ${stage}, the one unit whose SMTP entry is`,
@@ -57,6 +58,9 @@ function relayValues(unit: string, stage: Stage, apiHost: string, port: number):
     "  config:",
     "    general:",
     `      RELAYHOST: ${JSON.stringify(`[${apiHost}]:${port}`)}`,
+    "relayTarget:",
+    `  address: ${JSON.stringify(apiHost)}`,
+    `  port: ${port}`,
   ].join("\n") + "\n";
 }
 

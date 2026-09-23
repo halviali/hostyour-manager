@@ -47,7 +47,10 @@ describe("the relay target of a stage follows its mail sender, in the commit tha
   it("an onboard attesting an SMTP entry writes it: RELAYHOST onto the entry at the tailnet address of the unit's cluster", async () => {
     const { repo, reg } = books();
     await reg.commitRegistration({ unit: unit(), builds: [], deploy: deploy({ smtpEntry: entry }), runId: "run_1" });
-    expect(parseYaml(repo.read(repo.booksBranch, RELAY)!)).toEqual({ postfix: { config: { general: { RELAYHOST: "[100.64.0.11]:2525" } } } });
+    expect(parseYaml(repo.read(repo.booksBranch, RELAY)!)).toEqual({
+      postfix: { config: { general: { RELAYHOST: "[100.64.0.11]:2525" } } },
+      relayTarget: { address: "100.64.0.11", port: 2525 },
+    });
     expect(repo.read(repo.booksBranch, RELAY)).toMatch(/^# Written by the Manager from the registration of acme at prod, the one unit whose SMTP entry is\n/);
     expect(repo.commits.at(-1)!.write?.map((w) => w.path)).toEqual(["registrations/acme/build.yaml", "registrations/acme/prod.yaml", RELAY]);
   });
