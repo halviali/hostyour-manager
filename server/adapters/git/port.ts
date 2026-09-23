@@ -5,7 +5,7 @@
 //    credentialId opens a read credential from the store per use (it never rides a URL).
 //  - PlatformRepo — the Manager's ONLY writer of the platform repo's consumers/** (the
 //    Registrations backend): fetch/reset a branch worktree, then commit + push. The path
-//    guard + serializer law live in the domain (registrations.ts), not here.
+//    guard + serializer law live in the domain (registration-laws.ts), not here.
 //
 // The concrete impl shells out to git (an adapter may import IO libs); the fakes are in-memory.
 

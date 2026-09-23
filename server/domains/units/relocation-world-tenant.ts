@@ -11,7 +11,7 @@ import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { parse as parseYaml } from "yaml";
 import { localTx } from "../../executor/stepkit.ts";
-import { serializePointer } from "./registrations.ts";
+import { serializePointer } from "./registration-laws.ts";
 import { loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantSelector, allPruned, lingering } from "./tenant-lifecycle.run.ts";
 import { memberAppProject, memberApplication, memberNamespace, tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { seedQuota, type UnitQuota } from "../../../shared/unit-size.ts";
 import { z } from "zod";
-import { Registrations, serializePointer, parseRegistration, makeRegistrationGuard, trailer } from "./registrations.ts";
+import { Registrations } from "./registrations.ts";
+import { serializePointer, parseRegistration, makeRegistrationGuard, trailer } from "./registration-laws.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { ConsumerRegistrationSchema, type ConsumerRegistration } from "../../../shared/consumer.ts";
 import type { Stage } from "../../../shared/enums.ts";

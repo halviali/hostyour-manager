@@ -1,6 +1,6 @@
 // THE BOOT MIGRATION OF THE REGISTRATIONS: every registration file on both books branches, parsed
 // through the schema this release ships and written back in the registry's own form where the bytes
-// differ (registrations.ts migrateRegistrationFiles, called by each registry's migrateToSchema).
+// differ (registration-laws.ts migrateRegistrationFiles, called by each registry's migrateToSchema).
 //
 // WHY. A registration is written once by the run that creates the unit and rewritten only by a flip.
 // When the schema gains a field with a default, every file written before carries no key for it, and
@@ -11,7 +11,8 @@
 // (boot.ts), because a schema changes only with a release and a release boots the Manager; a timer
 // would measure the same files against the same schema.
 import type { Logger } from "../../kernel/logger.ts";
-import { bootMarker, type RegistrationMigration, type Registrations } from "./registrations.ts";
+import { bootMarker, type RegistrationMigration } from "./registration-laws.ts";
+import type { Registrations } from "./registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 
 /** Which books a migration ran over: the platform's (hostyour-cloud, the consumer registrations) or

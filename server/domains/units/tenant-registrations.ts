@@ -1,6 +1,6 @@
 // TenantRegistrations — the Manager's ONLY writer of the catalog
 // repo's registrations/**. The structural twin of the consumer registration Registrations (registrations.ts),
-// reusing the SAME laws through registrations.ts's shared primitives (serializePointer / parseRegistration /
+// reusing the SAME laws through the shared primitives of registration-laws.ts (serializePointer / parseRegistration /
 // makeRegistrationGuard / trailer):
 //   - PATH GUARD: every write path matches registrations/<guid>/<stage>.yaml exactly — a traversal or
 //     a stray path is a programming error (INTERNAL), never a commit.
@@ -33,7 +33,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { AppError } from "../../kernel/errors.ts";
-import { serializePointer, makeRegistrationGuard, trailer, schemaWhy, migrateRegistrationFiles, type RegistrationMigration } from "./registrations.ts";
+import { serializePointer, makeRegistrationGuard, trailer, schemaWhy, migrateRegistrationFiles, type RegistrationMigration } from "./registration-laws.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */
@@ -48,7 +48,7 @@ const tenantDir = (guid: string): string => `registrations/${guid}`;
 const registrationPath = (stage: Stage, guid: string): string => `${tenantDir(guid)}/${stage}.yaml`;
 
 /** WHY a YAML parse failed, in one line. Shared by the strict fold and the tolerant scan so a broken
- *  file reads identically whether it THREW the read or was SKIPPED by it; schemaWhy (registrations.ts)
+ *  file reads identically whether it THREW the read or was SKIPPED by it; schemaWhy (registration-laws.ts)
  *  is the same for a body that failed its schema. */
 const yamlWhy = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -343,7 +343,7 @@ export class TenantRegistrations {
   }
 
   /** Every registrations/<guid>/<stage>.yaml brought to the schema this release ships
-   *  (registrations.ts migrateRegistrationFiles), in ONE turn and at most ONE commit ending in
+   *  (registration-laws.ts migrateRegistrationFiles), in ONE turn and at most ONE commit ending in
    *  `marker`. The boot runs it once (registrations-migration.ts), after the catalog carry. A file
    *  the schema refuses is answered by path and reason, never rewritten. */
   async migrateToSchema(marker: string): Promise<RegistrationMigration> {
