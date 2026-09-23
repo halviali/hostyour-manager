@@ -144,7 +144,7 @@ interface Harness {
 function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator; projects?: FakeMasterProjectWriter; repoCredential?: FakeRepoCredentialWriter; created?: boolean } = {}): Harness {
   const platform = platformRepo("s1.example", "m1.example");
   const registrations = new Registrations(platform);
-  const argo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
+  const argo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" }, everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
   const projects = over.projects ?? new FakeMasterProjectWriter();
   const cluster = new FakeClusterReader({
     deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },

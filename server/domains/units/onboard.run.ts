@@ -18,6 +18,7 @@ import { preflightScopesStep } from "./onboard-preflight-scopes.ts";
 import { setupWebhookStep } from "./onboard-webhook.ts";
 import { injectReleaseKitStep } from "./onboard-release-kit.ts";
 import { awaitBuildNamespaceStep } from "./onboard-await-build-namespace.ts";
+import { awaitUnitFencesStep } from "./onboard-await-unit-fences.ts";
 import { seedRepoPatStep } from "./onboard-seed-repo-pat.ts";
 import { seedPostgresSuperuserStep } from "./onboard-seed-postgres.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
@@ -378,6 +379,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     setupWebhookStep(ports, p),
     // The trigger + the watches: start the cycle ONCE through the injected workflow
     // — the proof of the injection — and read its results back stage by stage.
+    awaitUnitFencesStep(ports, p),
     triggerReleaseStep(ports, p),
     watchReleaseBuildStep(ports, p, release),
     watchDeploymentStep(ports, p, release),

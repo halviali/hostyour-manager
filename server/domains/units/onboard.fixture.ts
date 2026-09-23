@@ -161,7 +161,7 @@ export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
         smoke: { namespaceExists: true, workloads: [{ kind: "Deployment", name: "acme-web", available: true, desired: 1, ready: 1 }], externalSecretsReady: true },
       }),
-      argoReader: argo ?? new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
+      argoReader: argo ?? new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" }, everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
       projectWriter: projects ?? new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),

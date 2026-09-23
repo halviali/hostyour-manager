@@ -96,7 +96,7 @@ function fakePorts(over: Partial<OnboardPorts> = {}): OnboardPorts {
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
         smoke: { namespaceExists: true, workloads: [{ kind: "Deployment", name: "acme", available: true, desired: 1, ready: 1 }], externalSecretsReady: true },
       }),
-      argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
+      argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" }, everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
@@ -168,7 +168,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     expect(planned?.steps.map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
       "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
-      "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-build", "watch-deployment",
+      "inject-release-kit", "setup-webhook", "await-unit-fences", "trigger-release", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);
     expect(planned?.targetKind).toBe("cluster");

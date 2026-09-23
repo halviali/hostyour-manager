@@ -102,7 +102,7 @@ function ports(over: Partial<OnboardPorts> = {}): OnboardPorts {
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
         smoke: { namespaceExists: true, workloads: [{ kind: "Deployment", name: "acme-web", available: true, desired: 1, ready: 1 }], externalSecretsReady: true },
       }),
-      argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
+      argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" }, everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
       projectWriter: new FakeMasterProjectWriter(),
       argoNamespace: "argocd",
     }),
@@ -315,7 +315,7 @@ describe("the activation waits for the unit's host, and a retry activates with a
       externalSecretsByNamespace: { acme: [{ name: "acme-app", ready: true, reason: "", targetSecret: "acme-app-env", refreshTime: "" }] },
       rollingFor: 2,
     });
-    const resolver = new FakeClusterKubeResolver({ clusterReader, argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });
+    const resolver = new FakeClusterKubeResolver({ clusterReader, argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" }, everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });
     const p = params({ activation: AUTH_ACTIVATION, secretSpecs: [BOOTSTRAP_SPEC] });
     const slot: { cp?: unknown } = {};
 

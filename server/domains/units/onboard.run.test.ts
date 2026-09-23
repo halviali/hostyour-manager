@@ -98,7 +98,7 @@ describe("onboard run definition", () => {
     expect(def.steps({} as OnboardParams).map((s) => s.name)).toEqual([
       "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
       "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
-      "inject-release-kit", "setup-webhook", "trigger-release", "watch-release-build", "watch-deployment",
+      "inject-release-kit", "setup-webhook", "await-unit-fences", "trigger-release", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
     ]);
     expect(() => def.plan({} as OnboardParams, { db: db.db })).toThrow(/planStream/);
@@ -304,7 +304,7 @@ describe("onboard run definition", () => {
 
 
   it("routes a slave-targeted onboard to the RESOLVED slave clients + per-slave ArgoCD namespace", async () => {
-    const slaveArgo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
+    const slaveArgo = new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" }, everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } });
     const slaveCluster = new FakeClusterReader({
       deployState: { domain: "s2.example", stage: "prod", writtenAt: "x", generation: 5 },
       smoke: { namespaceExists: true, workloads: [{ kind: "Deployment", name: "acme-web", available: true, desired: 1, ready: 1 }], externalSecretsReady: true },
