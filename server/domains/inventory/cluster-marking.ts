@@ -33,12 +33,15 @@
 //                Declared and validated here so a map rewrite carries it instead of deleting it.
 //   master       the managing master's FQDN. Present exactly for a cluster carrying the slave part.
 //   apiHost      the address the master's IN-CLUSTER components dial the slave's kube-apiserver
-//   apiPort      on, and its port. Present only on a pure slave. It is the slave's tailnet address
+//   apiPort      on, and its port. Both are present on a pure slave. It is the slave's tailnet address
 //                once the two share that private network, its LAN address when the slave sits in
 //                the master's own network — the field says which apiserver endpoint git publishes,
 //                never which network carries it. Four components read the address this field feeds:
 //                the master's per-slave ArgoCD instance, Vault on every ESO login, the shared
 //                dashboard's kubeconfig, and this process's per-slave kube client, which writes.
+//                A master's map carries apiHost alone: its own tailnet address, which the catalogue's
+//                tailnet-join-self records and the fence of a mail sender's SMTP entry admits
+//                (hostyour-cloud#242). The slaves ApplicationSet selects on role, so it stays out.
 //   unit-apex    the public apex units (consumers and tenants) serve under, <name>.<unit-apex>.
 //   platform-domain  the installation's business domain — the mail sender identity and the relay's
 //                sender allowlist. The branch programs write it (defaulting to the unit apex).
