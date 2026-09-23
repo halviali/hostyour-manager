@@ -127,21 +127,38 @@ runs_here() {
 # never judges this commit here — but it judges it wherever the same commit is pushed from a
 # checkout that does, and a commit the gate refuses from one place is a commit it should refuse
 # from every place (#132).
+#
+# THE BRANCH IS READ AGAIN BEFORE EVERY ATTEMPT. A release waits minutes for its images, and the
+# Manager commits to an install branch meanwhile (an onboarding, an offboard): a push onto the head
+# this clone saw at its start is then refused, so the pin is written onto the head the remote has
+# now and pushed again. A pin that already stands — a rerun — writes nothing and is done.
 pin_branch() {
   branch="$1"
   git -C "$PLATFORM_REPO_DIR" checkout --quiet "$branch" || die "the platform tree has no branch ${branch} - nothing further was pinned"
-  git -C "$PLATFORM_REPO_DIR" reset --quiet --hard "origin/${branch}"
-  pinned="$(python3 "$PINNER" "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST")"
-  if [ -z "$pinned" ]; then
-    say "${branch} carries no values-${STAGE}.yaml pin of ${NAME} - left as it stands"
-    return 0
-  fi
-  git -C "$PLATFORM_REPO_DIR" add -- $pinned
-  git -C "$PLATFORM_REPO_DIR" commit --quiet -m "release: pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
-  git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch" \
-    || die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${branch} of ${PLATFORM_REPO}"
-  say "pinned ${branch} to ${TAG}-${SHA7} in ${pinned}"
-  PINNED_ANY=1
+  for attempt in 1 2 3 4 5; do
+    git -C "$PLATFORM_REPO_DIR" fetch --quiet origin "$branch" \
+      || die "the branch ${branch} of ${PLATFORM_REPO} could not be fetched - nothing further was pinned"
+    git -C "$PLATFORM_REPO_DIR" reset --quiet --hard "origin/${branch}"
+    pinned="$(python3 "$PINNER" "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST")"
+    if [ -z "$pinned" ]; then
+      say "${branch} carries no values-${STAGE}.yaml pin of ${NAME} - left as it stands"
+      return 0
+    fi
+    git -C "$PLATFORM_REPO_DIR" add -- $pinned
+    if git -C "$PLATFORM_REPO_DIR" diff --cached --quiet; then
+      say "${branch} is pinned to ${TAG}-${SHA7} already - nothing to write"
+      PINNED_ANY=1
+      return 0
+    fi
+    git -C "$PLATFORM_REPO_DIR" commit --quiet -m "release: pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
+    if git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch"; then
+      say "pinned ${branch} to ${TAG}-${SHA7} in ${pinned}"
+      PINNED_ANY=1
+      return 0
+    fi
+    say "${branch} of ${PLATFORM_REPO} moved on while this release waited (attempt ${attempt} of 5) - pinning again onto its new head"
+  done
+  die "the pin of ${STAGE} to ${TAG}-${SHA7} could not be pushed to ${branch} of ${PLATFORM_REPO} in 5 attempts"
 }
 
 VERSION="${1:-}"

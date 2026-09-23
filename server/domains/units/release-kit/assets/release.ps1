@@ -137,22 +137,41 @@ function Test-RunsHere {
 # never judges this commit here — but it judges it wherever the same commit is pushed from a
 # checkout that does, and a commit the gate refuses from one place is a commit it should refuse
 # from every place (#132).
+#
+# THE BRANCH IS READ AGAIN BEFORE EVERY ATTEMPT. A release waits minutes for its images, and the
+# Manager commits to an install branch meanwhile (an onboarding, an offboard): a push onto the head
+# this clone saw at its start is then refused, so the pin is written onto the head the remote has
+# now and pushed again. A pin that already stands — a rerun — writes nothing and is done.
 function Publish-BranchPin {
   param([Parameter(Mandatory = $true)][string]$Branch)
   git -C $platformRepoDir checkout --quiet $Branch 2>$null
   if ($LASTEXITCODE -ne 0) { Die "the platform tree has no branch $Branch - nothing further was pinned" }
-  git -C $platformRepoDir reset --quiet --hard "origin/$Branch"
-  $pinned = @(Write-StagePin -Tree $platformRepoDir -PinStage $Stage -ImageTag "$tag-$sha7" -BuildNames $buildNames)
-  if ($pinned.Count -eq 0) {
-    Say "$Branch carries no values-$Stage.yaml pin of $name - left as it stands"
-    return
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    git -C $platformRepoDir fetch --quiet origin $Branch
+    if ($LASTEXITCODE -ne 0) { Die "the branch $Branch of $platformRepo could not be fetched - nothing further was pinned" }
+    git -C $platformRepoDir reset --quiet --hard "origin/$Branch"
+    $pinned = @(Write-StagePin -Tree $platformRepoDir -PinStage $Stage -ImageTag "$tag-$sha7" -BuildNames $buildNames)
+    if ($pinned.Count -eq 0) {
+      Say "$Branch carries no values-$Stage.yaml pin of $name - left as it stands"
+      return
+    }
+    git -C $platformRepoDir add -- @pinned
+    git -C $platformRepoDir diff --cached --quiet
+    if ($LASTEXITCODE -eq 0) {
+      Say "$Branch is pinned to $tag-$sha7 already - nothing to write"
+      $script:pinnedAny = $true
+      return
+    }
+    git -C $platformRepoDir commit --quiet -m "release: pin $Stage to $tag" -m "Written by the release of $name, once its images were built."
+    git -C $platformRepoDir push --quiet origin $Branch
+    if ($LASTEXITCODE -eq 0) {
+      Say "pinned $Branch to $tag-$sha7 in $($pinned -join ' ')"
+      $script:pinnedAny = $true
+      return
+    }
+    Say "$Branch of $platformRepo moved on while this release waited (attempt $attempt of 5) - pinning again onto its new head"
   }
-  git -C $platformRepoDir add -- @pinned
-  git -C $platformRepoDir commit --quiet -m "release: pin $Stage to $tag" -m "Written by the release of $name, once its images were built."
-  git -C $platformRepoDir push --quiet origin $Branch
-  if ($LASTEXITCODE -ne 0) { Die "the pin of $Stage to $tag-$sha7 could not be pushed to $Branch of $platformRepo" }
-  Say "pinned $Branch to $tag-$sha7 in $($pinned -join ' ')"
-  $script:pinnedAny = $true
+  Die "the pin of $Stage to $tag-$sha7 could not be pushed to $Branch of $platformRepo in 5 attempts"
 }
 
 # THE COMMIT A TAG SITS ON DECLARES THE VERSION THE TAG NAMES. The build reads the version out of
