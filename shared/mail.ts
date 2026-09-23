@@ -55,6 +55,17 @@ export interface MailDnsView {
   measuredAt: string;
 }
 
+/** Where the mail of a stage leaves, read once for the Mail page and for mail-dns-publish alike, so
+ *  the page measures exactly what a publish writes: the stage's SENDER where a unit declares one, the
+ *  name mail leaves by, the address it resolves to at public DNS, and the key the sender signs the
+ *  platform domain with as the base64 of `p=` — null where no unit sends or the Manager holds none. */
+export interface MailEgress {
+  sender: { unit: string; cluster: string } | null;
+  name: string;
+  address: string | null;
+  dkimPublicKey: string | null;
+}
+
 /** The three records this platform PUBLISHES for a sender domain and can take back: the SPF at the
  *  apex, the DKIM key under the relay's selector (the stage), the DMARC policy. The address record
  *  and the reverse DNS are not here because no run of this Manager owns them. */

@@ -10,6 +10,8 @@ import { makeDnsRemoveDef } from "./defs/dns-remove.ts";
 import { makeMailDnsUnpublishDef } from "./defs/mail-dns-unpublish.ts";
 import type { DnsRecordPorts } from "./defs/dns-record.kit.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
+import type { MailEgress } from "../../../shared/mail.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import { makeRemoveSlaveDef } from "./defs/remove-slave.ts";
 import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
@@ -32,10 +34,13 @@ export function register<P>(runDefinitions: RunDefinitions, def: RunDefinition<P
  *  two arms it runs, and a definition's steps() is handed the persisted params and no database. */
 export interface RunDefinitionsPorts extends DeploySlavePorts, AnsiwisePorts, DnsRecordPorts {
   db: Db;
-  /** The DNS provider mail-dns-publish reads the master's egress address from (its own A record),
+  /** The DNS provider mail-dns-publish reads the published records at before and after its program,
    *  and the two removal run kinds delete at. Absent on a manager without a DNS provider: each run
-   *  kind then refuses — mail-dns-publish at its answers, the removals at their plan. */
+   *  kind then refuses — mail-dns-publish at its program step, the removals at their plan. */
   dns?: DnsProvider;
+  /** Where the stage's mail leaves and the key its sender signs with, for mail-dns-publish's answers
+   *  — the Mail page's own reading, bound by the composition root. */
+  mailEgress?: (stage: Stage, masterDomain: string) => Promise<MailEgress>;
 }
 
 export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDefinition[] = []): RunDefinitions {

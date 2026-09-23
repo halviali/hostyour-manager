@@ -29,7 +29,7 @@ import { EmergencyStore, createEmergencyApp, serveAdminSocket } from "../domains
 import { registerRunRoutes } from "../domains/runs/api.ts";
 import { registerClustersRoutes, registerServerRoutes } from "../domains/inventory/api.ts";
 import { registerMailRoutes } from "../domains/mail/api.ts";
-import { readMailDns, type MailDnsDeps } from "../domains/mail/mail-dns.ts";
+import { readMailDns, readMailEgress, type MailDnsDeps } from "../domains/mail/mail-dns.ts";
 import { registerDnsRoutes } from "../domains/dns/api.ts";
 import { readDnsInventory, type DnsInventoryDeps } from "../domains/dns/dns-inventory.ts";
 import { DohPublicDns } from "../adapters/dns/public-dns.ts";
@@ -200,6 +200,7 @@ export async function wire(): Promise<Wired> {
     // repository is public, so there is no pair to be half-configured.
     catalogueOrigin: { repoURL: config.deployProgramsRepoUrl },
     ...(units.dns ? { dns: units.dns } : {}),
+    mailEgress: (stage: Stage, masterDomain: string) => readMailEgress(mailDns, stage, masterDomain),
     // What dns-remove and mail-dns-unpublish are allowed to delete: a record is taken back only
     // where the inventory names it as this installation's, never by the name an operator typed.
     readDnsInventory: () => readDnsInventory(dnsInventory),

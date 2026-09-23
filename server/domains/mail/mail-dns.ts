@@ -3,7 +3,7 @@ import type { Db } from "../../db/client.ts";
 import { apps, clusters, servers } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound } from "../../kernel/errors.ts";
 import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
-import { MAIL_RECORD_TAG, mailRecordNames, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type SenderRole } from "../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, mailRecordNames, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { clusterShortName, resolveClusterMarking } from "../inventory/cluster-marking.ts";
@@ -143,6 +143,25 @@ export interface MailDnsDeps {
   smtpSenders?: (stage: Stage) => Promise<{ unit: string; cluster: string }[]>;
 }
 
+/** Where the stage's mail leaves. THE SENDER, where a unit declares one — G29 keeps it at one per
+ *  stage: mail then leaves by the cluster it stands on, and the platform domain is signed with the
+ *  unit's key. Where no unit sends, by the master's identity, whose relay delivers and signs. The name
+ *  is resolved the way DNS resolves it: a CNAME — a master identity onto one of two machines — is
+ *  followed to its address, which is where mail leaves from. */
+export async function readMailEgress(deps: Pick<MailDnsDeps, "db" | "publicDns" | "smtpSenders">, stage: Stage, masterDomain: string): Promise<MailEgress> {
+  const sender = (deps.smtpSenders ? await deps.smtpSenders(stage) : [])[0];
+  if (sender === undefined) return { sender: null, name: masterDomain, address: (await deps.publicDns.a(masterDomain))[0] ?? null, dkimPublicKey: null };
+  const on = deps.db.select({ domain: clusters.domain }).from(clusters).all().find((c) => clusterShortName(c.domain) === sender.cluster);
+  if (!on) throw errNotFound(`the mail sender ${sender.unit} stands on cluster "${sender.cluster}", which is no cluster of this Manager`);
+  const row = deps.db.select({ key: apps.dkimPublicKey }).from(apps).where(and(eq(apps.name, sender.unit), eq(apps.stage, stage))).get();
+  return {
+    sender: { unit: sender.unit, cluster: on.domain },
+    name: on.domain,
+    address: (await deps.publicDns.a(on.domain))[0] ?? null,
+    dkimPublicKey: row?.key ? dkimRecordKey(row.key) : null,
+  };
+}
+
 /** The installation's mail DNS, measured now. The master is the one role=master server and its
  *  cluster row; the sender domains are its map's platformDomain (customer mail) and unitApex
  *  (alert mail) — one block when the two are the same name. */
@@ -159,35 +178,23 @@ export async function readMailDns(deps: MailDnsDeps): Promise<MailDnsView> {
         "the two sender domains are read off it; write the answer into the installation's config and regenerate the branch",
     );
   }
-  // THE SENDER, where a unit declares one: G29 keeps it at one per stage. Mail then leaves by the
-  // cluster it stands on; where no unit sends, by the master's identity, which its relay delivers from.
-  const senders = deps.smtpSenders ? await deps.smtpSenders(cluster.stage) : [];
-  const sender = senders[0] ?? null;
-  let egressName = cluster.domain;
-  let dkimPublicKey: string | null = null;
-  if (sender !== null) {
-    const on = deps.db.select({ domain: clusters.domain }).from(clusters).all().find((c) => clusterShortName(c.domain) === sender.cluster);
-    if (!on) throw errNotFound(`the mail sender ${sender.unit} stands on cluster "${sender.cluster}", which is no cluster of this Manager`);
-    egressName = on.domain;
-    const row = deps.db.select({ key: apps.dkimPublicKey }).from(apps).where(and(eq(apps.name, sender.unit), eq(apps.stage, cluster.stage))).get();
-    dkimPublicKey = row?.key ? dkimRecordKey(row.key) : null;
-  }
-  // Resolved the way DNS resolves it: a name that is a CNAME — a master identity onto one of two
-  // machines — is followed to its address. The address a name resolves to is where mail leaves from.
-  const egress = (await deps.publicDns.a(egressName))[0] ?? null;
+  const out = await readMailEgress(deps, cluster.stage, cluster.domain);
   const senderDomains: Array<{ domain: string; role: SenderRole }> = [{ domain: marking.platformDomain, role: "customer mail" }];
   if (marking.unitApex !== marking.platformDomain) senderDomains.push({ domain: marking.unitApex, role: "alert mail" });
   const domains: MailDnsDomainView[] = [];
   for (const s of senderDomains) {
     domains.push({
       ...s,
-      rows: await mailDnsRows({ ...s, stage: cluster.stage, egressName, egress, dkimPublicKey: s.role === "customer mail" ? dkimPublicKey : null }, deps.publicDns),
+      rows: await mailDnsRows(
+        { ...s, stage: cluster.stage, egressName: out.name, egress: out.address, dkimPublicKey: s.role === "customer mail" ? out.dkimPublicKey : null },
+        deps.publicDns,
+      ),
     });
   }
   return {
     master: { serverId: master.id, name: master.name, fqdn: cluster.domain, stage: cluster.stage },
-    sender: sender === null ? null : { unit: sender.unit, cluster: egressName },
-    egress: { name: egressName, address: egress },
+    sender: out.sender,
+    egress: { name: out.name, address: out.address },
     domains,
     measuredAt: new Date().toISOString(),
   };

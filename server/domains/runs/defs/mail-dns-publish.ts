@@ -3,7 +3,7 @@ import type { Step, StepCtx, RunDefinition } from "../../../executor/types.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import { recordDnsWrite } from "../../../db/dns-writes.ts";
 import { DMARC_POLICY, isMasterRole, type Stage } from "../../../../shared/enums.ts";
-import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, mailRecordNames, type PublishedMailRecord } from "../../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, mailRecordNames, type MailEgress, type PublishedMailRecord } from "../../../../shared/mail.ts";
 import type { DnsProvider } from "../../../adapters/dns/port.ts";
 import { resolveClusterMarking } from "../../inventory/cluster-marking.ts";
 import { activeClusterTarget, requirePlatformRepo, type DeploySlavePorts } from "./deploy-slave.kit.ts";
@@ -11,7 +11,7 @@ import { attestClusterStep, loadActiveCluster } from "./live-cluster.kit.ts";
 import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, type ExtraAnswers } from "./ansiwise-run.kit.ts";
 
 // mail-dns-publish: publish the mail DNS of ONE sender domain of this installation — its SPF, its
-// address record, its DKIM key where the relay holds one, its DMARC policy — by running the
+// DKIM key, its DMARC policy — by running the
 // catalogue's `publish-mail-dns` program on the master, the way deploy-slave and redeploy run the
 // machine's own programs. The Manager writes no mail record itself: the program is the ONE writer of
 // these records (its SPF merge keeps what another service published and refuses a domain that already
@@ -24,16 +24,16 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 // program does; the Mail page offers one run per domain.
 //
 // WHAT IS ANSWERED, AND FROM WHERE. `stage` is the cluster row's (composeAnswers reads the inventory);
-// `mail_domain` is the run's; `egress_address` is READ off the master's own A record at the DNS
-// provider — the one authority for where the master is reachable, the same read provision-dns makes
-// for a unit's record — never typed and never derived from a name the program is about to publish;
-// `dkim_selector` is left to the program's default, the stage, which is what the relay signs with;
-// `dmarc_policy` and `dmarc_mailbox` are the operator's on the Mail page. The DKIM public key is not
-// answered here yet: the program reads it from the hand-filled input on the master until the key is
-// minted by this manager (hostyour-manager#147, hostyour-deploy#33).
+// `mail_domain` is the run's; `egress_address` and `dkim_public_key` come from the Mail page's own
+// reading of where the stage's mail leaves (MailEgress) — the address the name mail leaves by
+// resolves to at public DNS, never typed; the key the stage's sender signs the platform domain with,
+// answered for that domain only (the alert domain is signed by the relay, whose key the program reads
+// out of the store). `dkim_selector` is left to the program's default, the stage;
+// `dmarc_policy` and `dmarc_mailbox` are the operator's on the Mail page.
 //
-// WHAT THIS DOES NOT DO. The reverse DNS of the egress address is set where the address is rented;
-// the plan says so in its warning and the Mail page shows the value to set.
+// WHAT THIS DOES NOT DO. It writes no address record: the mail name is its own name, given by the
+// reverse DNS of the egress address where that address is rented. The plan says so in its warning
+// and the Mail page measures both.
 //
 // WHAT THE BOOK OF DNS WRITES LEARNS. The Manager writes none of these records itself, so the only
 // way it can say what the program did is the DIFFERENCE: what stood under the three published names
@@ -42,8 +42,7 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 // with the sender domain as its owner. Both readings are taken AT THE PROVIDER and not at public
 // resolvers, although the Mail page measures there: a resolver answers from its cache for the
 // record's TTL, and a reading before the program would prime that cache with the old content, so a
-// public reading after it could not see the write. The address record is not diffed — the inventory
-// lists it as the installer's, and the book carries only what a run of this Manager may take back.
+// public reading after it could not see the write.
 
 export const MAIL_DNS_PROGRAM = "publish-mail-dns";
 
@@ -60,8 +59,11 @@ export const MailDnsPublishParams = z.object({
 export type MailDnsPublishParams = z.infer<typeof MailDnsPublishParams>;
 
 export interface MailDnsPublishPorts extends DeploySlavePorts, AnsiwisePorts {
-  /** The DNS provider the egress address is read from (the master's own A record). */
+  /** The DNS provider the three published names are read at, before and after the program. */
   dns?: DnsProvider;
+  /** Where the stage's mail leaves and the key its sender signs with — the Mail page's reading
+   *  (domains/mail readMailEgress), bound by the composition root. */
+  mailEgress?: (stage: Stage, masterDomain: string) => Promise<MailEgress>;
 }
 
 /** The two domains an installation sends as, off the master's map: customer mail as the platform
@@ -88,9 +90,10 @@ export function senderRoleOf(domain: string, sender: { platformDomain: string; u
 }
 
 /** What `publish-mail-dns` is answered with beyond the inventory (composeAnswers reads `stage` off
- *  the cluster row): the run's domain and DMARC choices, and the egress address READ off the master's
- *  own A record — fail-closed on a master that has none, since a record naming a guessed address
- *  would make receivers fail every mail of the domain. */
+ *  the cluster row): the run's domain and DMARC choices, the address mail leaves from, and for the
+ *  customer-mail domain the key the stage's sender signs it with. Fail-closed where the name mail
+ *  leaves by resolves to no address, and where a sender stands whose key the Manager does not hold:
+ *  a guessed address, or the relay's key standing in for the sender's, makes receivers fail the mail. */
 export function mailDnsAnswers(params: MailDnsPublishParams, ports: MailDnsPublishPorts): ExtraAnswers {
   return async (ctx) => {
     const { cluster } = loadActiveCluster(ctx.db, params.serverId);
@@ -99,21 +102,30 @@ export function mailDnsAnswers(params: MailDnsPublishParams, ports: MailDnsPubli
     if (role === undefined) {
       throw errValidation(`${params.senderDomain} is not a sender domain of ${cluster.domain} — its map names ${sender.platformDomain} (customer mail) and ${sender.unitApex} (alert mail)`);
     }
-    const egress = await requireMailDns(ports).readRecordContent({ name: cluster.domain, type: "A", signal: ctx.signal });
-    if (egress === null) {
+    if (!ports.mailEgress) throw errValidation("no mail reading is wired into this manager — the egress address and the sender's key have no other source");
+    const out = await ports.mailEgress(cluster.stage, cluster.domain);
+    if (out.address === null) {
+      throw errValidation(`${out.name} resolves to no address at public DNS — mail leaves from that address, and the SPF names it`);
+    }
+    const signer = role === "customer mail" && out.sender !== null ? out.sender.unit : null;
+    if (signer !== null && out.dkimPublicKey === null) {
       throw errValidation(
-        `${cluster.domain} has no A record at the DNS provider — the egress address the SPF names is read off that record, ` +
-          "and a master that is not reachable by its own name is not one whose mail should be announced",
+        `the mail sender ${signer} signs ${params.senderDomain}, and the Manager holds no key of it — its SMTP entry names no dkimKey, ` +
+          "or its secrets stood before it named one",
       );
     }
+    const dkim = signer !== null ? out.dkimPublicKey : null;
     ctx.log(
       "meta",
-      `${MAIL_DNS_PROGRAM} is told mail_domain=${params.senderDomain} (${role}), egress_address=${egress} (the A record of ${cluster.domain}), ` +
-        `dmarc_policy=${params.dmarcPolicy}, dmarc_mailbox=${params.dmarcMailbox}; dkim_selector is left to the stage, which is what the relay signs with`,
+      `${MAIL_DNS_PROGRAM} is told mail_domain=${params.senderDomain} (${role}), egress_address=${out.address} (${out.name}` +
+        `${out.sender !== null ? `, where the mail sender ${out.sender.unit} stands` : ", the master"}), ` +
+        `${dkim !== null ? `dkim_public_key=the public half of ${signer}'s key` : "no dkim_public_key (the relay's key is read out of the store)"}, ` +
+        `dmarc_policy=${params.dmarcPolicy}, dmarc_mailbox=${params.dmarcMailbox}; dkim_selector is left to the stage`,
     );
     return {
       mail_domain: params.senderDomain,
-      egress_address: egress,
+      egress_address: out.address,
+      ...(dkim !== null ? { dkim_public_key: dkim } : {}),
       dmarc_policy: params.dmarcPolicy,
       dmarc_mailbox: params.dmarcMailbox,
     };
@@ -175,7 +187,7 @@ export function bookedProgramStep(params: MailDnsPublishParams, ports: MailDnsPu
 
 function requireMailDns(ports: MailDnsPublishPorts): DnsProvider {
   if (!ports.dns) {
-    throw errValidation("no DNS provider is wired into this manager — the egress address is read off the master's own A record there, and nothing else may state it");
+    throw errValidation("no DNS provider is wired into this manager — the published records are read there before and after the program, for the book of DNS writes");
   }
   return ports.dns;
 }
@@ -221,15 +233,15 @@ export function makeMailDnsPublishDef(ports: MailDnsPublishPorts): RunDefinition
         targetId: params.serverId,
         summary:
           `Publish the mail DNS of ${params.senderDomain} (${role}) through the DNS provider, from the master "${server.name}" ` +
-          `(${cluster.domain}, ${cluster.stage}): the catalogue's ${MAIL_DNS_PROGRAM} program merges the master's egress address into the ` +
-          `domain's SPF (one v=spf1 record, everything already in it kept), writes the domain's address record, publishes the DKIM key ` +
-          `where the relay holds one, and sets DMARC ${params.dmarcPolicy} with reports to ${params.dmarcMailbox} — proved dry, then run, ` +
-          `on the master's own record. The password you enter raises the program's root commands and is stored nowhere.`,
+          `(${cluster.domain}, ${cluster.stage}): the catalogue's ${MAIL_DNS_PROGRAM} program merges the address mail leaves from into the ` +
+          `domain's SPF (one v=spf1 record, everything already in it kept), publishes the DKIM key it is signed with, and sets ` +
+          `DMARC ${params.dmarcPolicy} with reports to ${params.dmarcMailbox} — proved dry, then run, on the master's own record. ` +
+          `The password you enter raises the program's root commands and is stored nowhere.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [{ serverId: server.id, ownsHost: true, label: `${server.name} (${server.role})` }],
         locks: [],
         warnings: [
-          `The reverse DNS of the master's egress address is set at the hosting provider, not here — point it at ${sender.platformDomain}.`,
+          "The reverse DNS of the address mail leaves from is set at the hosting provider, not here — it gives the mail name, which must resolve back to that address.",
         ],
         requiredSecrets: [ANSIWISE_ELEVATION_SECRET],
       };

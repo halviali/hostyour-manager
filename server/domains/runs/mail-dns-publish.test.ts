@@ -9,14 +9,16 @@ import type { Logger } from "../../kernel/logger.ts";
 import { makeHarness, disposeHarnesses, seedMasterCluster, MASTER_ID, SLAVE_ID, MASTER_MARKING_YAML, type Harness } from "./deploy-slave.fixture.ts";
 import { MASTER_FQDN } from "./cluster-maps.fixture.ts";
 import { ANSIWISE_ELEVATION_SECRET } from "./defs/ansiwise-run.kit.ts";
+import type { MailEgress } from "../../../shared/mail.ts";
 import { bookedProgramStep, makeMailDnsPublishDef, mailDnsAnswers, readPublishedRecords, senderRoleOf, type MailDnsPublishParams, type MailDnsPublishPorts } from "./defs/mail-dns-publish.ts";
 
 // mail-dns-publish runs the catalogue's publish-mail-dns on the master for ONE of the two sender
 // domains the master's map names. What these tests hold: the plan stands only on a master and only
-// for one of those two names, the program is answered with the egress address READ off the master's
-// own A record (never typed), the two DMARC choices travel from the params to the answers, and the
-// book of DNS writes learns what the program changed from the difference of the three published
-// names read at the provider before and after it.
+// for one of those two names, the program is answered with the Mail page's reading of where the
+// stage's mail leaves (never typed) and, for the platform domain, the key the stage's sender signs it
+// with, the two DMARC choices travel from the params to the answers, and the book of DNS writes
+// learns what the program changed from the difference of the three published names read at the
+// provider before and after it.
 
 const EGRESS = "203.0.113.9";
 const PARAMS: MailDnsPublishParams = { serverId: MASTER_ID, senderDomain: "example.com", dmarcPolicy: "none", dmarcMailbox: "dmarc@example.com" };
@@ -26,6 +28,16 @@ afterEach(disposeHarnesses);
 function ports(h: Harness, dns?: FakeDnsProvider): MailDnsPublishPorts {
   return { ...h.runPorts, ...(dns ? { dns } : {}) };
 }
+
+/** The Mail page's reading, scripted: without a sender, mail leaves by the master's identity. */
+function egressOf(over: Partial<MailEgress> = {}, asked: string[] = []): NonNullable<MailDnsPublishPorts["mailEgress"]> {
+  return async (stage, masterDomain) => {
+    asked.push(`${stage} ${masterDomain}`);
+    return { sender: null, name: masterDomain, address: EGRESS, dkimPublicKey: null, ...over };
+  };
+}
+
+const SENDER: Partial<MailEgress> = { sender: { unit: "post", cluster: "a1.example.com" }, name: "a1.example.com", dkimPublicKey: "MIIBsenderKey" };
 
 function ctx(h: Harness, logs: string[], slot: { checkpoint?: unknown } = {}): StepCtx {
   return {
@@ -47,7 +59,8 @@ describe("mail-dns-publish plan", () => {
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.summary).toContain("example.com (customer mail)");
     // The PTR is the provider's to set; the plan says so rather than pretending to.
-    expect(plan.warnings.join(" ")).toMatch(/reverse DNS .* point it at example\.com/);
+    expect(plan.warnings.join(" ")).toMatch(/reverse DNS of the address mail leaves from .* resolve back to that address/);
+    expect(plan.summary).not.toMatch(/address record/);
   });
 
   it("names the alert domain by its role when the map's unit apex differs from the platform domain", async () => {
@@ -75,29 +88,47 @@ describe("mail-dns-publish plan", () => {
 });
 
 describe("what publish-mail-dns is answered with", () => {
-  it("the run's domain, the DMARC choices, and the egress address READ off the master's own A record", async () => {
+  it("without a sender: the run's domain, the DMARC choices and the address the master's identity resolves to — no key, the relay's stands in the store", async () => {
     const h = await makeHarness();
     seedMasterCluster(h);
-    const dns = new FakeDnsProvider();
-    dns.seed(MASTER_FQDN, "A", EGRESS);
+    const asked: string[] = [];
     const logs: string[] = [];
-    const answers = await mailDnsAnswers({ ...PARAMS, dmarcPolicy: "quarantine" }, ports(h, dns))(ctx(h, logs));
+    const answers = await mailDnsAnswers({ ...PARAMS, dmarcPolicy: "quarantine" }, { ...ports(h), mailEgress: egressOf({}, asked) })(ctx(h, logs));
     expect(answers).toEqual({ mail_domain: "example.com", egress_address: EGRESS, dmarc_policy: "quarantine", dmarc_mailbox: "dmarc@example.com" });
-    // dkim_selector is NOT answered: the program defaults it to the stage, which is what the relay signs with.
+    expect(asked).toEqual([`prod ${MASTER_FQDN}`]);
+    // dkim_selector is NOT answered: the program defaults it to the stage, which is what the signers sign with.
     expect(logs.join(" ")).toContain("dkim_selector is left to the stage");
   });
 
-  it("refuses a master without an A record rather than announcing an address nobody resolves", async () => {
+  it("with a sender: mail leaves where it stands; the platform domain is answered its key, the alert domain is not — the relay signs that", async () => {
     const h = await makeHarness();
     seedMasterCluster(h);
-    await expect(mailDnsAnswers(PARAMS, ports(h, new FakeDnsProvider()))(ctx(h, [])))
-      .rejects.toThrow(/m1\.example\.com has no A record at the DNS provider/);
+    h.platformRepo.seed(h.platformRepo.booksBranch, clusterMapPath(MASTER_FQDN), MASTER_MARKING_YAML.replace("unitApex: example.com", "unitApex: apps.example.net"));
+    const withSender = { ...ports(h), mailEgress: egressOf(SENDER) };
+    const logs: string[] = [];
+    expect(await mailDnsAnswers(PARAMS, withSender)(ctx(h, logs))).toMatchObject({ egress_address: EGRESS, dkim_public_key: "MIIBsenderKey" });
+    expect(logs.join(" ")).toContain("a1.example.com, where the mail sender post stands");
+    expect(await mailDnsAnswers({ ...PARAMS, senderDomain: "apps.example.net" }, withSender)(ctx(h, []))).not.toHaveProperty("dkim_public_key");
   });
 
-  it("refuses without a DNS provider wired — the egress address has no other source", async () => {
+  it("refuses a sender whose key the Manager does not hold, rather than letting the relay's key stand in for it", async () => {
     const h = await makeHarness();
     seedMasterCluster(h);
-    await expect(mailDnsAnswers(PARAMS, ports(h))(ctx(h, []))).rejects.toThrow(/no DNS provider is wired/);
+    await expect(mailDnsAnswers(PARAMS, { ...ports(h), mailEgress: egressOf({ ...SENDER, dkimPublicKey: null }) })(ctx(h, [])))
+      .rejects.toThrow(/the mail sender post signs example\.com, and the Manager holds no key of it/);
+  });
+
+  it("refuses where the name mail leaves by resolves to no address, rather than announcing a guessed one", async () => {
+    const h = await makeHarness();
+    seedMasterCluster(h);
+    await expect(mailDnsAnswers(PARAMS, { ...ports(h), mailEgress: egressOf({ address: null }) })(ctx(h, [])))
+      .rejects.toThrow(/m1\.example\.com resolves to no address at public DNS/);
+  });
+
+  it("refuses without the mail reading wired — the address and the key have no other source", async () => {
+    const h = await makeHarness();
+    seedMasterCluster(h);
+    await expect(mailDnsAnswers(PARAMS, ports(h))(ctx(h, []))).rejects.toThrow(/no mail reading is wired/);
   });
 });
 
