@@ -18,6 +18,22 @@ function stubFetch(routes: Record<string, { status: number; body?: unknown }>): 
   }) as unknown as typeof fetch;
 }
 
+describe("github-consumer adapter — readFile", () => {
+  it("asks for the file raw and answers its text: the adapter's own accept header does not replace the caller's", async () => {
+    // Replaced, GitHub answers the JSON envelope with the file base64-encoded inside it, and a reader
+    // looking for lines in the file finds none: the consumer wizard then measured no scope in a
+    // repository's .npmrc and never asked for the owner's packages reader.
+    const accepted: string[] = [];
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      accepted.push((init?.headers as Record<string, string> | undefined)?.accept ?? "");
+      return { ok: true, status: 200, statusText: "200", text: async () => "@acme:registry=https://npm.pkg.github.com\n" } as Response;
+    }) as unknown as typeof fetch;
+    const client = new HttpGitHubConsumer({ fetchImpl });
+    expect(await client.readFile({ owner: "x", repo: "acme", path: ".npmrc", token: "tkn" })).toBe("@acme:registry=https://npm.pkg.github.com\n");
+    expect(accepted).toEqual(["application/vnd.github.raw+json"]);
+  });
+});
+
 const TARGET = "https://build.s1.example/github";
 const ensureInput = { owner: "x", repo: "acme", token: "tkn", targetUrl: TARGET, secret: "hmac", events: ["push"], contentType: "json" };
 

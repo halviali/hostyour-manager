@@ -44,13 +44,15 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     };
   }
 
-  /** Thin fetch wrapper: merges the auth headers over any caller headers (auth ALWAYS wins) and turns a
-   *  transport error into a GitHubConsumerError. It does NOT throw on a non-2xx — each method inspects
+  /** Thin fetch wrapper: merges the caller's headers over the defaults — a caller may state the
+   *  representation it wants (readFile's raw `accept`) — and the auth header over both (auth ALWAYS
+   *  wins), and turns a transport error into a GitHubConsumerError. It does NOT throw on a non-2xx — each method inspects
    *  the status itself, because a 403/404 on /hooks is the load-bearing "missing scope" signal and a
    *  404 on the dispatch endpoint is the retryable not-yet-indexed one. */
   private async send(token: string, path: string, init: RequestInit | undefined): Promise<Response> {
     try {
-      return await this.fetchImpl(`${this.apiBase}${path}`, { ...init, headers: { ...(init?.headers ?? {}), ...this.headers(token) } });
+      // readFile's raw `accept`, replaced by the default, returned the JSON envelope instead of the file.
+      return await this.fetchImpl(`${this.apiBase}${path}`, { ...init, headers: { ...this.headers(token), ...(init?.headers ?? {}), authorization: `Bearer ${token}` } });
     } catch (e) {
       throw new GitHubConsumerError(`GitHub request failed (${path}): ${e instanceof Error ? e.message : String(e)}`);
     }
