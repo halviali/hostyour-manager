@@ -152,7 +152,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     // ensure-images defaults: every image present ⇒ the step is a pure probe/no-op, so the
     // existing suites never trigger a build (a test scripts missing tags to exercise that path).
     registryProbe: new FakeRegistryProbe(),
-    dns: seededDns(),
+    dns: new FakeDnsProvider(),
     buildRbac: new FakeBuildRbacWriter(),
     // Who builds what, as the registration branch states it: example-platform builds the engine image
     // the tenant's apps pull, swissbookai is a unit beside it that builds none of them.
@@ -163,14 +163,6 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     consumerHostLabels: async () => ["example-platform", "swissbookai"],
     ...portOver,
   };
-}
-
-/** The target cluster's own A record — what provision-dns points the tenant's wildcard at. */
-function seededDns(): FakeDnsProvider {
-  const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
-  dns.seed("m1.example", "A", "203.0.113.11");
-  return dns;
 }
 
 function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {

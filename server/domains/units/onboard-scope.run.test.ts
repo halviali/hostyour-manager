@@ -79,39 +79,36 @@ function ctx(stepName: string, logs: string[]): StepCtx {
 }
 
 describe("onboard scope — a second stage beside a live one", () => {
-  it("provision-dns REFUSES a host another cluster of THIS installation answers, names it, and leaves that address alone", async () => {
+  it("provision-dns REFUSES a host that points at another cluster of THIS installation, names it, and leaves the record alone", async () => {
     const dns = new FakeDnsProvider();
-    dns.seed("s1.example", "A", "203.0.113.10"); // this cluster's own address
-    dns.seed("s2.example", "A", "203.0.113.20"); // the other cluster of this installation
-    dns.seed("acme.example.com", "A", "203.0.113.20"); // the same stage on that cluster, under the shared apex
+    dns.seed("acme.example.com", "CNAME", "s2.example"); // the same stage on the other cluster, under the shared apex
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "203.0.113.20", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active", slaveId: 2 }).run();
     const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
-    await expect(step.run(ctx("provision-dns", []))).rejects.toThrow(/already answers with 203\.0\.113\.20, the address of s2\.example of this installation/);
-    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.20"); // untouched
+    await expect(step.run(ctx("provision-dns", []))).rejects.toThrow(/already points at s2\.example, a cluster of this installation/);
+    expect(dns.record("acme.example.com", "CNAME")).toBe("s2.example"); // untouched
   });
 
-  it("provision-dns REPLACES a record at an address no cluster of this installation has — a gone installation's leftover — and says what stood there", async () => {
+  it("provision-dns REPLACES a record that points at no cluster of this installation — a gone installation's leftover — and says what stood there", async () => {
     // What stopped a real run at its thirteenth step: post.digitacloud.app still at the abandoned
     // apps4 when apps7 onboarded the same unit. Only this installation's token writes the zone, so a
-    // record at an address none of its clusters has is nobody's live service.
+    // record that points at none of its clusters is nobody's live service.
     const dns = new FakeDnsProvider();
-    dns.seed("s1.example", "A", "203.0.113.10");
     dns.seed("acme.example.com", "A", "157.90.201.150");
     const logs: string[] = [];
     const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
     await expect(step.run(ctx("provision-dns", logs))).resolves.toBeUndefined();
-    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
-    expect(logs.join("\n")).toMatch(/stood at 157\.90\.201\.150, an address no cluster of this installation has/);
+    expect(dns.record("acme.example.com", "A")).toBeUndefined();
+    expect(dns.record("acme.example.com", "CNAME")).toBe("s1.example");
+    expect(logs.join("\n")).toMatch(/stood as A 157\.90\.201\.150, which points at no cluster of this installation/);
   });
 
-  it("provision-dns is idempotent over its OWN record — the same address is a re-run, not a takeover", async () => {
+  it("provision-dns is idempotent over its OWN record — the same cluster is a re-run, not a takeover", async () => {
     const dns = new FakeDnsProvider();
-    dns.seed("s1.example", "A", "203.0.113.10");
-    dns.seed("acme.example.com", "A", "203.0.113.10"); // what a previous pass of this same step wrote
+    dns.seed("acme.example.com", "CNAME", "s1.example"); // what a previous pass of this same step wrote
     const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
     await expect(step.run(ctx("provision-dns", []))).resolves.toBeUndefined();
-    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
+    expect(dns.record("acme.example.com", "CNAME")).toBe("s1.example");
   });
 
   it("the abort cleanup takes THIS stage's mail-ops grant and leaves the other stage's standing", async () => {

@@ -106,7 +106,6 @@ function fakeTenantSeeder(): VaultSeeder {
 /** The ports of a tenant WITHOUT the App and the template — what withAppsTemplate adds. */
 function bare(over: Partial<TenantOnboardPorts> = {}, catalog = MANIFEST_YAML): TenantOnboardPorts {
   const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
   return {
     seeder: fakeTenantSeeder(),
     objectStore: new FakeObjectStore(),

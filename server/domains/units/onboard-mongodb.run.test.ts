@@ -3,7 +3,7 @@ import { seedUnitSizes } from "./unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
-import { CHANNEL_STAGES, seededDns } from "./onboard.fixture.ts";
+import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
 import { Registrations } from "./registrations.ts";
 import { FakeRepoReader, FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -85,7 +85,7 @@ function ports(mongodb: MongodbMode, seeder?: RecordingSeeder): OnboardPorts {
       argoNamespace: "argocd",
     }),
     tenantSubdomains: async () => [],
-    dns: seededDns(),
+    dns: emptyZone(),
     declareListening: true,
     argoWatchTimeoutMs: 1000,
     deployRefVisibleMs: 200,

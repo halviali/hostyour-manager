@@ -155,7 +155,6 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
   const buildPlane = new FakeBuildPlane();
   buildPlane.seedReleaseRun("acme", { runName: "acme-release-1", releaseTag: MINTED_TAG, succeeded: true });
   const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
   const ports: OnboardPorts = {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
     runner: new FakeGateRunner({ report: passReport(over.manifest ?? MANIFEST) }),

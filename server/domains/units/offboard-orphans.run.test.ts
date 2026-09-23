@@ -114,7 +114,7 @@ describe("offboard assert-no-orphans", () => {
     await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" })]);
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 3 } });
     const dns = new FakeDnsProvider();
-    dns.seed("acme.s1.example", "A", "203.0.113.10");
+    dns.seed("acme.s1.example", "CNAME", "s1.example");
 
     const step = scanStep(ports(reg, { cluster, projects: new FakeMasterProjectWriter(), buildRbac, repoCredential, dns }));
     const failure = await step.run(ctx([])).then(() => null, (e: Error) => e);
@@ -125,7 +125,7 @@ describe("offboard assert-no-orphans", () => {
     // Every leftover is NAMED with where it stands — a report of what is gone would be useless here.
     for (const object of [
       "ArgoCD repository Secret argocd/repo-acme-prod",
-      "DNS A acme.s1.example",
+      "DNS CNAME acme.s1.example",
       "Role postfix/acme-prod-smtp-ops",
       "RoleBinding postfix/acme-prod-smtp-ops",
     ]) {

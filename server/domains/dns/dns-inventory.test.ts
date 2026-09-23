@@ -13,7 +13,6 @@ import { readDnsInventory, type DnsInventoryDeps } from "./dns-inventory.ts";
 const M1 = "m1.example.com";
 const S1 = "s1.example.com";
 const M1_ADDRESS = "203.0.113.9";
-const S1_ADDRESS = "198.51.100.4";
 
 /** The five rows the Mail page measures for one sender domain, as that page composes them. */
 const mailView = (): MailDnsView => ({
@@ -45,8 +44,6 @@ describe("readDnsInventory", () => {
     db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: M1, status: "active" }).run();
     db.db.insert(clusters).values({ id: "cls_s", serverId: "srv_s", stage: "prod", domain: S1, status: "active", slaveId: 1 }).run();
     dns = new FakeDnsProvider();
-    dns.seed(M1, "A", M1_ADDRESS);
-    dns.seed(S1, "A", S1_ADDRESS);
   });
   afterEach(() => db.sqlite.close());
 
@@ -61,19 +58,27 @@ describe("readDnsInventory", () => {
     ...over,
   });
 
-  it("derives one record per unit per stage and reads each at the provider, with the cluster's own address as what it must carry", async () => {
-    dns.seed("post.example.net", "A", M1_ADDRESS); // the consumer's host, standing where its cluster answers
-    dns.seed("*.beta.example.net", "A", M1_ADDRESS); // the slave's tenant, still pointing at the master's address
+  it("derives one record per unit per stage and reads each at the provider, with the cluster's own name as what its CNAME must carry", async () => {
+    dns.seed("post.example.net", "CNAME", M1); // the consumer's host, pointing at its cluster
+    dns.seed("*.beta.example.net", "CNAME", M1); // the slave's tenant, still pointing at the master
     const view = await readDnsInventory(deps());
     expect(view.skipped).toEqual([]);
     expect(view.rows.filter((r) => r.owner.kind === "consumer" || r.owner.kind === "tenant").map((r) => `${r.name} ${r.verdict}`)).toEqual([
       "post.example.net standing",
       "*.acme.example.net absent", // never provisioned, or already taken back
-      "*.beta.example.net other", // the slave's own address is what this one must carry
+      "*.beta.example.net other", // the slave's own name is what this one must carry
     ]);
     const consumer = view.rows.find((r) => r.name === "post.example.net")!;
-    expect(consumer).toMatchObject({ owner: { kind: "consumer", name: "post", stage: "prod" }, type: "A", expected: M1_ADDRESS, removable: true });
-    expect(view.rows.find((r) => r.name === "*.beta.example.net")).toMatchObject({ owner: { kind: "tenant", name: "beta", stage: "prod" }, expected: S1_ADDRESS, found: M1_ADDRESS });
+    expect(consumer).toMatchObject({ owner: { kind: "consumer", name: "post", stage: "prod" }, type: "CNAME", expected: M1, removable: true });
+    expect(view.rows.find((r) => r.name === "*.beta.example.net")).toMatchObject({ owner: { kind: "tenant", name: "beta", stage: "prod" }, expected: S1, found: M1 });
+  });
+
+  it("shows an address record standing where a unit's CNAME belongs as what it is — never as an absence", async () => {
+    dns.seed("*.acme.example.net", "A", "157.90.201.150"); // what a gone installation left under the tenant's wildcard
+    const view = await readDnsInventory(deps());
+    expect(view.rows.find((r) => r.name === "*.acme.example.net")).toMatchObject({
+      owner: { kind: "tenant", name: "acme", stage: "prod" }, type: "A", expected: M1, found: "157.90.201.150", verdict: "other", removable: true,
+    });
   });
 
   it("carries the mail rows verbatim and lets this Manager take back only the three it publishes", async () => {

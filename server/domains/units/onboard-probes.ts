@@ -136,8 +136,7 @@ export async function probeWebhook(ports: OnboardPorts, p: OnboardParams, ctx: P
   });
 }
 
-/** provision-dns's probe: the record's standing, judged the way the step judges it. The cluster's
- *  wildcard is a CNAME, which this manager's DNS port does not read; the run meets it. */
+/** provision-dns's probe: the record's standing, judged the way the step judges it. */
 export async function probeDns(ports: OnboardPorts, p: DeployableOnboardParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   const recordName = consumerUnitHost(p.host, p.stage, p.unitApex);
   const title = `The DNS record ${recordName}`;
@@ -145,8 +144,8 @@ export async function probeDns(ports: OnboardPorts, p: DeployableOnboardParams, 
   const out: PreflightCheck[] = [];
   const judged = await readStandingHost(ports.dns, ctx.db, { recordName, clusterFqdn: p.domain, signal: ctx.signal });
   out.push(judged.kind === "free" ? check("dns.record", title, "hard", "pass", "is free; the run creates it")
-    : judged.kind === "ours" ? check("dns.record", title, "hard", "pass", `already answers with ${p.domain}'s address`)
-      : judged.kind === "leftover" ? check("dns.record", title, "hard", "warn", `answers with ${judged.standing}, which no cluster of this installation carries; the run takes it over`)
-        : check("dns.record", title, "hard", "fail", `answers with ${judged.standing}, the address of ${judged.cluster} of this installation`, "offboard the unit there first"));
+    : judged.kind === "ours" ? check("dns.record", title, "hard", "pass", `already points at ${p.domain}`)
+      : judged.kind === "leftover" ? check("dns.record", title, "hard", "warn", `stands as ${judged.type} ${judged.content}, which points at no cluster of this installation; the run replaces it`)
+        : check("dns.record", title, "hard", "fail", `points at ${judged.cluster}, a cluster of this installation`, "offboard the unit there first"));
   return out;
 }

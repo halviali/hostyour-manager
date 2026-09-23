@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { apps, clusters, servers, tenants } from "../../db/schema/inventory.ts";
 import { checkUnitsStep } from "./check-units.ts";
-import { ports as onboardPorts, seededDns } from "./onboard.fixture.ts";
+import { ports as onboardPorts, emptyZone } from "./onboard.fixture.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
@@ -46,7 +46,7 @@ describe("check-units", () => {
     db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", provenance: "manager", status: "active" }).run();
     db.db.insert(apps).values({ id: "app_off", clusterId: "cls_1", name: "gone", stage: "prod", host: "gone", repoUrl: "https://github.com/x/gone.git", provenance: "manager", status: "offboarded" }).run();
     db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
-    const dns = seededDns();
+    const dns = emptyZone();
     dns.seed("*.acme.example.com", "A", "198.51.100.7"); // the tenant's wildcard moved to an address nobody here carries
     const github = new FakeGitHubConsumer();
     github.scopeError = true; // the consumer's stored PAT lost admin:repo_hook
@@ -68,9 +68,9 @@ describe("check-units", () => {
 
   it("says not measured on a unit it cannot probe — no onboarding wired, or a row without a repository", async () => {
     db.db.insert(apps).values({ id: "app_adopted", clusterId: "cls_1", name: "found", stage: "prod", host: "found", provenance: "adopted", status: "active" }).run();
-    await checkUnitsStep({ onboard: () => ({ ports: onboardPorts() }), tenant: { dns: seededDns(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
+    await checkUnitsStep({ onboard: () => ({ ports: onboardPorts() }), tenant: { dns: emptyZone(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
     expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ status: "warn", detail: "not measured: the row records no repository (an adopted unit)" }]);
-    await checkUnitsStep({ tenant: { dns: seededDns(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
+    await checkUnitsStep({ tenant: { dns: emptyZone(), resolveUnitApex: async () => "example.com" } }).run(ctx([]));
     expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ detail: "not measured: the consumer onboarding is not wired on this manager" }]);
   });
 

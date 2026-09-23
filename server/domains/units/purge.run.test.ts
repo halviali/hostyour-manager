@@ -266,10 +266,10 @@ describe("purge run definition", () => {
   it("remove-dns removes the unit's record and STILL fails the run on a DNS API failure (purge's one fail-closed teardown step)", async () => {
     seedCluster();
     const dns = new FakeDnsProvider();
-    dns.seed("acme.s1.example", "A", "203.0.113.10"); // unitApex == the branch in the fake chain
+    dns.seed("acme.s1.example", "CNAME", "s1.example"); // unitApex == the branch in the fake chain
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { dns })).steps(PARAMS).find((s) => s.name === "remove-dns")!;
     await step.run(ctx("remove-dns", []));
-    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme.s1.example", "CNAME")).toBeUndefined();
 
     const failingDns = new FakeDnsProvider();
     failingDns.failWith = new Error("Cloudflare DNS refused DELETE: [10000] Authentication error");

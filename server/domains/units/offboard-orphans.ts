@@ -134,7 +134,7 @@ export async function assertNoOrphans(ctx: StepCtx, ports: OrphanScanPorts, unit
     );
   }
   const host = consumerUnitHost(unit.host, unit.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(unit.domain, unit.stage)));
-  look(`DNS A ${host}`, (await ports.dns.readRecordContent({ name: host, type: "A", signal: ctx.signal })) !== null);
+  look(`DNS CNAME ${host}`, (await ports.dns.readRecordContent({ name: host, type: "CNAME", signal: ctx.signal })) !== null);
 
   if (left.length > 0) {
     throw errValidation(

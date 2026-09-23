@@ -403,26 +403,25 @@ describe("G27 unit host (hard) — the zone, read before the first write", () =>
   const host = "acme.units.example.com";
   const on = (standing: Parameters<typeof gateUnitHost>[0]["standing"]) => gateUnitHost({ host, unitName: "acme", clusterFqdn: "s1.example", standing });
 
-  it("passes a free host and a host already at the target's address", () => {
+  it("passes a free host and a host already pointing at the target", () => {
     expect(on({ kind: "free" })).toMatchObject({ id: "G27", severity: "hard", status: "pass", detail: "host is free" });
     expect(on({ kind: "ours" })).toMatchObject({ status: "pass", detail: "host already ours" });
   });
 
-  it("passes a leftover of a gone installation AND says it will be replaced, the standing address as evidence", () => {
+  it("passes a leftover of a gone installation AND says it will be replaced, what stands there as evidence", () => {
     // What the abandoned installation's onboarding had left at its old slave's address: the one
     // obstacle that stopped a real run at its thirteenth step after twelve writes.
-    const g = on({ kind: "leftover", standing: "157.90.201.150" });
+    const g = on({ kind: "leftover", type: "A", content: "157.90.201.150" });
     expect(g.status).toBe("pass");
     expect(g.found).toContain("157.90.201.150");
     expect(g.found).toContain("provision-dns replaces it");
-    expect(g.evidence).toEqual([{ source: "manager", name: host, fieldPath: "standing", value: "157.90.201.150" }]);
+    expect(g.evidence).toEqual([{ source: "manager", name: host, fieldPath: "standing", value: "A 157.90.201.150" }]);
   });
 
   it("fails a host another cluster of THIS installation serves, naming that cluster — one stage of a unit has one host", () => {
-    const g = on({ kind: "collision", standing: "203.0.113.20", cluster: "s2.example" });
+    const g = on({ kind: "collision", cluster: "s2.example" });
     expect(g.status).toBe("fail");
-    expect(g.found).toContain("s2.example");
-    expect(g.found).toContain("203.0.113.20");
+    expect(g.found).toContain("already points at s2.example");
     expect(g.reason).toContain("offboard the unit there first");
     expect(hardGatesPass([g])).toBe(false);
   });

@@ -95,19 +95,17 @@ describe("probeBuildUnit", () => {
 });
 
 describe("probeTenantDns — the tenant's wildcard record", () => {
-  it("free passes, ours passes, a leftover warns, another cluster's address fails by name", async () => {
+  it("free passes, ours passes, a leftover warns, a wildcard pointing at another cluster fails by name", async () => {
     const dns = new FakeDnsProvider();
-    dns.seed("s1.example", "A", "203.0.113.10");
     const prt = ports({ dns, resolveUnitApex: async () => "example.com" });
     expect(await probeTenantDns(prt, p(), ctx())).toMatchObject([{ id: "dns.record", status: "pass", detail: "is free; the run creates it" }]);
-    dns.seed("*.acme.example.com", "A", "203.0.113.10");
-    expect((await probeTenantDns(prt, p(), ctx()))[0]?.detail).toContain("already answers with s1.example's address");
-    dns.seed("*.acme.example.com", "A", "198.51.100.7");
+    dns.seed("*.acme.example.com", "CNAME", "s1.example");
+    expect((await probeTenantDns(prt, p(), ctx()))[0]?.detail).toContain("already points at s1.example");
+    dns.seed("*.acme.example.com", "CNAME", "apps4.gone.example");
     expect(await probeTenantDns(prt, p(), ctx())).toMatchObject([{ status: "warn" }]);
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "203.0.113.20", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active", slaveId: 2 }).run();
-    dns.seed("s2.example", "A", "203.0.113.20");
-    dns.seed("*.acme.example.com", "A", "203.0.113.20");
-    expect(await probeTenantDns(prt, p(), ctx())).toMatchObject([{ status: "fail", severity: "hard", detail: "answers with 203.0.113.20, the address of s2.example of this installation", hint: "offboard the tenant there first" }]);
+    dns.seed("*.acme.example.com", "CNAME", "s2.example");
+    expect(await probeTenantDns(prt, p(), ctx())).toMatchObject([{ status: "fail", severity: "hard", detail: "points at s2.example, a cluster of this installation", hint: "offboard the tenant there first" }]);
   });
 });

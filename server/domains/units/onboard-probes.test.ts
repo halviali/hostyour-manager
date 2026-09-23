@@ -5,7 +5,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { OnboardParams, type DeployableOnboardParams } from "./onboard.run.ts";
 import { probeTarget, probeIdentity, probePackages, probeWebhook, probeDns } from "./onboard-probes.ts";
-import { ports, SHA, seededDns } from "./onboard.fixture.ts";
+import { ports, SHA, emptyZone } from "./onboard.fixture.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeClusterReader, FakeClusterKubeResolver, FakeMasterArgoReader, FakeMasterProjectWriter } from "../../adapters/kube/testing/fake.ts";
@@ -111,17 +111,17 @@ describe("probeWebhook — the hooks readable with the identity", () => {
 });
 
 describe("probeDns — the unit's record, judged as the step judges it", () => {
-  it("free passes, ours passes, a leftover warns, and another cluster's address fails by name", async () => {
-    const dns = seededDns();
+  it("free passes, ours passes, a leftover warns, and a host pointing at another cluster fails by name", async () => {
+    const dns = emptyZone();
     const prt = ports({ dns });
     expect(await probeDns(prt, params(), ctx())).toMatchObject([{ id: "dns.record", status: "pass", detail: "is free; the run creates it" }]);
-    dns.seed("acme.example.com", "A", "203.0.113.10");
-    expect((await probeDns(prt, params(), ctx()))[0]?.detail).toContain("already answers with s1.example's address");
-    dns.seed("acme.example.com", "A", "198.51.100.7");
-    expect(await probeDns(prt, params(), ctx())).toMatchObject([{ status: "warn", detail: "answers with 198.51.100.7, which no cluster of this installation carries; the run takes it over" }]);
+    dns.seed("acme.example.com", "CNAME", "s1.example");
+    expect((await probeDns(prt, params(), ctx()))[0]?.detail).toContain("already points at s1.example");
+    dns.seed("acme.example.com", "CNAME", "apps4.gone.example");
+    expect(await probeDns(prt, params(), ctx())).toMatchObject([{ status: "warn", detail: "stands as CNAME apps4.gone.example, which points at no cluster of this installation; the run replaces it" }]);
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "203.0.113.20", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active", slaveId: 2 }).run();
-    dns.seed("acme.example.com", "A", "203.0.113.20");
-    expect(await probeDns(prt, params(), ctx())).toMatchObject([{ status: "fail", severity: "hard", detail: "answers with 203.0.113.20, the address of s2.example of this installation", hint: "offboard the unit there first" }]);
+    dns.seed("acme.example.com", "CNAME", "s2.example");
+    expect(await probeDns(prt, params(), ctx())).toMatchObject([{ status: "fail", severity: "hard", detail: "points at s2.example, a cluster of this installation", hint: "offboard the unit there first" }]);
   });
 });

@@ -8,14 +8,14 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import { provisionUnitDns, removeUnitDns } from "./unit-dns.ts";
 
-// The unit's ONE record and the book of DNS writes beside it: provisionUnitDns enters what it
-// changed — inserted where nothing stood, updated where another address stood — and enters NOTHING
-// where the address already stood, because the book says what this Manager changed; removeUnitDns
-// takes the row out beside the record. Every case is asserted against the fake provider's own store
-// and the book read back from the database.
+// The unit's ONE record and the book of DNS writes beside it: provisionUnitDns writes a CNAME onto the
+// target cluster's name and enters what it changed — inserted where nothing stood, updated where
+// another record stood — and enters NOTHING where the record already pointed at the target, because
+// the book says what this Manager changed; removeUnitDns takes the row out beside the record. Every
+// case is asserted against the fake provider's own store and the book read back from the database.
 
 const CLUSTER = "s1.example";
-const ADDRESS = "203.0.113.10";
+const OTHER = "s2.example";
 const HOST = "post.example.net";
 
 let db: DbHandle;
@@ -23,6 +23,8 @@ beforeEach(() => {
   db = openDb(":memory:");
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: CLUSTER, status: "active" }).run();
+  db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
+  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: OTHER, status: "active" }).run();
 });
 afterEach(() => { db.sqlite.close(); });
 
@@ -36,37 +38,51 @@ function ctx(logs: string[], runId = "run_onboard"): StepCtx {
   };
 }
 
-function provider(): FakeDnsProvider {
-  const dns = new FakeDnsProvider();
-  dns.seed(CLUSTER, "A", ADDRESS);
-  return dns;
-}
-
-const consumer = (dns: FakeDnsProvider, over: { overwriteAddress?: boolean } = {}) =>
+const consumer = (dns: FakeDnsProvider, over: { repoint?: boolean } = {}) =>
   ({ dns, unit: "post", kind: "consumer" as const, stage: "prod" as const, recordName: HOST, clusterFqdn: CLUSTER, runKind: "consumer-onboard", ...over });
 
 describe("provisionUnitDns and the book", () => {
-  it("a record that stood nowhere is inserted, and the book says so with the owner and the run", async () => {
-    const dns = provider();
+  it("a record that stood nowhere is inserted as a CNAME onto the cluster, whose own name need carry no address", async () => {
+    const dns = new FakeDnsProvider(); // nothing stands under s1.example: a master identity that is itself a CNAME serves units the same way
     await provisionUnitDns(ctx([], "run_1"), consumer(dns));
-    expect(dns.record(HOST, "A")).toBe(ADDRESS);
+    expect(dns.record(HOST, "CNAME")).toBe(CLUSTER);
     expect(listDnsWrites(db.db)).toMatchObject([
-      { name: HOST, type: "A", content: ADDRESS, act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_1" },
+      { name: HOST, type: "CNAME", content: CLUSTER, act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_1" },
     ]);
   });
 
-  it("a leftover of a gone installation is replaced, and the book says updated", async () => {
-    const dns = provider();
+  it("an address record a gone installation left is taken off before the CNAME is written, and the book says updated", async () => {
+    const dns = new FakeDnsProvider();
     dns.seed(HOST, "A", "157.90.201.150");
-    await provisionUnitDns(ctx([], "run_2"), consumer(dns));
-    expect(listDnsWrites(db.db)).toMatchObject([{ name: HOST, act: "updated", content: ADDRESS, runId: "run_2" }]);
+    const logs: string[] = [];
+    await provisionUnitDns(ctx(logs, "run_2"), consumer(dns));
+    expect(dns.record(HOST, "A")).toBeUndefined();
+    expect(dns.record(HOST, "CNAME")).toBe(CLUSTER);
+    expect(logs.some((l) => l.includes("stood as A 157.90.201.150") && l.includes(`replaced with a CNAME onto ${CLUSTER}`))).toBe(true);
+    expect(listDnsWrites(db.db)).toMatchObject([{ name: HOST, type: "CNAME", act: "updated", content: CLUSTER, runId: "run_2" }]);
   });
 
-  it("a record that already carries the address is left alone in the book — nothing was changed", async () => {
-    const dns = provider();
-    dns.seed(HOST, "A", ADDRESS);
+  it("a CNAME onto a name that is no cluster of this installation is repointed in place", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed(HOST, "CNAME", "apps4.gone.example");
+    await provisionUnitDns(ctx([], "run_3"), consumer(dns));
+    expect(dns.upserts).toEqual([{ name: HOST, type: "CNAME", content: CLUSTER, created: false }]);
+    expect(listDnsWrites(db.db)).toMatchObject([{ act: "updated", runId: "run_3" }]);
+  });
+
+  it("REFUSES a host that points at another cluster of this installation, and writes nothing", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed(HOST, "CNAME", OTHER);
+    await expect(provisionUnitDns(ctx([]), consumer(dns))).rejects.toThrow(`already points at ${OTHER}, a cluster of this installation`);
+    expect(dns.upserts).toEqual([]);
+    expect(listDnsWrites(db.db)).toEqual([]);
+  });
+
+  it("a record that already points at the cluster is left alone in the book — nothing was changed", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed(HOST, "CNAME", CLUSTER);
     const logs: string[] = [];
-    await provisionUnitDns(ctx(logs, "run_3"), consumer(dns));
+    await provisionUnitDns(ctx(logs, "run_4"), consumer(dns));
     // The provider was still asked (the upsert is idempotent), the book was not.
     expect(dns.upserts).toHaveLength(1);
     expect(logs.at(-1)).toContain("updated in place");
@@ -74,23 +90,24 @@ describe("provisionUnitDns and the book", () => {
   });
 
   it("a re-run over its own earlier write keeps the earlier row rather than overwriting it with a write that changed nothing", async () => {
-    const dns = provider();
+    const dns = new FakeDnsProvider();
     await provisionUnitDns(ctx([], "run_1"), consumer(dns));
-    await provisionUnitDns(ctx([], "run_4"), consumer(dns));
+    await provisionUnitDns(ctx([], "run_5"), consumer(dns));
     expect(listDnsWrites(db.db)).toMatchObject([{ act: "inserted", runId: "run_1" }]);
   });
 
-  it("the move (overwriteAddress) reads what stood before it too, so the switch is booked as updated by the tenant's run", async () => {
-    const dns = provider();
-    dns.seed("*.acme.example.net", "A", "203.0.113.20"); // the source cluster's address
-    await provisionUnitDns(ctx([], "run_move"), { dns, unit: "zsjs023ctne0", kind: "tenant", stage: "prod", recordName: "*.acme.example.net", clusterFqdn: CLUSTER, runKind: "tenant-migrate", overwriteAddress: true });
+  it("the move (repoint) takes the record off the source cluster, and the switch is booked as updated by the tenant's run", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("*.acme.example.net", "CNAME", OTHER); // the source cluster
+    await provisionUnitDns(ctx([], "run_move"), { dns, unit: "zsjs023ctne0", kind: "tenant", stage: "prod", recordName: "*.acme.example.net", clusterFqdn: CLUSTER, runKind: "tenant-migrate", repoint: true });
+    expect(dns.record("*.acme.example.net", "CNAME")).toBe(CLUSTER);
     expect(listDnsWrites(db.db)).toMatchObject([
-      { name: "*.acme.example.net", act: "updated", content: ADDRESS, owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_move" },
+      { name: "*.acme.example.net", type: "CNAME", act: "updated", content: CLUSTER, owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_move" },
     ]);
   });
 
   it("a provider failure books nothing — the book never records a write the zone did not take", async () => {
-    const dns = provider();
+    const dns = new FakeDnsProvider();
     dns.failWith = new Error("Cloudflare DNS refused");
     await expect(provisionUnitDns(ctx([]), consumer(dns))).rejects.toThrow(/Cloudflare DNS refused/);
     expect(listDnsWrites(db.db)).toEqual([]);
@@ -99,17 +116,17 @@ describe("provisionUnitDns and the book", () => {
 
 describe("removeUnitDns and the book", () => {
   it("takes the row out beside the record", async () => {
-    const dns = provider();
+    const dns = new FakeDnsProvider();
     await provisionUnitDns(ctx([]), consumer(dns));
     expect(listDnsWrites(db.db)).toHaveLength(1);
     await removeUnitDns(ctx([]), { dns, unit: "post", recordName: HOST });
-    expect(dns.record(HOST, "A")).toBeUndefined();
+    expect(dns.record(HOST, "CNAME")).toBeUndefined();
     expect(listDnsWrites(db.db)).toEqual([]);
   });
 
   it("forgets a row whose record is already absent — a unit whose run died after the book was written", async () => {
-    const dns = provider();
-    recordDnsWrite(db.db, { name: HOST, type: "A", content: ADDRESS, act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_dead" });
+    const dns = new FakeDnsProvider();
+    recordDnsWrite(db.db, { name: HOST, type: "CNAME", content: CLUSTER, act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_dead" });
     const logs: string[] = [];
     await removeUnitDns(ctx(logs), { dns, unit: "post", recordName: HOST });
     expect(logs.at(-1)).toContain("already absent");
@@ -117,7 +134,7 @@ describe("removeUnitDns and the book", () => {
   });
 
   it("leaves the row standing when the provider refuses — the record still stands, and so must the book", async () => {
-    const dns = provider();
+    const dns = new FakeDnsProvider();
     await provisionUnitDns(ctx([]), consumer(dns));
     dns.failWith = new Error("Cloudflare DNS refused");
     await expect(removeUnitDns(ctx([]), { dns, unit: "post", recordName: HOST })).rejects.toThrow(/Cloudflare DNS refused/);

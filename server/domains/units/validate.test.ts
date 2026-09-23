@@ -447,12 +447,12 @@ describe("G28 release workflow — the kit's path is read at validation, before 
 });
 
 describe("G27 unit host — the zone is read at validation, before anything is written", () => {
-  it("runs for a deployable target whose chain names the apex, and a leftover passes with the address it will replace", async () => {
+  it("runs for a deployable target whose chain names the apex, and a leftover passes with the record it will replace", async () => {
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
     const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
     const asked: string[] = [];
     const outcome = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), deps(repo, runner, {
-      standingHost: async (host, clusterFqdn) => { asked.push(`${host} on ${clusterFqdn}`); return { kind: "leftover", standing: "157.90.201.150" }; },
+      standingHost: async (host, clusterFqdn) => { asked.push(`${host} on ${clusterFqdn}`); return { kind: "leftover", type: "A", content: "157.90.201.150" }; },
     }));
     expect(asked).toEqual(["acme.dev.units.example.com on s1.example"]);
     const g27 = outcome.report.gates.find((g) => g.id === "G27");
@@ -465,7 +465,7 @@ describe("G27 unit host — the zone is read at validation, before anything is w
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-dev.yaml": pinFile("acme-api") } });
     const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"])) });
     const outcome = await validateOnboard(req(), target({ clusterValueFiles: APEX_CHAIN }), deps(repo, runner, {
-      standingHost: async () => ({ kind: "collision", standing: "203.0.113.20", cluster: "s2.example" }),
+      standingHost: async () => ({ kind: "collision", cluster: "s2.example" }),
     }));
     expect(outcome.verdict).toBe("fail");
     expect(outcome.builds).toBeNull();
@@ -487,7 +487,7 @@ describe("G27 unit host — the zone is read at validation, before anything is w
     const runner = new FakeGateRunner({ report: report(g1Pass, "pass", manifestWith(["acme-api"], false)) });
     const { chartPath: _chartPath, ...buildOnly } = target({ clusterValueFiles: APEX_CHAIN });
     const outcome = await validateOnboard(req(), buildOnly, deps(repo, runner, {
-      standingHost: async () => ({ kind: "collision", standing: "203.0.113.20", cluster: "s2.example" }),
+      standingHost: async () => ({ kind: "collision", cluster: "s2.example" }),
     }));
     expect(outcome.report.gates.find((g) => g.id === "G27")).toBeUndefined();
   });

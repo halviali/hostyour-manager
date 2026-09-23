@@ -1,12 +1,12 @@
 // The unit DNS port (the public address belongs to the unit, not to the server). A unit gets
-// EXACTLY ONE record — a consumer the A record `<label>.<stage apex>`, a tenant the wildcard A
+// EXACTLY ONE record — a consumer the CNAME `<label>.<stage apex>`, a tenant the wildcard CNAME
 // `*.<subdomain>.<unitApex>` that covers every member one level below — created at onboarding,
 // updated on a move, removed at offboard and purge. Kept a PORT so the run steps depend on the
 // abstraction; the Cloudflare impl is cloudflare-dns.ts, the fake is testing/fake.ts.
 //
-// A unit record is only ever an A record: it points at the target cluster's IP, and that IP is READ
-// off the cluster's own A record (readRecordContent) rather than computed — the cluster's address
-// record is the one authority for where the cluster is reachable.
+// A unit record is only ever a CNAME onto the target cluster's FQDN, never an address: the cluster's
+// name is the one authority for where it is reachable, and DNS resolves it — through a master
+// identity that is itself a CNAME onto one of two machines as well (server/domains/units/unit-dns.ts).
 //
 // TXT rides the same three calls because the mail records of a sender domain (SPF, DKIM, DMARC) are
 // records of this installation too: the DNS inventory reads them and `dns-remove` and

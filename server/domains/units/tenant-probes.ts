@@ -107,7 +107,7 @@ export async function probeTenantDns(ports: TenantOnboardPorts, p: CreateTenantP
   if (!ports.dns) return [unmeasured("dns.record", title, "no DNS provider is wired on this manager")];
   const judged = await readStandingHost(ports.dns, ctx.db, { recordName, clusterFqdn: p.domain, signal: ctx.signal });
   return [judged.kind === "free" ? check("dns.record", title, "hard", "pass", "is free; the run creates it")
-    : judged.kind === "ours" ? check("dns.record", title, "hard", "pass", `already answers with ${p.domain}'s address`)
-      : judged.kind === "leftover" ? check("dns.record", title, "hard", "warn", `answers with ${judged.standing}, which no cluster of this installation carries; the run takes it over`)
-        : check("dns.record", title, "hard", "fail", `answers with ${judged.standing}, the address of ${judged.cluster} of this installation`, "offboard the tenant there first")];
+    : judged.kind === "ours" ? check("dns.record", title, "hard", "pass", `already points at ${p.domain}`)
+      : judged.kind === "leftover" ? check("dns.record", title, "hard", "warn", `stands as ${judged.type} ${judged.content}, which points at no cluster of this installation; the run replaces it`)
+        : check("dns.record", title, "hard", "fail", `points at ${judged.cluster}, a cluster of this installation`, "offboard the tenant there first")];
 }

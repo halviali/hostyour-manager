@@ -281,15 +281,15 @@ describe("offboard run definition", () => {
     await expect(step.run(ctx("remove-repo-pat", []))).rejects.toThrow(/repo-pat delete failed/);
   });
 
-  it("remove-dns removes the unit's A record under the cluster's own apex, and an absent record is the no-op", async () => {
+  it("remove-dns removes the unit's record under the cluster's own apex, and an absent record is the no-op", async () => {
     seedApp();
     const dns = new FakeDnsProvider();
     // The default FakePlatformRepo values chain states unitApex == the branch (s1.example).
-    dns.seed("acme.s1.example", "A", "203.0.113.10");
+    dns.seed("acme.s1.example", "CNAME", "s1.example");
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { dns })).steps({ appId: "app_1" }).find((s) => s.name === "remove-dns")!;
     const logs: string[] = [];
     await step.run(ctx("remove-dns", logs));
-    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme.s1.example", "CNAME")).toBeUndefined();
     expect(logs.some((l) => l.includes("no address is left pointing nowhere"))).toBe(true);
     await step.run(ctx("remove-dns", logs)); // absent now — the idempotent no-op, no throw
   });

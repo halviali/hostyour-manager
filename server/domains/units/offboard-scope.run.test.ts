@@ -126,8 +126,8 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
     const seeder = new RecordingTeardownSeeder();
     const dns = new FakeDnsProvider();
-    dns.seed("acme.s1.example", "A", "203.0.113.10"); // prod's own host
-    dns.seed("acme.dev.s2.example", "A", "203.0.113.20"); // dev's — under the OTHER cluster's apex
+    dns.seed("acme.s1.example", "CNAME", "s1.example"); // prod's own host
+    dns.seed("acme.dev.s2.example", "CNAME", "s2.example"); // dev's — under the OTHER cluster's apex
     const revoked: string[] = [];
     const creds = {
       list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
@@ -144,7 +144,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
 
     // PER STAGE — prod's own objects are gone.
     expect(await reg.readRegistration("prod", "acme")).toBeNull();
-    expect(dns.record("acme.s1.example", "A")).toBeUndefined();
+    expect(dns.record("acme.s1.example", "CNAME")).toBeUndefined();
     expect(seeder.deletedApp).toEqual([{ stage: "prod", consumerName: "acme" }]);
     expect(db.db.select().from(apps).where(eq(apps.id, "app_1")).get()?.status).toBe("offboarded");
     // No credential is the row's own (#226): the unit is reached with the owner x's identity, which
@@ -163,7 +163,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     expect(github.deletedCalls).toEqual([]);
     expect(consumerRepo.commits).toEqual([]);
     expect(seeder.deleted).toEqual([]);
-    expect(dns.record("acme.dev.s2.example", "A")).toBeDefined();
+    expect(dns.record("acme.dev.s2.example", "CNAME")).toBeDefined();
     // One skip line per per-unit cleanup: the webhook, the release kit, the PAT.
     expect(logs.filter((l) => l.includes("stays registered at dev"))).toHaveLength(3);
   });

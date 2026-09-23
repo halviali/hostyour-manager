@@ -2,9 +2,9 @@
 // provisioned at onboard/create-tenant, removed at offboard AND at both purge run kinds, over the
 // DnsProvider port (adapters/dns). One record per unit STANDING AT A STAGE, by kind of unit:
 //
-//   consumer — A `<label>.<stage apex>`. The chart renders exactly ONE host, and by DNS rule a
+//   consumer — CNAME `<label>.<stage apex>`. The chart renders exactly ONE host, and by DNS rule a
 //              wildcard does NOT cover a bare label, so the record is the host itself.
-//   tenant   — wildcard A `*.<subdomain>.<stage apex>`, one PER STAGE. Every member sits exactly one
+//   tenant   — wildcard CNAME `*.<subdomain>.<stage apex>`, one PER STAGE. Every member sits exactly one
 //              level below (`<member>.<subdomain>.<stage apex>`, nothing lives on the bare zone), so
 //              one wildcard covers a stage's members — members added later included — and a move
 //              changes ONE record per stage.
@@ -15,18 +15,22 @@
 // between two clusters in one zone — and under a shared apex two stages of one unit are two records
 // in two zones, so both may stand in one installation and on one cluster. What the name does NOT separate
 // is two CLUSTERS claiming the same stage of one unit: the host can answer for exactly one cluster,
-// so provisionUnitDns REFUSES a host that already answers with the address of ANOTHER CLUSTER OF THIS
-// INSTALLATION. A standing record at an address none of this installation's clusters has is a
-// different thing: only this installation's token writes the zone, so such a record is what an
-// installation that is gone left behind (its machines restored bare, its units never offboarded —
-// measured on 2026-09-15, post.digitacloud.app still at the abandoned apps4 when apps7 onboarded the
-// same unit), and it is REPLACED, with the log saying what stood there. readStandingHost is the one
+// so provisionUnitDns REFUSES a host whose record already points at ANOTHER CLUSTER OF THIS
+// INSTALLATION. A standing record that points at no cluster of this installation is a different
+// thing: only this installation's token writes the zone, so such a record is what an installation
+// that is gone left behind (its machines restored bare, its units never offboarded — measured on
+// 2026-09-15, post.digitacloud.app still at the abandoned apps4 when apps7 onboarded the same unit),
+// and it is REPLACED, with the log saying what stood there. An address record under a unit's host is
+// always such a record, because no unit record of this Manager is one. readStandingHost is the one
 // reading of that difference; gate G27 (gates/compose.ts) takes it BEFORE the run writes anything, and
 // provision-dns takes it again at its own step (hostyour-manager#151).
 //
-// The record's CONTENT is the target cluster's address, READ off the cluster's own A record (its
-// FQDN resolves to the machine that serves it) — never computed. A move is then a content update of
-// this one record and nothing else, and it is the ONE caller that overwrites a foreign address.
+// The record's CONTENT is the target cluster's FQDN — a CNAME, never an address. The cluster's name
+// is the one authority for where it is reachable, and DNS resolves it, so a cluster whose name is
+// itself a CNAME serves its units through the same chain: a master identity `master.<apex>` onto one
+// of two machines keeps every unit record when the identity moves, and the failover is that one
+// record. A move between clusters is a content update of this one record, and the relocation's
+// switch is the ONE caller that repoints a record from another cluster of this installation.
 // Certificates are unaffected: HTTP-01 only requires that every certificate host resolves, which the
 // record (or the wildcard) provides.
 //
@@ -37,10 +41,11 @@
 //
 // EVERY WRITE AND EVERY REMOVAL IS ENTERED INTO THE BOOK OF DNS WRITES (db/dns-writes.ts), which is
 // what the DNS page shows first: a record inserted or updated here is a row, and the removal takes
-// the row out beside the record. A write that found the target address already standing changed
-// nothing and enters nothing — the book says what this Manager changed, not what it was asked.
+// the row out beside the record. A write that found the record already pointing at the target
+// changed nothing and enters nothing — the book says what this Manager changed, not what it was asked.
 import type { StepCtx } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
+import { eq } from "drizzle-orm";
 import { clusters } from "../../db/schema/inventory.ts";
 import { forgetDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
@@ -75,49 +80,36 @@ function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string)
   return dns;
 }
 
-/** The target cluster's address: the content of ITS own A record. The cluster's FQDN is the one
- *  authority for where the cluster is reachable, so the unit record copies it rather than computing
- *  an address from inventory. Fail-closed: a cluster without an address record can serve nothing. */
-async function resolveClusterAddress(dns: DnsProvider, clusterFqdn: string, signal: AbortSignal): Promise<string> {
-  const content = await dns.readRecordContent({ name: clusterFqdn, type: "A", signal });
-  if (content === null) {
-    throw errValidation(`the target cluster ${clusterFqdn} has no A record of its own — there is no address to point the unit's record at`);
-  }
-  return content;
-}
-
-/** What a unit's host answers with now, read against this installation's own clusters. */
+/** What stands under a unit's host now, read against this installation's own clusters. */
 export type StandingHost =
   /** No record stands under the host. */
   | { kind: "free" }
-  /** The record already carries the target cluster's address — a re-run, never a takeover. */
+  /** A CNAME onto the target cluster already stands — a re-run, never a takeover. */
   | { kind: "ours" }
-  /** The record carries the address of ANOTHER cluster of this installation: one stage of a unit has
-   *  one host, and that cluster serves it. Refused wherever it is read. */
-  | { kind: "collision"; standing: string; cluster: string }
-  /** The record carries an address none of this installation's clusters has — what an installation
-   *  that is gone left in the zone. Replaced by provision-dns, and said so. */
-  | { kind: "leftover"; standing: string };
+  /** A CNAME onto ANOTHER cluster of this installation: one stage of a unit has one host, and that
+   *  cluster serves it. Refused wherever it is read, except by the switch that repoints it. */
+  | { kind: "collision"; cluster: string }
+  /** A record that points at no cluster of this installation — a CNAME onto a foreign name, or an
+   *  address record: what an installation that is gone left in the zone. Replaced by provision-dns,
+   *  and said so. */
+  | { kind: "leftover"; type: "A" | "CNAME"; content: string };
 
 /** The unit's host as the DNS provider answers it now, judged against the installation's own
- *  clusters — every cluster row's domain resolved to its address at the same provider. The target
- *  cluster's own address is read the way provision-dns reads it, and a target without one is refused
- *  here for the same reason. The one reading gate G27 and the provision-dns step both take. */
+ *  clusters by NAME — a CNAME names one of them or it does not, and no address is read. The one
+ *  reading gate G27 and the provision-dns step both take. */
 export async function readStandingHost(
   dns: DnsProvider,
   db: Db,
   opts: { recordName: string; clusterFqdn: string; signal: AbortSignal },
 ): Promise<StandingHost> {
-  const address = await resolveClusterAddress(dns, opts.clusterFqdn, opts.signal);
-  const standing = await dns.readRecordContent({ name: opts.recordName, type: "A", signal: opts.signal });
-  if (standing === null) return { kind: "free" };
-  if (standing === address) return { kind: "ours" };
-  for (const row of db.select({ domain: clusters.domain }).from(clusters).all()) {
-    if (row.domain === opts.clusterFqdn) continue;
-    const theirs = await dns.readRecordContent({ name: row.domain, type: "A", signal: opts.signal });
-    if (theirs === standing) return { kind: "collision", standing, cluster: row.domain };
+  const named = await dns.readRecordContent({ name: opts.recordName, type: "CNAME", signal: opts.signal });
+  if (named === null) {
+    const address = await dns.readRecordContent({ name: opts.recordName, type: "A", signal: opts.signal });
+    return address === null ? { kind: "free" } : { kind: "leftover", type: "A", content: address };
   }
-  return { kind: "leftover", standing };
+  if (named === opts.clusterFqdn) return { kind: "ours" };
+  const other = db.select({ domain: clusters.domain }).from(clusters).where(eq(clusters.domain, named)).get();
+  return other ? { kind: "collision", cluster: other.domain } : { kind: "leftover", type: "CNAME", content: named };
 }
 
 /** G27's input: the unit's host as the provider answers it now, judged against the installation's own
@@ -133,15 +125,15 @@ export function standingHostFrom(dns: DnsProvider | undefined, db: Db, signal: A
 }
 
 /** The sentence a collision is refused with, the same at the gate and at the step. */
-export function standingHostRefusal(recordName: string, unit: string, judged: { standing: string; cluster: string }): string {
+export function standingHostRefusal(recordName: string, unit: string, judged: { cluster: string }): string {
   return (
-    `the host ${recordName} already answers with ${judged.standing}, the address of ${judged.cluster} of this installation — ` +
+    `the host ${recordName} already points at ${judged.cluster}, a cluster of this installation — ` +
     `refusing to point "${unit}" at a second cluster: one stage of a unit has ONE host, and that cluster serves it. ` +
     `Offboard the unit there first, or give the two clusters different unit_apex answers.`
   );
 }
 
-/** Create (or move onto the current cluster address) the unit's ONE record. Shared by the consumer
+/** Create (or move onto the current cluster) the unit's ONE record. Shared by the consumer
  *  onboard and create-tenant provision-dns steps AND by the relocation switch-dns (a move IS a
  *  content update of exactly this record) — the caller composes the record name per kind and names
  *  its run kind for the refusal message. */
@@ -162,44 +154,41 @@ export async function provisionUnitDns(
      *  consumer-onboard, tenant-create and the two relocation run kinds, so a default would put one
      *  of their names on the other three's refusal. */
     runKind: string;
-    /** The MOVE alone. switch-dns repoints a record the unit already owns onto the target cluster,
-     *  so overwriting an address that is not the target's IS the step. Every other caller is putting
-     *  a unit onto a cluster for the first time and must not take a live address off whatever answers
-     *  there now — see the host-collision paragraph in this module's header. */
-    overwriteAddress?: boolean;
+    /** The MOVE alone. switch-dns repoints a record the unit already owns from the source cluster
+     *  onto the target, so a record pointing at another cluster of this installation IS what the
+     *  step changes. Every other caller is putting a unit onto a cluster for the first time and must
+     *  not take a host off the cluster that serves it — see the host-collision paragraph in this
+     *  module's header. */
+    repoint?: boolean;
   },
 ): Promise<void> {
   const dns = requireDns(opts.dns, opts.unit, opts.runKind);
-  const address = await resolveClusterAddress(dns, opts.clusterFqdn, ctx.signal);
+  const target = opts.clusterFqdn;
   // Read before write, in every case: upsertRecord overwrites the first match in place and answers
   // only whether it created, so what stood there is known nowhere else — a takeover would leave no
   // trace in the run, a leftover replaced without a word would leave none, and the book could not
-  // tell a write that changed the record from one that found the address already there.
-  let standing: string | null;
-  if (opts.overwriteAddress) {
-    standing = await dns.readRecordContent({ name: opts.recordName, type: "A", signal: ctx.signal });
-  } else {
-    const judged = await readStandingHost(dns, ctx.db, { recordName: opts.recordName, clusterFqdn: opts.clusterFqdn, signal: ctx.signal });
-    if (judged.kind === "collision") {
-      throw errValidation(standingHostRefusal(opts.recordName, opts.unit, judged));
-    }
-    if (judged.kind === "leftover") {
-      ctx.log(
-        "meta",
-        `the host ${opts.recordName} stood at ${judged.standing}, an address no cluster of this installation has — what an installation that is gone left in the zone; replaced with ${address}`,
-      );
-    }
-    standing = judged.kind === "free" ? null : judged.kind === "ours" ? address : judged.standing;
+  // tell a write that changed the record from one that found it already pointing at the target.
+  const standing = await readStandingHost(dns, ctx.db, { recordName: opts.recordName, clusterFqdn: target, signal: ctx.signal });
+  if (standing.kind === "collision" && !opts.repoint) {
+    throw errValidation(standingHostRefusal(opts.recordName, opts.unit, standing));
   }
-  const { created } = await dns.upsertRecord({ name: opts.recordName, type: "A", content: address, signal: ctx.signal });
-  ctx.checkpoint({ record: opts.recordName, content: address, created });
+  if (standing.kind === "leftover") {
+    ctx.log(
+      "meta",
+      `the host ${opts.recordName} stood as ${standing.type} ${standing.content}, which points at no cluster of this installation — what an installation that is gone left in the zone; replaced with a CNAME onto ${target}`,
+    );
+    // A CNAME stands alone under its name, so the address record goes before it is written.
+    if (standing.type === "A") await dns.deleteRecord({ name: opts.recordName, type: "A", signal: ctx.signal });
+  }
+  const { created } = await dns.upsertRecord({ name: opts.recordName, type: "CNAME", content: target, signal: ctx.signal });
+  ctx.checkpoint({ record: opts.recordName, content: target, created });
   ctx.log(
     "meta",
-    `DNS record ${opts.recordName} → ${address} ${created ? "created" : "updated in place"} — the unit's address is its own, and a move is a content update of exactly this record`,
+    `DNS record ${opts.recordName} → CNAME ${target} ${created ? "created" : "updated in place"} — the unit follows its cluster's name, and a move is a content update of exactly this record`,
   );
-  if (standing !== address) {
+  if (standing.kind !== "ours") {
     recordDnsWrite(ctx.db, {
-      name: opts.recordName, type: "A", content: address, act: created ? "inserted" : "updated",
+      name: opts.recordName, type: "CNAME", content: target, act: standing.kind === "free" ? "inserted" : "updated",
       owner: { kind: opts.kind, name: opts.unit, stage: opts.stage }, runId: ctx.runId,
     });
   }
@@ -212,8 +201,8 @@ export async function removeUnitDns(
   opts: { dns: DnsProvider | undefined; unit: string; recordName: string },
 ): Promise<void> {
   const dns = requireDns(opts.dns, opts.unit, "remove");
-  const { deleted } = await dns.deleteRecord({ name: opts.recordName, type: "A", signal: ctx.signal });
-  forgetDnsWrite(ctx.db, { name: opts.recordName, type: "A" });
+  const { deleted } = await dns.deleteRecord({ name: opts.recordName, type: "CNAME", signal: ctx.signal });
+  forgetDnsWrite(ctx.db, { name: opts.recordName, type: "CNAME" });
   ctx.checkpoint({ record: opts.recordName, deleted });
   ctx.log(
     "meta",

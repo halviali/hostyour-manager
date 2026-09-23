@@ -63,8 +63,8 @@ describe("tenant-restore", () => {
     expect(names).toContain(`reloc-restore-mongo-${GUID}`);
     expect(names).toContain(`reloc-restore-bucket-${GUID}`);
     expect(names).toContain(`reloc-verify-mongo-${GUID}`);
-    // The one wildcard record points at the target cluster's own address.
-    expect(f.dns.record(`*.${SUBDOMAIN}.example.com`, "A")).toBe(TARGET.ip);
+    // The one wildcard record points at the target cluster.
+    expect(f.dns.record(`*.${SUBDOMAIN}.example.com`, "CNAME")).toBe(TARGET.domain);
     // The rows settled LAST: active, on the target.
     const row = db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get();
     expect(row?.status).toBe("active");
@@ -129,7 +129,7 @@ describe("restore (consumer)", () => {
     // what "medium" means there today.
     expect(restored?.entry.quota).toEqual(seedQuota("medium"));
     expect(jobNames(f.target)).toContain(`reloc-restore-mongo-${CONSUMER}`);
-    expect(f.dns.record(`${CONSUMER}.${TARGET.domain}`, "A")).toBe(TARGET.ip);
+    expect(f.dns.record(`${CONSUMER}.${TARGET.domain}`, "CNAME")).toBe(TARGET.domain);
     const row = db.db.select().from(apps).where(eq(apps.id, "app_1")).get();
     expect(row?.status).toBe("active");
     expect(row?.clusterId).toBe(TARGET.clusterId);

@@ -134,13 +134,6 @@ function fakeTenantSeeder(): VaultSeeder {
   };
 }
 
-/** The target cluster's own A record — what G27 reads the tenant's wildcard against at the plan. */
-function seededDns(): FakeDnsProvider {
-  const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
-  return dns;
-}
-
 function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboardPorts {
   const { argo, cluster, projects, ...portOver } = over;
   return {
@@ -163,7 +156,7 @@ function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboard
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
-    dns: seededDns(),
+    dns: new FakeDnsProvider(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],

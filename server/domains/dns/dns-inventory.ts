@@ -65,18 +65,21 @@ const MAIL_PUBLISHED: ReadonlySet<MailDnsRecord> = new Set<MailDnsRecord>(["spf"
  *  reverse DNS is a PTR at the hosting provider, which is why neither is removable below. */
 const MAIL_ROW_TYPE: Record<MailDnsRecord, DnsRowType> = { spf: "TXT", a: "A", dkim: "TXT", dmarc: "TXT", ptr: "PTR" };
 
-/** The reading of ONE unit record: what stands at the name, judged against the address its cluster
- *  answers with. Removable without exception — every unit record was written by a run of this
- *  Manager, and taking one back is what offboard does anyway. */
-async function unitRow(dns: DnsProvider, owner: DnsOwner, name: string, expected: string): Promise<DnsRecordRow> {
-  const found = await dns.readRecordContent({ name, type: "A" });
+/** The reading of ONE unit record: what stands at the name, judged against the FQDN of its cluster,
+ *  which the unit's CNAME must name. An address record standing where the CNAME belongs is the row
+ *  as what it is — an absence would hide a host that answers. Removable without exception: whatever
+ *  stands under a unit's host is that unit's record, and taking it back is what offboard does anyway. */
+async function unitRow(dns: DnsProvider, owner: DnsOwner, name: string, cluster: string): Promise<DnsRecordRow> {
+  const named = await dns.readRecordContent({ name, type: "CNAME" });
+  const address = named === null ? await dns.readRecordContent({ name, type: "A" }) : null;
+  const found = address ?? named;
   return {
     owner,
     name,
-    type: "A",
-    expected,
+    type: address === null ? "CNAME" : "A",
+    expected: cluster,
     found,
-    verdict: found === null ? "absent" : found === expected ? "standing" : "other",
+    verdict: found === null ? "absent" : address === null && named === cluster ? "standing" : "other",
     removable: true,
   };
 }
@@ -106,17 +109,12 @@ async function unitRowsOf(
   tenants: { subdomain: string; cluster: string }[],
 ): Promise<DnsRecordRow[]> {
   const apex = await deps.unitApex(domain, stage);
-  const address = await deps.dns.readRecordContent({ name: domain, type: "A" });
-  // A cluster without an address record can serve nothing, and provision-dns refuses one for that
-  // reason. Here it is not a refusal but a verdict: the records of that cluster are still standing
-  // in the zone, and an operator tearing an installation down needs to see them.
-  const expected = address ?? `the address of ${domain}, which has no A record of its own`;
   const rows: DnsRecordRow[] = [];
   for (const consumer of await deps.consumers(domain, stage)) {
-    rows.push(await unitRow(deps.dns, { kind: "consumer", name: consumer.name, stage }, consumerUnitHost(consumer.host, stage, apex), expected));
+    rows.push(await unitRow(deps.dns, { kind: "consumer", name: consumer.name, stage }, consumerUnitHost(consumer.host, stage, apex), domain));
   }
   for (const tenant of tenants.filter((t) => t.cluster === clusterShortName(domain))) {
-    rows.push(await unitRow(deps.dns, { kind: "tenant", name: tenant.subdomain, stage }, tenantWildcardHost(tenant.subdomain, stage, apex), expected));
+    rows.push(await unitRow(deps.dns, { kind: "tenant", name: tenant.subdomain, stage }, tenantWildcardHost(tenant.subdomain, stage, apex), domain));
   }
   return rows;
 }

@@ -181,7 +181,7 @@ function fakeTenantSeeder(): VaultSeeder {
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
-    dns: seededDns(),
+    dns: new FakeDnsProvider(),
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
@@ -321,10 +321,3 @@ describe("aborting a create-tenant run that never got a usable plan", () => {
     expect(db.db.select().from(tenants).all()).toEqual([]); // it created nothing, so it undid nothing
   });
 });
-
-/** The target cluster's own A record — what provision-dns points the tenant's wildcard at. */
-function seededDns(): FakeDnsProvider {
-  const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
-  return dns;
-}

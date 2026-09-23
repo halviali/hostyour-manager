@@ -164,9 +164,9 @@ describe("onboard run definition", () => {
     expect(github.dispatches).toHaveLength(1);
     expect(github.dispatches[0]).toMatchObject({ workflowFile: "release.yml", inputs: { version: "1.0.0", channel: "stable", stage: "prod" } });
 
-    // provision-dns created the unit's ONE record, pointing at the target cluster's own address
+    // provision-dns created the unit's ONE record, a CNAME onto the target cluster
     const dns = prt.dns as FakeDnsProvider;
-    expect(dns.record("acme.example.com", "A")).toBe("203.0.113.10");
+    expect(dns.record("acme.example.com", "CNAME")).toBe("s1.example");
 
     // provision-repo-credential put the ArgoCD repository Secret beside the Applications
     const cred = (prt.repoCredential as FakeRepoCredentialWriter).get("argocd", "repo-acme-prod");
@@ -233,14 +233,17 @@ describe("onboard run definition", () => {
     }
   });
 
-  it("provision-dns fails loud without a wired provider, and on a cluster with no address record of its own", async () => {
+  it("provision-dns fails loud without a wired provider, and needs no address of the cluster it points at", async () => {
     const p = params();
     const noDns = ports();
     delete (noDns as { dns?: unknown }).dns;
     const step = (prt: OnboardPorts) => makeOnboardDef(prt).steps(p).find((s) => s.name === "provision-dns")!;
     await expect(step(noDns).run(ctx(p, "provision-dns", []))).rejects.toThrow(/requires the DNS provider/);
-    const blankDns = ports({ dns: new FakeDnsProvider() });
-    await expect(step(blankDns).run(ctx(p, "provision-dns", []))).rejects.toThrow(/has no A record of its own/);
+    // A master identity is a CNAME onto one of two machines and carries no address of its own; the
+    // unit's record names it all the same.
+    const blankDns = new FakeDnsProvider();
+    await step(ports({ dns: blankDns })).run(ctx(p, "provision-dns", []));
+    expect(blankDns.record("acme.example.com", "CNAME")).toBe("s1.example");
   });
 
   // THE ONBOARD WRITES NO FENCE OF ITS OWN, and this is the assertion that says so. Since
@@ -314,7 +317,6 @@ describe("onboard run definition", () => {
 
     const prt = ports({ resolver });
     const p = params({ clusterId: "cls_s2", domain: "s2.example" });
-    (prt.dns as FakeDnsProvider).seed("s2.example", "A", "203.0.113.20");
     const steps = makeOnboardDef(prt).steps(p);
     const byName = (n: string) => steps.find((s) => s.name === n)!;
     // watch-release-build rides along: it records the minted tag the deployment watch holds the branch to (#246).

@@ -163,18 +163,11 @@ function ports(registrations: TenantRegistrations): TenantOnboardPorts {
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: ${REGISTRY_HOST}\n` }],
     registryProbe: new FakeRegistryProbe(),
-    dns: seededDns(),
+    dns: new FakeDnsProvider(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
     consumerHostLabels: async () => [],
   };
-}
-
-/** The target cluster's own A record — what the replace's fresh provision-dns re-points the wildcard at. */
-function seededDns(): FakeDnsProvider {
-  const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
-  return dns;
 }
 
 function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {

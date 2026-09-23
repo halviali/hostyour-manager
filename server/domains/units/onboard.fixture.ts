@@ -131,23 +131,20 @@ export class FakeBuildPlaneClusterReader extends FakeClusterReader {
   }
 }
 
-/** The full port set with every release-cycle fake wired green: the dispatched workflow run
- *  completes with success, the build plane carries the unit's Succeeded release run, and the DNS
- *  fake knows the target cluster's own A record. */
-/** The DNS provider every onboarding harness needs since G27 reads the zone at the plan: the target
- *  cluster answers with its own address, and nothing stands under the unit's host. */
-export function seededDns(): FakeDnsProvider {
-  const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
-  dns.seed("s2.example", "A", "203.0.113.20");
-  return dns;
+/** The zone every onboarding harness starts from since G27 reads it at the plan: nothing stands
+ *  under the unit's host, and the unit's CNAME needs no address of its cluster. */
+export function emptyZone(): FakeDnsProvider {
+  return new FakeDnsProvider();
 }
 
+/** The full port set with every release-cycle fake wired green: the dispatched workflow run
+ *  completes with success, the build plane carries the unit's Succeeded release run, and the DNS
+ *  fake starts from an empty zone. */
 export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts {
   const { argo, cluster, projects, ...portOver } = over;
   const buildPlane = new FakeBuildPlane();
   buildPlane.seedReleaseRun("acme", { runName: "acme-release-1", releaseTag: MINTED_TAG, succeeded: true });
-  const dns = seededDns();
+  const dns = emptyZone();
   // ONE repo behind both the registrations and the build-plane read: the registrations and the cluster maps
   // live in the same platform repo, exactly as they do in the wiring. The deployable form targets
   // s1 and the build-only form the master m1, so both carry a map.

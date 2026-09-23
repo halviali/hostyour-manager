@@ -15,7 +15,7 @@ import { getRun } from "../../executor/read.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerConsumerRoutes, registerTenantRoutes } from "./api.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
-import { CHANNEL_STAGES, seededDns } from "./onboard.fixture.ts";
+import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
 import { makeOffboardDef } from "./offboard.run.ts";
 import { makeSuspendDef, makeResumeDef } from "./suspend-resume.run.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -108,7 +108,7 @@ function onboardPorts(): OnboardPorts {
     seeder: fakeSeeder(),
     // Reuse the lifecycle resolver so onboard drives the same master-local fakes.
     resolver: lifecycle.resolver,
-    tenantSubdomains: async () => [], dns: seededDns(),
+    tenantSubdomains: async () => [], dns: emptyZone(),
     declareListening: true,
     argoWatchTimeoutMs: 1000,
     deployRefVisibleMs: 100,
@@ -355,7 +355,7 @@ function tenantOnboardPorts(reg: TenantRegistrations): TenantOnboardPorts {
     registryProbe: new FakeRegistryProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }],
-    consumerHostLabels: async () => [], dns: seededDns(),
+    consumerHostLabels: async () => [], dns: emptyZone(),
     resolveUnitApex: async () => "example.com",
     resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: `global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n` }],
   });

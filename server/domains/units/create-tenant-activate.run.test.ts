@@ -85,7 +85,6 @@ type FakeKube = { cluster?: FakeClusterReader };
 function ports(over: Partial<TenantOnboardPorts> & FakeKube = {}): TenantOnboardPorts {
   const { cluster, ...portOver } = over;
   const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
   const statuses = new Map<string, ArgoAppStatus>(EXPECTED.map((n) => [n, GREEN]));
   return {
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),

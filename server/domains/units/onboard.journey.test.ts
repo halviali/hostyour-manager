@@ -117,7 +117,7 @@ function fakePorts(over: Partial<OnboardPorts> = {}): OnboardPorts {
     buildArgo: new FakeMasterArgoReader({ everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }),
     repoCredential: new FakeRepoCredentialWriter(),
     buildPlane: journeyBuildPlane(),
-    dns: journeyDns(),
+    dns: new FakeDnsProvider(),
     ...over,
   };
 }
@@ -128,13 +128,6 @@ function journeyBuildPlane(): FakeBuildPlane {
   const bp = new FakeBuildPlane();
   bp.seedReleaseRun("acme", { runName: "acme-release-1", releaseTag: MINTED_TAG, succeeded: true });
   return bp;
-}
-
-/** The target cluster's own A record — what provision-dns points the unit's record at. */
-function journeyDns(): FakeDnsProvider {
-  const dns = new FakeDnsProvider();
-  dns.seed("s1.example", "A", "203.0.113.10");
-  return dns;
 }
 
 function makeExecutor(ports: OnboardPorts): { executor: Executor; store: CredentialStore; bus: RunEventBus } {
@@ -195,7 +188,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const github = ports.github as FakeGitHubConsumer;
     expect(github.dispatches).toHaveLength(1);
     expect(github.dispatches[0]!.inputs).toEqual({ version: "1.0.0", channel: "stable", stage: "prod" });
-    expect((ports.dns as FakeDnsProvider).record("acme.example.com", "A")).toBe("203.0.113.10");
+    expect((ports.dns as FakeDnsProvider).record("acme.example.com", "CNAME")).toBe("s1.example");
   });
 
   it("a rejected validation settles the run failed with no steps and no inventory", async () => {

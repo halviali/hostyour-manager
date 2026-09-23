@@ -28,8 +28,8 @@ const SHA = "a".repeat(40);
 export const GUID = "zsjs023ctne0";
 export const SUBDOMAIN = "acme";
 export const CONSUMER = "acme";
-export const SOURCE = { clusterId: "cls_1", domain: "s1.example", cluster: "s1", ip: "10.0.0.1" } as const;
-export const TARGET = { clusterId: "cls_2", domain: "s2.example", cluster: "s2", ip: "10.0.0.2" } as const;
+export const SOURCE = { clusterId: "cls_1", domain: "s1.example", cluster: "s1" } as const;
+export const TARGET = { clusterId: "cls_2", domain: "s2.example", cluster: "s2" } as const;
 const BOX = { host: "box.example", user: "u100", password: "box-secret" } as const;
 const DBTOOLS_IMAGE = "registrations.example/dbtools:1.0.0";
 const TENANT_APPS = [{ name: "web" }];
@@ -118,8 +118,6 @@ export function makeFakes(): RelocationFakes {
   const resolver = new FakeClusterKubeResolver({ clusterReader: source.reader, argoReader: source.argo, projectWriter: source.projects, argoNamespace: SOURCE.cluster });
   resolver.set(TARGET.clusterId, { clusterReader: target.reader, argoReader: target.argo, projectWriter: target.projects, argoNamespace: TARGET.cluster });
   const dns = new FakeDnsProvider();
-  dns.seed(SOURCE.domain, "A", SOURCE.ip);
-  dns.seed(TARGET.domain, "A", TARGET.ip);
   return {
     source,
     target,
