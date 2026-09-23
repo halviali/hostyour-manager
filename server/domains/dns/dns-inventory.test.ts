@@ -16,7 +16,9 @@ const M1_ADDRESS = "203.0.113.9";
 
 /** The five rows the Mail page measures for one sender domain, as that page composes them. */
 const mailView = (): MailDnsView => ({
-  master: { serverId: "srv_m", name: "m1", fqdn: M1, stage: "prod", egress: M1_ADDRESS },
+  master: { serverId: "srv_m", name: "m1", fqdn: M1, stage: "prod" },
+  sender: null,
+  egress: { name: M1, address: M1_ADDRESS },
   domains: [
     {
       domain: "example.com",

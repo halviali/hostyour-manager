@@ -1,13 +1,12 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
-import { clusters, servers } from "../../db/schema/inventory.ts";
+import { apps, clusters, servers } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound } from "../../kernel/errors.ts";
 import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
 import { MAIL_RECORD_TAG, mailRecordNames, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type SenderRole } from "../../../shared/mail.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
-import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
-import { resolveClusterMarking } from "../inventory/cluster-marking.ts";
+import { clusterShortName, resolveClusterMarking } from "../inventory/cluster-marking.ts";
 
 // The mail DNS of the installation, MEASURED: what receivers find at public DNS, held against what the
 // master's map and address say they must find. Read-only — the writer is the catalogue's
@@ -23,23 +22,37 @@ import { resolveClusterMarking } from "../inventory/cluster-marking.ts";
 export interface MailDnsNeed {
   domain: string;
   role: SenderRole;
-  /** The relay signs with the stage as its selector, so that is where the key must stand. */
+  /** The key is published under the stage as its selector, so that is where it must stand. */
   stage: Stage;
-  /** The master's egress address — null when the master has no A record, which paints every
-   *  address-bound row red with the reason. */
+  /** The name mail leaves by: the sender's cluster, or the master's identity where no unit sends. */
+  egressName: string;
+  /** The address that name resolves to — null where it resolves to none, which paints every
+   *  address-bound row red with that one reason. */
   egress: string | null;
-  /** The name the master greets with and the reverse DNS must give back: the platform domain. */
-  platformDomain: string;
+  /** The key the sender signs THIS domain with, as the base64 a DKIM record carries in `p=` — where the
+   *  Manager holds it (the platform domain of a unit that sends); null where the relay's own key is it. */
+  dkimPublicKey: string | null;
 }
 
 const joined = (records: readonly string[]): string | null => (records.length === 0 ? null : records.join(" | "));
 
+/** The base64 a DKIM record carries in `p=`: the DER of the SubjectPublicKeyInfo, which is the body
+ *  of the SPKI PEM the Manager keeps. */
+export function dkimRecordKey(spkiPem: string): string {
+  return spkiPem.replace(/-----(BEGIN|END) PUBLIC KEY-----/g, "").replace(/\s+/g, "");
+}
+
 /** The five rows of one sender domain. Pure over the lookups, so a test scripts DNS and reads verdicts.
- *  A red row's note is ONE sentence naming the act: publish, remove a record by hand, or set the
- *  reverse DNS at the provider. What the publish does is the run's summary, not this page's. */
+ *  A red row's note is ONE sentence naming the act: publish, remove a record by hand, set the reverse
+ *  DNS at the provider, or point the mail name back at the address. What the publish does is the run's
+ *  summary, not this page's.
+ *
+ *  THE MAIL NAME IS ITS OWN NAME (decided 2026-09-23): the reverse DNS of the address gives a name,
+ *  and that name must resolve back to the address — the forward confirmation receivers check. The
+ *  sender domain's apex is not asked to answer the address; it stays free for whatever it serves. */
 export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<MailDnsRow[]> {
-  const { domain, stage, egress, platformDomain } = need;
-  const noEgress = { note: "give the master an A record at the DNS provider first" };
+  const { domain, stage, egress, egressName, dkimPublicKey } = need;
+  const noEgress = { note: `give ${egressName} an address record first` };
   const publish = { note: "publish" };
 
   const names = mailRecordNames(domain, stage);
@@ -47,7 +60,7 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
   const spfRow: MailDnsRow = {
     record: "spf",
     name: names.spf,
-    expected: egress === null ? "one v=spf1 record naming the master's egress address" : `one v=spf1 record naming ip4:${egress}`,
+    expected: egress === null ? `one v=spf1 record naming the address ${egressName} resolves to` : `one v=spf1 record naming ip4:${egress}`,
     found: joined(spf),
     ok: egress !== null && spf.length === 1 && spf[0]!.includes(`ip4:${egress}`),
     ...(egress === null
@@ -61,28 +74,41 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
             : { note: "publish; the address is merged into the record that stands" }),
   };
 
-  const addresses = await dns.a(domain);
+  // The reverse DNS and its forward confirmation, the same for every sender domain: one address, one name.
+  const ptrNames = egress === null ? [] : await dns.ptr(egress);
+  const mailName = ptrNames[0] ?? null;
+  const back = mailName === null ? [] : await dns.a(mailName);
+
   const aRow: MailDnsRow = {
     record: "a",
-    name: domain,
-    expected: egress ?? "the master's egress address",
-    found: joined(addresses),
-    ok: egress !== null && addresses.includes(egress),
-    ...(egress === null ? noEgress : addresses.includes(egress) ? {} : publish),
+    name: mailName ?? egressName,
+    expected: egress ?? `the address ${egressName} resolves to`,
+    found: joined(back),
+    ok: egress !== null && back.includes(egress),
+    ...(egress === null
+      ? noEgress
+      : mailName === null
+        ? { note: "set the reverse DNS first; the name it gives must resolve back to the address" }
+        : back.includes(egress)
+          ? {}
+          : { note: `point ${mailName} at ${egress}` }),
   };
 
   const dkim = (await dns.txt(names.dkim)).filter(MAIL_RECORD_TAG.dkim);
+  const carriesKey = (txt: string): boolean => dkimPublicKey !== null && txt.replace(/\s+/g, "").includes(`p=${dkimPublicKey}`);
   const dkimRow: MailDnsRow = {
     record: "dkim",
     name: names.dkim,
-    expected: "one v=DKIM1 record carrying the relay's public key",
+    expected: dkimPublicKey === null ? "one v=DKIM1 record carrying the relay's public key" : `one v=DKIM1 record carrying the sender's public key (p=${dkimPublicKey.slice(0, 16)}…)`,
     found: joined(dkim),
-    ok: dkim.length === 1,
+    ok: dkim.length === 1 && (dkimPublicKey === null || carriesKey(dkim[0]!)),
     ...(dkim.length === 0
-      ? { note: "publish; the key is published where the relay holds one" }
+      ? { note: dkimPublicKey === null ? "publish; the key is published where the relay holds one" : "publish" }
       : dkim.length > 1
         ? { note: `remove ${dkim.length - 1} of the ${dkim.length} records under this selector by hand` }
-        : {}),
+        : dkimPublicKey !== null && !carriesKey(dkim[0]!)
+          ? { note: "publish; the record carries another key than the sender signs with" }
+          : {}),
   };
 
   const dmarc = (await dns.txt(names.dmarc)).filter(MAIL_RECORD_TAG.dmarc);
@@ -95,18 +121,13 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     ...(dmarc.length === 0 ? publish : dmarc.length > 1 ? { note: `remove ${dmarc.length - 1} of the ${dmarc.length} DMARC records by hand, then publish` } : {}),
   };
 
-  const ptrNames = egress === null ? [] : await dns.ptr(egress);
   const ptrRow: MailDnsRow = {
     record: "ptr",
-    name: egress ?? domain,
-    expected: platformDomain,
+    name: egress ?? egressName,
+    expected: "a name that resolves back to this address",
     found: joined(ptrNames),
-    ok: egress !== null && ptrNames.includes(platformDomain),
-    ...(egress === null
-      ? noEgress
-      : ptrNames.includes(platformDomain)
-        ? {}
-        : { note: `set the reverse DNS of ${egress} to ${platformDomain} at the hosting provider` }),
+    ok: egress !== null && mailName !== null,
+    ...(egress === null ? noEgress : mailName === null ? { note: `set the reverse DNS of ${egress} to the mail name at the hosting provider` } : {}),
   };
 
   return [spfRow, aRow, dkimRow, dmarcRow, ptrRow];
@@ -115,15 +136,12 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
 export interface MailDnsDeps {
   db: Db;
   platformRepo?: PlatformRepo;
-  /** The DNS provider the egress address is read from — the master's own A record there, the same
-   *  read mail-dns-publish answers the program with. */
-  dns?: PublicDnsEgress;
   publicDns: PublicDns;
+  /** The units whose registration at a stage carries an SMTP entry, with the SHORT name of the cluster
+   *  each stands on — the registrations of domains/units, bound by the composition root. Absent, no
+   *  sender is read and the master's relay is taken as the one that delivers. */
+  smtpSenders?: (stage: Stage) => Promise<{ unit: string; cluster: string }[]>;
 }
-
-/** The one read the check makes at the provider: the master's address record. Narrowed from the
- *  full DnsProvider so a caller that only measures needs nothing that writes. */
-export type PublicDnsEgress = Pick<DnsProvider, "readRecordContent">;
 
 /** The installation's mail DNS, measured now. The master is the one role=master server and its
  *  cluster row; the sender domains are its map's platformDomain (customer mail) and unitApex
@@ -141,18 +159,35 @@ export async function readMailDns(deps: MailDnsDeps): Promise<MailDnsView> {
         "the two sender domains are read off it; write the answer into the installation's config and regenerate the branch",
     );
   }
-  const egress = deps.dns ? await deps.dns.readRecordContent({ name: cluster.domain, type: "A" }) : null;
-  const senders: Array<{ domain: string; role: SenderRole }> = [{ domain: marking.platformDomain, role: "customer mail" }];
-  if (marking.unitApex !== marking.platformDomain) senders.push({ domain: marking.unitApex, role: "alert mail" });
+  // THE SENDER, where a unit declares one: G29 keeps it at one per stage. Mail then leaves by the
+  // cluster it stands on; where no unit sends, by the master's identity, which its relay delivers from.
+  const senders = deps.smtpSenders ? await deps.smtpSenders(cluster.stage) : [];
+  const sender = senders[0] ?? null;
+  let egressName = cluster.domain;
+  let dkimPublicKey: string | null = null;
+  if (sender !== null) {
+    const on = deps.db.select({ domain: clusters.domain }).from(clusters).all().find((c) => clusterShortName(c.domain) === sender.cluster);
+    if (!on) throw errNotFound(`the mail sender ${sender.unit} stands on cluster "${sender.cluster}", which is no cluster of this Manager`);
+    egressName = on.domain;
+    const row = deps.db.select({ key: apps.dkimPublicKey }).from(apps).where(and(eq(apps.name, sender.unit), eq(apps.stage, cluster.stage))).get();
+    dkimPublicKey = row?.key ? dkimRecordKey(row.key) : null;
+  }
+  // Resolved the way DNS resolves it: a name that is a CNAME — a master identity onto one of two
+  // machines — is followed to its address. The address a name resolves to is where mail leaves from.
+  const egress = (await deps.publicDns.a(egressName))[0] ?? null;
+  const senderDomains: Array<{ domain: string; role: SenderRole }> = [{ domain: marking.platformDomain, role: "customer mail" }];
+  if (marking.unitApex !== marking.platformDomain) senderDomains.push({ domain: marking.unitApex, role: "alert mail" });
   const domains: MailDnsDomainView[] = [];
-  for (const sender of senders) {
+  for (const s of senderDomains) {
     domains.push({
-      ...sender,
-      rows: await mailDnsRows({ ...sender, stage: cluster.stage, egress, platformDomain: marking.platformDomain }, deps.publicDns),
+      ...s,
+      rows: await mailDnsRows({ ...s, stage: cluster.stage, egressName, egress, dkimPublicKey: s.role === "customer mail" ? dkimPublicKey : null }, deps.publicDns),
     });
   }
   return {
-    master: { serverId: master.id, name: master.name, fqdn: cluster.domain, stage: cluster.stage, egress },
+    master: { serverId: master.id, name: master.name, fqdn: cluster.domain, stage: cluster.stage },
+    sender: sender === null ? null : { unit: sender.unit, cluster: egressName },
+    egress: { name: egressName, address: egress },
     domains,
     measuredAt: new Date().toISOString(),
   };

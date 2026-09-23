@@ -154,13 +154,13 @@ export async function wire(): Promise<Wired> {
   const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver }, githubApp);
   // The mail DNS of the installation, measured at public resolvers: the Mail page's deps, and the
   // mail half of the DNS inventory below — one measurement, so the two pages can never disagree
-  // about one record. The units' DNS provider gives the master's egress address (its own A record)
-  // and the platform repo the two sender domains.
+  // about one record. The platform repo gives the two sender domains, and the registrations the
+  // stage's mail sender: the unit whose SMTP entry is attested there, and the cluster it stands on.
   const mailDns: MailDnsDeps = {
     db: db.db,
     publicDns: new DohPublicDns(),
     ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}),
-    ...(units.dns ? { dns: units.dns } : {}),
+    ...(units.registrations ? { smtpSenders: (stage: Stage) => units.registrations!.listSmtpSenders(stage) } : {}),
   };
   // EVERY RECORD THIS INSTALLATION IS RESPONSIBLE FOR at the DNS provider, derived from its own
   // registrations and read there (domains/dns/dns-inventory.ts). That domain imports no other

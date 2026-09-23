@@ -134,10 +134,15 @@ export function Mail() {
       {data && (
         <>
           <section className="card">
-            <h3 className="page__title">Master</h3>
+            <h3 className="page__title">Where mail leaves</h3>
             <p>
-              <span className="mono">{data.master.fqdn}</span> ({data.master.name}, {data.master.stage}) — egress address{" "}
-              {data.master.egress ? <span className="mono">{data.master.egress}</span> : <span className="chip chip--warn">no A record at the DNS provider</span>}
+              {data.sender
+                ? <>Sender <span className="mono">{data.sender.unit}</span> on <span className="mono">{data.sender.cluster}</span> — the unit that declares the SMTP entry at {data.master.stage}; the relay on <span className="mono">{data.master.fqdn}</span> hands the alerts to it.</>
+                : <>No unit declares an SMTP entry at {data.master.stage}; the relay on <span className="mono">{data.master.fqdn}</span> ({data.master.name}) delivers directly.</>}
+            </p>
+            <p>
+              Mail leaves by <span className="mono">{data.egress.name}</span> at{" "}
+              {data.egress.address ? <span className="mono">{data.egress.address}</span> : <span className="chip chip--warn">no address</span>}
               <span className="muted"> · measured {new Date(data.measuredAt).toLocaleTimeString()}</span>
             </p>
           </section>

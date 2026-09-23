@@ -39,11 +39,18 @@ export interface MailDnsDomainView {
   rows: MailDnsRow[];
 }
 
-/** GET /api/mail/dns — the mail DNS of the installation as receivers see it: the master the mail
- *  leaves from (its egress address is its own A record at the DNS provider), and one block per
- *  sender domain. Measured against PUBLIC resolvers at `measuredAt`, never against the machine's. */
+/** GET /api/mail/dns — the mail DNS of the installation as receivers see it: the master whose map
+ *  names the sender domains, the stage's mail SENDER where a unit declares one (its SMTP entry, on the
+ *  cluster it stands on), the name mail leaves by and the address that name resolves to, and one block
+ *  per sender domain. Measured against PUBLIC resolvers at `measuredAt`, never against the machine's. */
 export interface MailDnsView {
-  master: { serverId: string; name: string; fqdn: string; stage: Stage; egress: string | null };
+  master: { serverId: string; name: string; fqdn: string; stage: Stage };
+  /** The unit whose registration at the master's stage carries the SMTP entry, and the FQDN of the
+   *  cluster it stands on — or null, where the master's relay delivers directly. */
+  sender: { unit: string; cluster: string } | null;
+  /** The name mail leaves by — the sender's cluster, or the master's identity where no unit sends — and
+   *  the address it resolves to at public DNS, CNAMEs followed; null where it resolves to none. */
+  egress: { name: string; address: string | null };
   domains: MailDnsDomainView[];
   measuredAt: string;
 }
