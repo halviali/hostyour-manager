@@ -91,6 +91,21 @@ export interface OrgTokenReading extends TokenScopes {
   packages: "reads" | "unreadable" | "absent" | "invalid";
 }
 
+/** A right on a repository, highest first — GitHub's `permissions` of GET /repos/{owner}/{repo}. */
+export const REPO_PERMISSIONS = ["admin", "maintain", "push", "triage", "pull"] as const;
+export type RepoPermission = (typeof REPO_PERMISSIONS)[number] | "none";
+
+/** Who a token acts as, and what it may do on one repository of an owner (#252). */
+export interface TokenAccess {
+  /** The account the token acts as (GET /user). */
+  login: string;
+  /** The owner's kind (GET /users/{owner}): a personal account's repositories have their owner alone
+   *  as admin; an organisation grants admin per member and repository. */
+  ownerKind: "User" | "Organization";
+  /** The token's highest right on the repository, where one was named; "none" where it sees none. */
+  permission?: RepoPermission;
+}
+
 export interface TokenScopes {
   /** true iff GitHub returned an X-OAuth-Scopes header — i.e. this is a CLASSIC PAT. Fine-grained
    *  tokens authenticate but omit the header entirely, so `false` means "not a classic PAT" and the
@@ -130,6 +145,11 @@ export interface GitHubConsumer {
    *  403 ⇒ "unreadable" (a token without it), 404 ⇒ "absent" (no such owner, or one the
    *  token cannot see), 401 ⇒ "invalid". Any other transport/HTTP fault throws GitHubConsumerError. */
   readOrgToken(input: { org: string; token: string; signal?: AbortSignal }): Promise<OrgTokenReading>;
+  /** Who the token acts as and the owner's kind, and, where a repository is named, the token's
+   *  highest right there (#252): GET /user, GET /users/{owner}, GET /repos/{owner}/{repo}. A
+   *  repository hook needs admin, whatever the scopes; a repository the token cannot see answers
+   *  "none". Any other fault throws GitHubConsumerError. */
+  readTokenAccess(input: { owner: string; repo?: string; token: string; signal?: AbortSignal }): Promise<TokenAccess>;
   /** REPLACING create: list the repo's hooks, DELETE every one that targets the EventListener path
    *  (targetsEventListener) but is not the current `targetUrl` — a stale hook fires an old entry
    *  point into nothing — then keep the exact match ({created:false}) or create the push-webhook

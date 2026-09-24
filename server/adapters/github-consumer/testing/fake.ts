@@ -6,7 +6,7 @@
 // contract the HTTP client answers.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput, OrgTokenReading,
+  DispatchWorkflowInput, OrgTokenReading, TokenAccess, RepoPermission,
 } from "../port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener } from "../port.ts";
 
@@ -61,6 +61,15 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   readonly orgPackageReaders = new Map<string, string[]>();
   /** Every owner readOrgToken was asked about, with the token — a test asserts the measurement. */
   readonly orgReads: { org: string; token: string }[] = [];
+
+  /** What readTokenAccess answers (#252): the token's account and the owner's kind, and the right
+   *  on any repository named. Default: an organisation's admin, which every measurement passes. */
+  tokenAccess: { login: string; ownerKind: "User" | "Organization"; repoPermission: RepoPermission } = { login: "operator", ownerKind: "Organization", repoPermission: "admin" };
+
+  async readTokenAccess(input: { owner: string; repo?: string; token: string }): Promise<TokenAccess> {
+    const { login, ownerKind, repoPermission } = this.tokenAccess;
+    return input.repo === undefined ? { login, ownerKind } : { login, ownerKind, permission: repoPermission };
+  }
 
   async readOrgToken(input: { org: string; token: string }): Promise<OrgTokenReading> {
     this.orgReads.push({ org: input.org, token: input.token });

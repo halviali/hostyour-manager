@@ -26,7 +26,7 @@ import { missingConsumerPatScopes } from "./pat-scopes.ts";
 export interface OwnerDeps {
   db: Db;
   store: Pick<CredentialStore, "seal" | "revoke" | "list">;
-  github: Pick<GitHubConsumer, "readOrgToken">;
+  github: Pick<GitHubConsumer, "readOrgToken" | "readTokenAccess">;
   githubApp?: Pick<GitHubApp, "installationOrg"> | undefined;
   actor: () => string;
 }
@@ -101,7 +101,10 @@ export async function recordPackagesReader(deps: OwnerDeps, org: string, token: 
 }
 
 /** Records the owner's repository PAT after measuring its scopes: a classic PAT carrying
- *  repo + workflow + admin:repo_hook. A fine-grained token reports no scopes and is refused. */
+ *  repo + workflow + admin:repo_hook. A fine-grained token reports no scopes and is refused. And the
+ *  account it acts as (#252): a personal account's repositories have their owner alone as admin, and
+ *  the build webhook needs admin, so a personal owner's PAT is one that owner created. An
+ *  organisation grants admin per repository, which the onboarding's webhook probe measures. */
 export async function recordRepositoryPat(deps: OwnerDeps, org: string, token: string, signal?: AbortSignal): Promise<OwnerCredentialView> {
   assertOrgLogin(org);
   const reading = await deps.github.readOrgToken({ org, token, ...(signal ? { signal } : {}) });
@@ -109,6 +112,10 @@ export async function recordRepositoryPat(deps: OwnerDeps, org: string, token: s
   if (!reading.classic) throw errValidation(`the token is fine-grained, which reports no scopes — the repository PAT of an owner is a CLASSIC PAT with ${REPOSITORY_PAT_SCOPES.join(" + ")}`);
   const missing = missingConsumerPatScopes(reading.scopes);
   if (missing.length > 0) throw errValidation(`the token lacks ${missing.join(", ")} (granted: ${reading.scopes.join(", ") || "none"}) — the repository PAT of an owner carries ${REPOSITORY_PAT_SCOPES.join(" + ")}`);
+  const access = await deps.github.readTokenAccess({ owner: org, token, ...(signal ? { signal } : {}) });
+  if (access.ownerKind === "User" && access.login.toLowerCase() !== org.toLowerCase()) {
+    throw errValidation(`the token acts as ${access.login}, and ${org} is a personal account, whose repositories have ${org} alone as admin — the build webhook needs admin, so the repository PAT of ${org} is one ${org} created`);
+  }
   return record(deps, org, "repository-pat", token, `repository PAT (${org})`);
 }
 

@@ -323,3 +323,17 @@ describe("github-consumer adapter — listReleaseTags", () => {
     await expect(client.listReleaseTags({ owner: "x", repo: "acme", token: "tkn" })).rejects.toThrow(/403: Resource not accessible/);
   });
 });
+
+describe("github-consumer adapter — readTokenAccess (#252)", () => {
+  it("answers the token's account, the owner's kind, and its highest right on the repository; one it cannot see is none", async () => {
+    const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
+      "GET /user": { status: 200, body: { login: "kartalbas" } },
+      "GET /users/ahkutun": { status: 200, body: { login: "ahkutun", type: "User" } },
+      "GET /repos/ahkutun/swissbookai": { status: 200, body: { permissions: { admin: false, maintain: false, push: true, triage: true, pull: true } } },
+      "GET /repos/ahkutun/hidden": { status: 404, body: { message: "Not Found" } },
+    }) });
+    expect(await client.readTokenAccess({ owner: "ahkutun", token: "tkn" })).toEqual({ login: "kartalbas", ownerKind: "User" });
+    expect(await client.readTokenAccess({ owner: "ahkutun", repo: "swissbookai", token: "tkn" })).toEqual({ login: "kartalbas", ownerKind: "User", permission: "push" });
+    expect(await client.readTokenAccess({ owner: "ahkutun", repo: "hidden", token: "tkn" })).toEqual({ login: "kartalbas", ownerKind: "User", permission: "none" });
+  });
+});

@@ -18,7 +18,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { readOwnerIdentity } from "./owners.ts";
-import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing } from "./repo-identity.ts";
+import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing, patHookRefusal } from "./repo-identity.ts";
 import { consumerUnitHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
@@ -125,13 +125,16 @@ export async function probeWebhook(ports: OnboardPorts, p: OnboardParams, ctx: P
   if (!ports.webhookSecret) return [unmeasured("webhook", title, "GITHUB_WEBHOOK_SECRET is not configured on this manager")];
   const buildPlaneFqdn = await ports.resolveBuildPlaneFqdn(p.domain);
   const targetUrl = webhookTargetUrl(buildPlaneFqdn, ports.webhookSubdomain);
-  return withIdentity(ctx, p, "consumer-onboard:probe-webhook", async (token) => {
+  return withIdentity(ctx, p, "consumer-onboard:probe-webhook", async (token, viaApp) => {
     try {
       const stands = await ports.github!.hookStandsAt({ owner, repo, token, targetUrl, signal: ctx.signal });
       return [check("webhook", title, "hard", "pass", stands ? `a hook already stands at ${targetUrl} and is re-set by the run` : `the hooks are readable; the run creates one at ${targetUrl}`)];
     } catch (err) {
-      if (err instanceof WebhookScopeError) return [check("webhook", title, "hard", "fail", `the identity cannot read the hooks (HTTP ${err.status ?? "403/404"})`, "provide a PAT with admin:repo_hook")];
-      throw err;
+      if (!(err instanceof WebhookScopeError)) throw err;
+      const status = `HTTP ${err.status ?? "403/404"}`;
+      const refusal = viaApp ? null : await patHookRefusal(ports.github!, { owner, repo, token, signal: ctx.signal });
+      if (refusal) return [check("webhook", title, "hard", "fail", `${refusal.reading} (${status})`, refusal.hint)];
+      return [check("webhook", title, "hard", "fail", `the identity cannot read the hooks (${status})`, "provide a PAT with admin:repo_hook")];
     }
   });
 }

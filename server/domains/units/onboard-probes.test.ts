@@ -108,6 +108,17 @@ describe("probeWebhook — the hooks readable with the identity", () => {
     github.scopeError = true;
     expect(await probeWebhook(prt, params(), ctx())).toMatchObject([{ status: "fail", severity: "hard", hint: "provide a PAT with admin:repo_hook" }]);
   });
+
+  it("names the account and its right where a PAT without admin is refused, and whose PAT to record (#252)", async () => {
+    const github = new FakeGitHubConsumer();
+    github.scopeError = true;
+    github.tokenAccess = { login: "kartalbas", ownerKind: "User", repoPermission: "push" };
+    const [finding] = await probeWebhook(ports({ github }), params(), ctx());
+    expect(finding).toMatchObject({ status: "fail", severity: "hard" });
+    expect(finding?.detail).toContain("the PAT acts as kartalbas, which holds push but not admin on x/acme, and a build webhook needs admin");
+    expect(finding?.hint).toContain("replace the repository PAT of x under Settings with one x created");
+    expect(await probeWebhook(ports({ github }), params(), ctx({ viaApp: true }))).toMatchObject([{ status: "fail", hint: "provide a PAT with admin:repo_hook" }]);
+  });
 });
 
 describe("probeDns — the unit's record, judged as the step judges it", () => {

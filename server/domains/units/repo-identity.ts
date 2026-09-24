@@ -18,6 +18,7 @@
 // Callers: the onboard POST and its prefill (api.ts, api-onboard-prefill.ts), the tenant build
 // units (tenant-builds.ts) and the tenant's own apps repository (tenant-apps-steps.ts).
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
+import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
@@ -93,6 +94,21 @@ export async function ensureAppIdentityRow(store: Pick<CredentialStore, "list" |
 /** The App's one row, or null where boot has not seeded it. */
 export async function appIdentityRowId(store: Pick<CredentialStore, "list">): Promise<string | null> {
   return (await store.list({ kind: "github-app", purpose: "repository-identity", excludeRotated: true })).find((r) => r.subject.kind === "owner")?.id ?? null;
+}
+
+/** Why a PAT is refused on a repository's hooks, measured (#252): the account it acts as and its
+ *  right there, and whose PAT to record instead. Null where that account IS admin — the refusal is
+ *  then the token's own scope. */
+export async function patHookRefusal(github: Pick<GitHubConsumer, "readTokenAccess">, input: { owner: string; repo: string; token: string; signal?: AbortSignal }): Promise<{ reading: string; hint: string } | null> {
+  const access = await github.readTokenAccess(input);
+  if (access.permission === "admin") return null;
+  const right = access.permission === "none" || access.permission === undefined ? "no right" : `${access.permission} but not admin`;
+  return {
+    reading: `the PAT acts as ${access.login}, which holds ${right} on ${input.owner}/${input.repo}, and a build webhook needs admin`,
+    hint: access.ownerKind === "User"
+      ? `replace the repository PAT of ${input.owner} under Settings with one ${input.owner} created: ${input.owner} is a personal account, whose repositories have ${input.owner} alone as admin`
+      : `replace the repository PAT of ${input.owner} under Settings with one of an account that is admin of ${input.owner}/${input.repo}`,
+  };
 }
 
 /** THE CREDENTIAL ID A REPOSITORY IS REACHED WITH, RESOLVED NOW (#226): the App's one row where its

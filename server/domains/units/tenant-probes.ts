@@ -17,7 +17,7 @@ import type { ProbeCtx } from "../../executor/probe.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
-import { judgeRepoIdentity, resolveRepoCredentialId } from "./repo-identity.ts";
+import { judgeRepoIdentity, patHookRefusal, resolveRepoCredentialId } from "./repo-identity.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import { tenantWildcardHost } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
@@ -91,8 +91,11 @@ export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, po
     const stands = await github.hookStandsAt({ owner, repo, token: token.toString("utf8"), targetUrl, signal: ctx.signal });
     return [check(`unit.${unit.unit}`, title, "hard", "pass", stands ? "its stored credential reads the hooks; the build hook stands" : "its stored credential reads the hooks; the re-release sets the build hook")];
   } catch (err) {
-    if (err instanceof WebhookScopeError) return [check(`unit.${unit.unit}`, title, "hard", "fail", `its stored credential cannot read the hooks (HTTP ${err.status ?? "403/404"})`, "re-onboard the unit with a PAT holding admin:repo_hook")];
-    throw err;
+    if (!(err instanceof WebhookScopeError)) throw err;
+    const status = `HTTP ${err.status ?? "403/404"}`;
+    const refusal = judged.kind === "pat" ? await patHookRefusal(github, { owner, repo, token: token.toString("utf8"), signal: ctx.signal }) : null;
+    if (refusal) return [check(`unit.${unit.unit}`, title, "hard", "fail", `${refusal.reading} (${status})`, refusal.hint)];
+    return [check(`unit.${unit.unit}`, title, "hard", "fail", `its stored credential cannot read the hooks (${status})`, "re-onboard the unit with a PAT holding admin:repo_hook")];
   } finally {
     token.fill(0);
   }

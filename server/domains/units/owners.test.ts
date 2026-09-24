@@ -92,6 +92,16 @@ describe("the repository PAT of an owner", () => {
     const list = await listOwnerIdentities(deps());
     expect(list.map((o) => [o.org, o.appInstalled, o.repositoryPat !== null])).toEqual([[ORG, true, false], ["other-org", false, true]]);
   });
+
+  it("of a personal account is one that account created: another account's token is refused, naming both (#252)", async () => {
+    github.tokenScopes = { classic: true, scopes: ["repo", "workflow", "admin:repo_hook"] };
+    github.tokenAccess = { login: "kartalbas", ownerKind: "User", repoPermission: "push" };
+    await expect(recordRepositoryPat(deps(), "ahkutun", "ghp_collaborator")).rejects.toThrow(/acts as kartalbas, and ahkutun is a personal account, whose repositories have ahkutun alone as admin/);
+    expect(readOwnerIdentity(db.db, "ahkutun")?.repoCredentialId ?? null).toBeNull();
+    github.tokenAccess = { login: "AhKutun", ownerKind: "User", repoPermission: "admin" };
+    await recordRepositoryPat(deps(), "ahkutun", "ghp_owner");
+    expect(readOwnerIdentity(db.db, "ahkutun")?.repoCredentialId).toMatch(/^cred_/);
+  });
 });
 
 describe("the owners over HTTP", () => {

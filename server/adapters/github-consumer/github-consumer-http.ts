@@ -5,9 +5,9 @@
 // github.ts one is platform-repo/single-token scoped and has no hook or workflow methods.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput,
+  DispatchWorkflowInput, TokenAccess,
 } from "./port.ts";
-import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener, type OrgTokenReading } from "./port.ts";
+import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener, REPO_PERMISSIONS, type OrgTokenReading } from "./port.ts";
 
 type FetchLike = typeof fetch;
 
@@ -114,6 +114,25 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     if (res.status === 403) return { ...scopes, packages: "unreadable" };
     if (res.status === 404) return { ...scopes, packages: "absent" };
     throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+  }
+
+  async readTokenAccess(input: { owner: string; repo?: string; token: string; signal?: AbortSignal }): Promise<TokenAccess> {
+    const init = input.signal ? { signal: input.signal } : undefined;
+    const read = async <T>(path: string): Promise<T> => {
+      const res = await this.send(input.token, path, init);
+      if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+      return (await res.json()) as T;
+    };
+    const { login } = await read<{ login: string }>("/user");
+    const { type } = await read<{ type: string }>(`/users/${encodeURIComponent(input.owner)}`);
+    const access: TokenAccess = { login, ownerKind: type === "Organization" ? "Organization" : "User" };
+    if (input.repo === undefined) return access;
+    const path = this.repoPath(input.owner, input.repo);
+    const res = await this.send(input.token, path, init);
+    if (res.status === 404) return { ...access, permission: "none" };
+    if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+    const granted = ((await res.json()) as { permissions?: Record<string, boolean> }).permissions ?? {};
+    return { ...access, permission: REPO_PERMISSIONS.find((p) => granted[p] === true) ?? "none" };
   }
 
   async ensureHook(input: EnsureHookInput): Promise<EnsureHookResult> {
