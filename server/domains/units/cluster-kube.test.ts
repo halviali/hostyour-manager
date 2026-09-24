@@ -68,7 +68,7 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
 
   function seedMasterCluster(db: DbHandle): string {
     db.db.insert(servers).values({ id: "srv_master", name: "m1", host: "m1.example", sshUser: "ops", role: "master", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_master", serverId: "srv_master", stage: "prod", domain: "m1.example", status: "active", planeState: "ready" }).run();
+    db.db.insert(clusters).values({ id: "cls_master", serverId: "srv_master", stage: "prod", domain: "m1.example", name: "m1", status: "active", planeState: "ready" }).run();
     return "cls_master";
   }
 
@@ -80,7 +80,7 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
     const plane = typeof opts.plane === "object" && opts.plane !== null && "credentialIds" in opts.plane
       ? { ...(opts.plane as Record<string, unknown>), credentialIds: { clusterBearer: bearer.id } }
       : opts.plane;
-    db.db.insert(clusters).values({ id: "cls_s1", serverId: "srv_s1", stage: "prod", domain: "s1.example", status: "active", slaveId: 1, planeState: "ready", planeJson: plane }).run();
+    db.db.insert(clusters).values({ id: "cls_s1", serverId: "srv_s1", stage: "prod", domain: "s1.example", name: "s1", status: "active", slaveId: 1, planeState: "ready", planeJson: plane }).run();
     return "cls_s1";
   }
 
@@ -165,7 +165,7 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
   it("slave with an empty plane_json → typed 'no management plane' error", async () => {
     const { db, store } = setup();
     db.db.insert(servers).values({ id: "srv_s1", name: "s1", host: "s1.example", lanHost: "10.1.1.11", sshUser: "ops", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_s1", serverId: "srv_s1", stage: "prod", domain: "s1.example", status: "planned", slaveId: 1 }).run();
+    db.db.insert(clusters).values({ id: "cls_s1", serverId: "srv_s1", stage: "prod", domain: "s1.example", name: "s1", status: "planned", slaveId: 1 }).run();
     const { deps } = spyDeps(db, store);
     await expect(makeClusterKubeResolver(deps).resolve("cls_s1")).rejects.toMatchObject({
       code: "VALIDATION",
@@ -207,7 +207,7 @@ describe("domains/units/cluster-kube over the plane the deploy-slave run wrote",
   it("resolves a slave from the document register actually wrote, with the values it wrote", async () => {
     const { db, store } = await makeHarness();
     db.db.insert(clusters).values({
-      id: "cls_s1", serverId: "srv_slave1", stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s1", serverId: "srv_slave1", stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
       planeJson: { kube: { server: "https://100.64.0.11:16443", caData: "TFMtQ0EtREFUQQ==" } },
     }).run();
     const ctx = bareStepCtx(db, store);

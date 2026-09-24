@@ -81,7 +81,7 @@ describe("mail-dns-publish plan", () => {
 
   it("refuses a slave: the relay, the token and the egress address are the master's", async () => {
     const h = await makeHarness();
-    h.db.db.insert(clusters).values({ id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1 }).run();
+    h.db.db.insert(clusters).values({ id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", name: "s1", status: "active", slaveId: 1 }).run();
     await expect(makeMailDnsPublishDef(ports(h)).plan({ ...PARAMS, serverId: SLAVE_ID }, { db: h.db.db }))
       .rejects.toThrow(/s1 is a slave — publish-mail-dns runs on the master/);
   });

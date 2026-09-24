@@ -43,8 +43,8 @@ describe("readDnsInventory", () => {
     db = openDb(":memory:");
     db.db.insert(servers).values({ id: "srv_m", name: "m1", host: M1, sshUser: "m1", role: "master", status: "healthy" }).run();
     db.db.insert(servers).values({ id: "srv_s", name: "s1", host: S1, sshUser: "s1", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: M1, status: "active" }).run();
-    db.db.insert(clusters).values({ id: "cls_s", serverId: "srv_s", stage: "prod", domain: S1, status: "active", slaveId: 1 }).run();
+    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: M1, name: (M1).split(".")[0]!, status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_s", serverId: "srv_s", stage: "prod", domain: S1, name: (S1).split(".")[0]!, status: "active", slaveId: 1 }).run();
     dns = new FakeDnsProvider();
   });
   afterEach(() => db.sqlite.close());
@@ -53,7 +53,7 @@ describe("readDnsInventory", () => {
   const deps = (over: Partial<DnsInventoryDeps> = {}): DnsInventoryDeps => ({
     db: db.db,
     dns,
-    consumers: async (domain, stage) => (stage === "prod" && domain === M1 ? [{ name: "post", host: "post" }] : []),
+    consumers: async (cluster, stage) => (stage === "prod" && cluster === M1.split(".")[0] ? [{ name: "post", host: "post" }] : []),
     tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", cluster: "m1" }, { subdomain: "beta", cluster: "s1" }] : []),
     unitApex: async () => "example.net",
     mail: async () => mailView(),

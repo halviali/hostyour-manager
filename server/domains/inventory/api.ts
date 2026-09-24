@@ -8,6 +8,8 @@ import { listLocks } from "../../executor/locks.ts";
 import { listServers } from "./read.ts";
 import { createServer, deleteServer, serverCredFlags, CreateServerInput } from "./write.ts";
 import { restateMachineIdentity, RestateMachineIdentityInput } from "./machine-identity.ts";
+import { readServerReach } from "./reach.ts";
+import type { TcpProbe } from "../../adapters/net-probe/port.ts";
 import { createOperatorKey, deleteOperatorKey, listOperatorKeys, CreateOperatorKeyInput } from "./operator-keys.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
@@ -25,6 +27,8 @@ export interface ServerApiDeps {
    *  credential is placed on a machine by a run, never by a route. */
   creds: CredentialStore;
   actor: () => string;
+  /** The door probe a server card's reachability is read with. */
+  probe: TcpProbe;
 }
 
 /**
@@ -82,6 +86,10 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
     await deleteServer(db, creds, deps.actor(), c.req.param("id"));
     return c.json({ ok: true });
   });
+
+  // Whether the machine answers at the host its row names — a reading, and nothing is written. The
+  // card of a slave that moved to another name shows why it is out of reach here, beside the rename.
+  app.get("/api/servers/:id/reach", async (c) => c.json(await readServerReach({ db, probe: deps.probe }, c.req.param("id"))));
 
   // The one statement a person makes about a machine that no reading can replace: this machine was
   // rebuilt, and here is the host key it presents now. Every run refuses a machine whose host key is

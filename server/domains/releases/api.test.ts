@@ -70,7 +70,7 @@ describe("GET /api/releases — which release an installation stands on, and whi
       ["srv_l", "s2", "slave", "cls_l", LONELY, "dev"],
     ] as const) {
       db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES (?,?,?,'root',?,'healthy')").run(id, name, domain, role);
-      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain) VALUES (?,?,?,?)").run(cls, id, stage, domain);
+      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, name) VALUES (?,?,?,?,?)").run(cls, id, stage, domain, domain.split(".")[0]);
     }
     const session = new SessionCodec(db.db, config);
     const cloud = deps.cloud;
@@ -146,7 +146,7 @@ describe("GET /api/releases — which release an installation stands on, and whi
     const cloud = seededCloud();
     // Any seeded file makes the branch exist (FakeCarrierRepo); the cluster map is what a real
     // install branch always carries even when it pins nothing.
-    cloud.seed(LONELY, `clusters/active/${LONELY}.yaml`, `stage: dev\nrole: slave\n\nglobal:\n  domain: ${LONELY}\n  buildPlane: ${MASTER}\n`);
+    cloud.seed(LONELY, `clusters/active/${LONELY}.yaml`, `stage: dev\nrole: slave\n\nglobal:\n  domain: ${LONELY}\n  clusterName: ${(LONELY).split(".")[0]}\n  buildPlane: ${MASTER}\n`);
     const { app, cookie } = await make({ cloud });
     expect(view(await get(app, cookie), LONELY).apps).toEqual([]);
   });

@@ -130,7 +130,7 @@ type PurgeTarget = Omit<AppCluster, "host">;
 function loadPurgeTarget(db: Db, p: PurgeParams): PurgeTarget {
   const cluster = db.select().from(clusters).where(eq(clusters.id, p.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${p.clusterId}`);
-  return { name: p.consumerName, domain: cluster.domain, stage: p.stage, clusterId: cluster.id };
+  return { name: p.consumerName, domain: cluster.domain, clusterName: cluster.name, stage: p.stage, clusterId: cluster.id };
 }
 
 /** The apps row of this name AT THIS STAGE on this cluster, or undefined — purge NEVER requires it.

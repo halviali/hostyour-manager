@@ -54,7 +54,7 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
  *  provisional guard were absent — the refusal must come from the status, not from a missing secret. */
 function seedTenant(status: TenantStatus): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status }).run();
   db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp", status }).run();
 }

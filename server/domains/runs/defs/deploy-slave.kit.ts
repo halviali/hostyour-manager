@@ -101,12 +101,16 @@ export type SlaveInstallMode = "deploy" | "redeploy";
  *  never as strings frozen into the step closures. */
 export interface SlaveTarget {
   serverId: string;
-  resolve(db: Db): { domain: string; stage: Stage };
+  /** The cluster's FQDN, its stage and its NAME — the name fixed at its adoption, which a rename
+   *  of the FQDN leaves standing (cluster-marking.ts header). */
+  resolve(db: Db): { domain: string; stage: Stage; name: string };
 }
 
 /** deploy-slave's target: the operator named the FQDN and the stage, so the lookup is a constant. */
 export function statedTarget(serverId: string, domain: string, stage: Stage): SlaveTarget {
-  return { serverId, resolve: () => ({ domain, stage }) };
+  // A cluster is adopted under its server's name, which attest-target holds equal to the first
+  // label of the stated domain.
+  return { serverId, resolve: (db) => ({ domain, stage, name: loadServer(db, serverId).name }) };
 }
 
 /** redeploy's target: the ACTIVE cluster the server already carries states both. The lookup is at the
@@ -122,7 +126,7 @@ export function activeClusterTarget(serverId: string): SlaveTarget {
       if (cluster.status !== "active") {
         throw errValidation(`cluster ${cluster.id} for ${cluster.domain} is '${cluster.status}' — redeploy rebuilds a LIVE cluster; a planned or provisioning one is deploy-slave's to finish`);
       }
-      return { domain: cluster.domain, stage: cluster.stage };
+      return { domain: cluster.domain, stage: cluster.stage, name: cluster.name };
     },
   };
 }

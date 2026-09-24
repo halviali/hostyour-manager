@@ -61,8 +61,8 @@ describe("sweepRepoCredentials", () => {
   it("takes the token Secret off a live App unit, leaves a PAT unit, an offboarded unit and a foreign repository alone, and isolates a failing unit", async () => {
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
-    db.db.insert(clusters).values({ id: "cls_down", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_down", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     const row = (id: string, name: string, status: "active" | "suspended" | "offboarded", repoUrl: string, clusterId = "cls_1") =>
       db.db.insert(apps).values({ id, clusterId, name, stage: "prod", host: name, provenance: "manager", status, repoUrl }).run();
     row("app_post", "post", "active", "https://github.com/acme/post");

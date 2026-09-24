@@ -420,7 +420,7 @@ describe("Registrations.listConsumerRegistrations", () => {
       deploy: deploy({ cluster: "s2" }),
       runId: "run_2",
     });
-    const scan = await reg.listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await reg.listConsumerRegistrations("s1", "prod");
     expect(scan.registrations.map((r) => r.name)).toEqual(["acme"]);
     expect(scan.skipped).toEqual([]);
   });
@@ -429,7 +429,7 @@ describe("Registrations.listConsumerRegistrations", () => {
     const repo = new FakePlatformRepo();
     const reg = new Registrations(repo);
     await reg.commitRegistration({ unit: unit(), builds: ["acme-backend"], runId: "run_1" });
-    const scan = await reg.listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await reg.listConsumerRegistrations("s1", "prod");
     expect(scan.registrations).toEqual([]);
     expect(scan.skipped).toEqual([]);
   });
@@ -440,7 +440,7 @@ describe("Registrations.listConsumerRegistrations", () => {
       name: "other", repoURL: "https://github.com/x/other.git", suspended: false, quiesced: false,
       chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small"),
     })));
-    const scan = await new Registrations(repo).listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await new Registrations(repo).listConsumerRegistrations("s1", "prod");
     expect(scan.registrations).toEqual([]);
     expect(scan.skipped[0]?.reason).toContain("disagrees with its directory name");
   });
@@ -448,7 +448,7 @@ describe("Registrations.listConsumerRegistrations", () => {
   it("reports a stage file that carries no deploy group", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", serializePointer(ConsumerRegistrationSchema, ConsumerRegistrationSchema.parse({ ...unit(), builds: [] })));
-    const scan = await new Registrations(repo).listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await new Registrations(repo).listConsumerRegistrations("s1", "prod");
     expect(scan.registrations).toEqual([]);
     expect(scan.skipped[0]?.reason).toContain("carries no deploy group");
   });
@@ -456,7 +456,7 @@ describe("Registrations.listConsumerRegistrations", () => {
   it("reports an unparseable file rather than dropping it", async () => {
     const repo = new FakePlatformRepo();
     repo.seed(repo.booksBranch, "registrations/acme/prod.yaml", "garbage-without-colon\n");
-    const scan = await new Registrations(repo).listConsumerRegistrations("s1.example.com", "prod");
+    const scan = await new Registrations(repo).listConsumerRegistrations("s1", "prod");
     expect(scan.skipped[0]?.name).toBe("acme");
     expect(scan.skipped[0]?.reason).toContain("not readable registration YAML");
   });

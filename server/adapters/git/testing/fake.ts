@@ -128,7 +128,7 @@ export class FakePlatformRepo implements PlatformRepo {
       ? relPath.slice(CLUSTER_MAP_DIR.length + 1, -".yaml".length)
       : "";
     if (fqdn.length === 0 || fqdn.includes("/")) return null;
-    const map = `stage: prod\nrole: master\n\nglobal:\n  domain: ${fqdn}\n  buildPlane: ${fqdn}\n  unitApex: ${fqdn}\n  endpoints:\n    vault:\n      url: https://vault.${fqdn}:8200\n`;
+    const map = `stage: prod\nrole: master\n\nglobal:\n  domain: ${fqdn}\n  clusterName: ${(fqdn).split(".")[0]}\n  buildPlane: ${fqdn}\n  unitApex: ${fqdn}\n  endpoints:\n    vault:\n      url: https://vault.${fqdn}:8200\n`;
     this.seed(branch, relPath, map);
     return map;
   }

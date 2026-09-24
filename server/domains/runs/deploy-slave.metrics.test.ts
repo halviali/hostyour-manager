@@ -29,7 +29,7 @@ describe("verify-slave: the metrics probe over HTTP", () => {
   async function verifyWorld(metrics?: FakeMetricsQuery | false, hostsOver: Parameters<typeof scriptedHosts>[0] = {}): Promise<Harness> {
     const h = await makeHarness({ hosts: scriptedHosts(hostsOver), ...(metrics === undefined ? {} : { metrics }) });
     h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     // The master's own cluster row: the two master-side gates resolve their kube access through it.
     seedMasterCluster(h);

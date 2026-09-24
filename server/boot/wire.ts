@@ -17,6 +17,7 @@ import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
+import { repointUnitRecords } from "../domains/units/cluster-rename-records.ts";
 import { buildUnits } from "./wire-units.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
@@ -28,6 +29,7 @@ import { createOidcAdapter } from "../adapters/oidc/authentik.ts";
 import { EmergencyStore, createEmergencyApp, serveAdminSocket } from "../domains/access/emergency.ts";
 import { registerRunRoutes } from "../domains/runs/api.ts";
 import { registerClustersRoutes, registerServerRoutes } from "../domains/inventory/api.ts";
+import { NetTcpProbe } from "../adapters/net-probe/net-probe.ts";
 import { registerMailRoutes } from "../domains/mail/api.ts";
 import { readMailDns, readMailEgress, type MailDnsDeps } from "../domains/mail/mail-dns.ts";
 import { registerDnsRoutes } from "../domains/dns/api.ts";
@@ -176,7 +178,7 @@ export async function wire(): Promise<Wired> {
     mail: () => readMailDns(mailDns),
     ...(units.dns ? { dns: units.dns } : {}),
     ...(registrations
-      ? { consumers: async (domain: string, stage: Stage) => (await registrations.listConsumerRegistrations(domain, stage)).registrations.map((r) => ({ name: r.name, host: r.entry.host })) }
+      ? { consumers: async (cluster: string, stage: Stage) => (await registrations.listConsumerRegistrations(cluster, stage)).registrations.map((r) => ({ name: r.name, host: r.entry.host })) }
       : {}),
     ...(tenantRegistrations ? { tenants: async (stage: Stage) => (await tenantRegistrations.listTenantPointers(stage)).pointers } : {}),
     ...(units.resolveUnitApex ? { unitApex: units.resolveUnitApex } : {}),
@@ -202,6 +204,11 @@ export async function wire(): Promise<Wired> {
     catalogueOrigin: { repoURL: config.deployProgramsRepoUrl },
     ...(units.dns ? { dns: units.dns } : {}),
     mailEgress: (stage: Stage, masterDomain: string) => readMailEgress(mailDns, stage, masterDomain),
+    // What a slave's rename repoints: every unit record naming its old FQDN, read off the unit rows of
+    // the cluster and composed under the apex its map states.
+    ...(units.dns && units.resolveUnitApex
+      ? { unitRecords: (ctx, input) => repointUnitRecords({ dns: units.dns, unitApex: units.resolveUnitApex! }, ctx, input) }
+      : {}),
     // What dns-remove and mail-dns-unpublish are allowed to delete: a record is taken back only
     // where the inventory names it as this installation's, never by the name an operator typed.
     readDnsInventory: () => readDnsInventory(dnsInventory),
@@ -329,7 +336,7 @@ export async function wire(): Promise<Wired> {
     registerProtected: (a) => {
       registerRunRoutes(a, { executor, db: db.db, bus, config, logger });
       registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger });
-      registerServerRoutes(a, { db: db.db, creds: store, actor: runActor });
+      registerServerRoutes(a, { db: db.db, creds: store, actor: runActor, probe: new NetTcpProbe() });
       // The mail DNS of the installation, measured at public resolvers, and beside it every record
       // this installation is responsible for at the DNS provider. Both read-only: publishing and
       // removing are runs, so what a record costs is always planned and approved.

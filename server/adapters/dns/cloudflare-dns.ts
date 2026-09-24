@@ -10,7 +10,7 @@
 //    hardcoding, whatever registrable domain the unit apex sits under.
 // The token rides ONLY in the Authorization header and is never logged.
 import type { DnsProvider, DnsRecordType } from "./port.ts";
-import { DnsError } from "./port.ts";
+import { DnsError, DnsZoneUnknownError } from "./port.ts";
 
 type FetchLike = typeof fetch;
 
@@ -124,7 +124,7 @@ export class CloudflareDns implements DnsProvider {
       }
       candidate = candidate.slice(candidate.indexOf(".") + 1);
     }
-    throw new DnsError(`no Cloudflare zone found for any suffix of "${asked}" — is the DNS token scoped to this zone, and is the domain on Cloudflare?`);
+    throw new DnsZoneUnknownError(`no Cloudflare zone found for any suffix of "${asked}" — is the DNS token scoped to this zone, and is the domain on Cloudflare?`);
   }
 
   /** One API call: auth header, JSON body, the success-flag check, and the bounded 429 backoff.

@@ -31,7 +31,7 @@ import { declareTailnetAddressStep } from "./deploy-slave.address.ts";
 import { SLAVE_API_PORT, HOST_ADDRESS_COMMAND, hostAddressesFrom } from "./deploy-slave.remote.ts";
 import { rejoinStep, joinIfAbsentStep, readMembershipStep } from "./tailnet.kit.ts";
 import { createMgmtStep, removeSlaveCleanup } from "./deploy-slave.mgmt.ts";
-import { clusterShortName, resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
+import { resolveClusterMarking, writeClusterMarking, projectClusterMarking, type ClusterMarking } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { attestTargetStep } from "./deploy-slave.attest.ts";
 import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
@@ -68,11 +68,14 @@ import { verifySlaveStep, registerStep } from "./deploy-slave.verify.ts";
 // deploy-slave.kit.ts, the credential handshake in deploy-slave.mgmt.ts, verify-slave + register
 // in deploy-slave.verify.ts (the file-size doctrine, files ≤400 lines).
 
+/** A cluster's FQDN as this platform spells one: lowercase DNS labels, at least two of them. */
+export const ClusterFqdn = z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "must be a lowercase FQDN");
+
 export const DeploySlaveParams = z.object({
   serverId: z.string().startsWith("srv_"),
   stage: z.enum(STAGE),
-  /** The slave's FQDN == its install branch == clusters.domain (one branch per slave). */
-  domain: z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "must be a lowercase FQDN"),
+  /** The slave's FQDN == clusters.domain == the name of its map on the books branch. */
+  domain: ClusterFqdn,
   /** Explicit ordinal — used by a retry after a failed run (it is never recycled) or to take on a
    *  slave provisioned by hand. Omitted ⇒ attest-target allocates max(slave_id)+1. */
   slaveId: z.number().int().positive().optional(),
@@ -442,7 +445,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
       name: "mark-slave",
       title: "Mark the slave in the cluster map on the books branch",
       run: async (ctx) => {
-        const { domain, stage } = target.resolve(ctx.db);
+        const { domain, stage, name } = target.resolve(ctx.db);
         const server = loadServer(ctx.db, sid);
         const master = loadMaster(ctx.db);
         const masterFqdn = masterFqdnOf(ctx.db, master);
@@ -472,7 +475,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // because an optional property set to undefined is not the same as one that is not there.
         const { release: _theMastersRelease, ...installation } = masterMarking;
         const inherited = masterMarking.globalRest ?? {};
-        const shortName = clusterShortName(domain);
+        // THE CLUSTER'S NAME AS IT STANDS ON ITS ROW, fixed at its adoption — never the first label
+        // of the domain it is on now, which a rename moves (cluster-marking.ts header).
+        const shortName = name;
         const holdsBuildPlane = masterMarking.buildPlaneFqdn === domain;
         // THIS MACHINE'S OWN ADDRESSES, read off this machine. Everything else below is inherited,
         // and this is the one global key that is a fact about the box rather than about the
@@ -509,10 +514,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
           apiPort: SLAVE_API_PORT,
           globalRest: {
             ...inherited,
-            // Per cluster, both of them: the short name everything named per cluster carries, and
-            // the secret store's auth mount, which is what tells two clusters of one installation
-            // apart when they log in.
-            clusterName: shortName,
+            // Per cluster: the secret store's auth mount, named after the cluster, which is what
+            // tells two clusters of one installation apart when they log in. The name itself is
+            // written from `name` above.
             vaultKubernetesAuthPath: `kubernetes-${shortName}`,
             // Measured above, never inherited.
             nodeCidrs,
@@ -644,9 +648,9 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // namespace is the resolver's answer and not a literal: `argoNamespace` and the trio it
         // comes with are decided together, and two spellings of that pairing are one rename away
         // from coming apart (domains/units/cluster-kube.ts says so where the constant lives).
-        const { domain } = target.resolve(ctx.db);
+        const { domain, name } = target.resolve(ctx.db);
         const { argoReader, argoNamespace } = await requireResolver(ports).resolve(masterClusterId(ctx.db));
-        const appName = `${clusterShortName(domain)}-apps`;
+        const appName = `${name}-apps`;
         // watchApplication polls on its OWN cadence and writes nothing per tick, so the step's
         // budget is what it is given and the log carries one line rather than one every ten seconds.
         const last = await argoReader.watchApplication(
@@ -659,7 +663,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
           throw errValidation(`Application ${appName} did not reach Synced within ${APP_SYNC_TIMEOUT_MS / 60_000} min (last: ${last.sync}/${last.health}) — check the master's ArgoCD (slaves-appset) and the pushed map ${clusterMapPath(domain)}`);
         }
         ctx.checkpoint({ appName });
-        ctx.log("meta", `Application ${appName} is Synced — the ${clusterShortName(domain)} slave-ArgoCD now drives the slave from branch ${domain}`);
+        ctx.log("meta", `Application ${appName} is Synced — the ${name} slave-ArgoCD now drives the slave at ${domain}`);
       },
     },
     // verify-slave: HARD — the instance's ESO-materialized credentials Ready

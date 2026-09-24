@@ -49,27 +49,29 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
       // master itself is never this run's target: the plan refused it (deploy-slave.ts refuseMaster).
       loadMaster(ctx.db);
 
-      // ---- name/domain agreement (the split-brain guard). The run keys the master-side
-      // resources it drives over SSH on server.name (project/AppProject <name>, ES paths
-      // prod/app/<name>/*, verify ns, --slave-remove), while the installer and every GitOps
-      // reader derive that name from the FIRST DNS LABEL of the install branch/domain. If
-      // they disagree, --slave-add registers under one name and the Application looks for the
-      // other — AppProject missing, sync refused, ES never Ready — and the run only dies at
-      // step 5/6 after ~20 min. Fail HERE, before anything is allocated or mutated.
-      const domainName = clusterShortName(domain);
-      if (server.name !== domainName) {
-        throw errValidation(
-          `slave name mismatch: server "${server.name}" vs domain "${domain}" — the domain's first label ("${domainName}") ` +
-          `must equal the server name, because the installer names every per-slave resource after the domain label while ` +
-          `this run keys them on the server name; fix: rename the inventory server to "${domainName}", or deploy to a ` +
-          `domain starting with "${server.name}."`,
-        );
-      }
-
       // ---- cluster-state assertions + the idempotence probe. The cluster row
       // is the resume marker: same domain + same server + planned/provisioning ⇒ resume
       // (a failed run's onTerminal parks the row at `planned`, KEEPING its slaveId).
       const byDomain = ctx.db.select().from(clusters).where(eq(clusters.domain, domain)).get();
+
+      // ---- name agreement (the split-brain guard). The run keys the master-side resources it
+      // drives on server.name (project/AppProject <name>, ES paths prod/app/<name>/*, verify ns,
+      // the remove program), while every GitOps reader takes the name from the cluster map's
+      // clusterName. If they disagree, the plane registers under one name and the Application looks
+      // for the other — AppProject missing, sync refused, ES never Ready — and the run only dies at
+      // step 5/6 after ~20 min. Fail HERE, before anything is allocated or mutated. A cluster's name
+      // is fixed at its adoption, as the first label of the domain it is adopted under; a cluster
+      // that stands already carries its name on its row, whatever domain a rename has moved it to.
+      const clusterName = byDomain?.name ?? clusterShortName(domain);
+      if (server.name !== clusterName) {
+        throw errValidation(
+          byDomain
+            ? `slave name mismatch: server "${server.name}" vs cluster "${byDomain.name}" (${domain}) — the cluster's name must equal the server name, because every per-slave resource is named after it`
+            : `slave name mismatch: server "${server.name}" vs domain "${domain}" — a slave is adopted under a domain whose first label ("${clusterName}") ` +
+              `equals the server name, because every per-slave resource is named after it; fix: rename the inventory server to "${clusterName}", or deploy to a ` +
+              `domain starting with "${server.name}."`,
+        );
+      }
       const byServer = ctx.db.select().from(clusters).where(eq(clusters.serverId, sid)).get();
       if (byServer && byServer.domain !== domain) {
         throw errValidation(`server ${server.name} already carries cluster ${byServer.id} for ${byServer.domain} (one VM = one cluster)`);
@@ -159,7 +161,7 @@ export function attestTargetStep(input: SlaveInstallInput): Step {
           const clusterId = clsId();
           // Conceptually planned→provisioning; inserted directly at provisioning inside the
           // same tx (planeState stays at its 'absent' default until create-mgmt).
-          tx.insert(clusters).values({ id: clusterId, serverId: sid, stage, domain, status: "provisioning", slaveId }).run();
+          tx.insert(clusters).values({ id: clusterId, serverId: sid, stage, domain, name: clusterName, status: "provisioning", slaveId }).run();
           tx.update(servers).set({ status: "provisioning" }).where(eq(servers.id, sid)).run();
           return { clusterId, slaveId, resumed: false };
         });

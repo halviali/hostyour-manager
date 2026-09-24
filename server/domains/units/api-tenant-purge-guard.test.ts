@@ -72,7 +72,7 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
  *  that cluster outright, so the whole suite targets cls_1 = s1. */
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 /** The tenant's inventory rows at whichever lifecycle status the test needs. */

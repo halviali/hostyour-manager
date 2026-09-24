@@ -4,7 +4,7 @@ import { servers } from "../../../db/schema/inventory.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import { localTx } from "../../../executor/stepkit.ts";
 import {
-  clusterShortName, resolveClusterMarking, writeClusterMarking,
+  resolveClusterMarking, writeClusterMarking,
 } from "../../inventory/cluster-marking.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
 import { loadMaster, loadServer, requirePlatformRepo, type DeploySlavePorts, type SlaveTarget } from "./deploy-slave.kit.ts";
@@ -85,12 +85,12 @@ export function declareTailnetAddressStep(target: SlaveTarget, serverId: string,
     name: "declare-tailnet-address",
     title: "Declare the address the coordinator gave this machine",
     run: async (ctx) => {
-      const { domain, stage } = target.resolve(ctx.db);
+      const { domain, stage, name } = target.resolve(ctx.db);
       const server = loadServer(ctx.db, serverId);
-      // The slave's name AT THE COORDINATOR — the first label of its domain, which is what the mint
-      // program files its user under (`user_answer: slave_cluster_name`, derived
-      // `first_dns_label_of`). Filing and reading are one name or neither works.
-      const owner = clusterShortName(domain);
+      // The slave's name AT THE COORDINATOR — the cluster's name, which is what the mint program
+      // files its user under (`user_answer: slave_cluster_name`, answered by this manager from the
+      // row). Filing and reading are one name or neither works.
+      const owner = name;
       const master = loadMaster(ctx.db);
       // ON THE MASTER, because that is where the coordinator runs — this step deliberately never
       // touches the machine being deployed.

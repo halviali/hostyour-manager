@@ -56,10 +56,12 @@
 // be declared below even where nothing here decides anything with it: a key the schema does not
 // know is a key the next write deletes.
 //
-// The cluster SHORT NAME is NOT a field. It is derived from `fqdn` as its first label, by
-// clusterShortName below — the one derivation in this repo. A stored name would be a second writer
-// of the same datum, and the ApplicationSet selector that derives it from the fqdn would then match
-// nothing the moment the two disagreed.
+// THE CLUSTER'S NAME is `global.clusterName`, written ONCE, when the cluster is adopted — as the
+// first label of the domain it is adopted under (clusterShortName below) — and read by every reader
+// after that: this module, the slaves ApplicationSet, the per-slave plane, the Vault mount, the
+// tailnet user and every registration's `cluster`. It is never derived from `fqdn` again, because
+// the FQDN may change: a rename moves the map to its new FQDN and leaves the name, so nothing named
+// after the cluster moves with it. The row's `clusters.name` is the copy, as `domain` is of `fqdn`.
 //
 // Boundary: domain layer — the db schema, shared/ and the git PlatformRepo port only. Deliberately
 // imports NO other domain (inventory is the base domain every other one may read, not the reverse).
@@ -75,10 +77,10 @@ import { RELEASE_TAG_RE } from "../../../shared/release.ts";
 import { CLUSTER_MAP_DIR, clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 
-/** The ONE derivation of a cluster's short name — the first label of its FQDN.
- *  `m1.example.com` -> `m1`. Every reader of a short name in this repo goes through here;
- *  the shell layer's `cluster_name_from_fqdn` and the ApplicationSet generators derive it the same
- *  way, so the three artifact families can never disagree about what a cluster is called. */
+/** The name a cluster is ADOPTED under — the first label of the FQDN it is adopted with.
+ *  `m1.example.com` -> `m1`. Asked once, when the name is chosen: a slave's first deployment and the
+ *  master's own seed. Every reader after that reads the stored name (the map's clusterName, the
+ *  row's `name`), which a rename of the FQDN leaves standing. */
 export function clusterShortName(fqdn: string): string {
   return fqdn.split(".")[0] || fqdn;
 }
@@ -113,6 +115,9 @@ const ClusterMarkingFileSchema = z.object({
   // installation's answers being written down twice in two spellings.
   global: z.object({
     domain: z.string().min(1),
+    // The cluster's name, fixed at its adoption — see the header. Required: every reader of a name
+    // reads it here, and a map without one names no cluster.
+    clusterName: z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "must be a lowercase DNS label"),
     buildPlane: z.string().min(1),
     master: z.string().min(1).optional(),
     apiHost: z.string().min(1).optional(),
@@ -174,7 +179,7 @@ export interface ClusterMarking {
    *  that says how to edit it. NOT identity: sameMarking ignores it. */
   header?: string;
   fqdn: string;
-  /** clusterShortName(fqdn) — derived, never read from the file. */
+  /** The map's global.clusterName — fixed at the cluster's adoption, never derived from fqdn. */
   name: string;
   role: ServerRole;
   stage: Stage;
@@ -247,7 +252,7 @@ function headerOf(text: string): string | undefined {
 /** The keys of `global` this module states itself, and so the ones that must NOT also travel in
  *  globalRest - a key written from both would stand in the file twice. */
 const NAMED_GLOBALS = new Set([
-  "domain", "booksCluster", "buildPlane", "master", "apiHost", "apiPort",
+  "domain", "clusterName", "booksCluster", "buildPlane", "master", "apiHost", "apiPort",
   "unitApex", "platformDomain", "alertRecipients", "catalogUrl",
   "clusterIssuer", "letsencryptEmail", "letsencryptServer", "timeSources",
   "registryPullUser", "registryPushUser",
@@ -275,7 +280,7 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
   return {
     ...(header !== undefined ? { header } : {}),
     fqdn: g.domain,
-    name: clusterShortName(g.domain),
+    name: g.clusterName,
     role: m.role,
     stage: m.stage,
     ...(m.booksCluster !== undefined ? { booksCluster: m.booksCluster } : {}),
@@ -308,12 +313,11 @@ function foldMarking(path: string, raw: unknown, text?: string): ClusterMarking 
   };
 }
 
-/** Read every map under clusters/active and index it BOTH ways — by FQDN and by the derived short
- *  name — so a caller may name a cluster either way.
+/** Read every map under clusters/active and index it BOTH ways — by FQDN and by the cluster's name —
+ *  so a caller may name a cluster either way.
  *
- *  Two clusters whose FQDNs share a first label (`s1.dev.example` and `s1.example`) derive
- *  the SAME short name. Silently keeping the last one read would hand a caller the wrong cluster's
- *  role and stage, so the collision is a typed error naming both files. */
+ *  Two maps carrying the SAME name would hand a caller the wrong cluster's role and stage if the
+ *  last one read silently won, so the collision is a typed error naming both files. */
 async function indexMarkings(repo: PlatformRepo): Promise<{ byFqdn: Map<string, ClusterMarking>; byName: Map<string, ClusterMarking> }> {
   return repo.withBranch(repo.booksBranch, indexMarkingsIn);
 }
@@ -331,7 +335,7 @@ async function indexMarkingsIn(books: BranchScope): Promise<{ byFqdn: Map<string
     const clash = byName.get(marking.name);
     if (clash) {
       throw errValidation(
-        `cluster maps ${clusterMapPath(clash.fqdn)} and ${path} both derive the short name "${marking.name}" — a cluster is addressed by that name (ArgoCD instance, AppProject, Vault mount), so the two would collide; rename one cluster's first FQDN label`,
+        `cluster maps ${clusterMapPath(clash.fqdn)} and ${path} both carry the name "${marking.name}" — a cluster is addressed by that name (ArgoCD instance, AppProject, Vault mount), so the two would collide; a name is fixed at a cluster's adoption, so one of the two files was written by hand`,
       );
     }
     byFqdn.set(marking.fqdn, marking);
@@ -341,7 +345,7 @@ async function indexMarkingsIn(books: BranchScope): Promise<{ byFqdn: Map<string
 }
 
 /** Resolve ONE cluster's marking, named either by its FQDN (`s1.example.com`) or by its
- *  short name (`s1`) — the two spellings of the same identity, joined by clusterShortName.
+ *  name (`s1`) — the two spellings of the same identity, joined by the map's clusterName.
  *  A cluster with no map is a typed error, not a default: role/stage/build plane have no safe
  *  fallback, and every install path writes the map before the cluster is ever reachable. */
 export async function resolveClusterMarking(repo: PlatformRepo, cluster: string): Promise<ClusterMarking> {
@@ -445,6 +449,7 @@ function serializeMarking(m: ClusterMarking): string {
   const asYaml = (yaml: string): { yaml: string } => ({ yaml });
   const globals: [string, string | number | { yaml: string }][] = [
     ["domain", m.fqdn],
+    ["clusterName", m.name],
     ["buildPlane", m.buildPlaneFqdn],
     ...(m.booksCluster !== undefined ? ([["booksCluster", m.booksCluster]] as [string, string][]) : []),
     ...(m.master !== undefined ? ([["master", m.master]] as [string, string][]) : []),
@@ -589,6 +594,44 @@ export async function writeClusterMarking(
   return { changed: true };
 }
 
+/** MOVE ONE CLUSTER'S MAP ONTO ANOTHER FQDN — `cluster-rename`'s act on the books branch. The map
+ *  at `from` goes and the same map at `to` comes in ONE commit, so the slaves ApplicationSet never
+ *  reads the cluster twice nor misses it: it names the slave by the map's clusterName, which the
+ *  move leaves, so the Application it generates is the same one with a new domain. Every other map
+ *  naming `from` as its build plane is rewritten in the same commit, or it would name a cluster
+ *  that stands nowhere.
+ *
+ *  Converges: a map already standing at `to` and none at `from` is a move already made. */
+export async function moveClusterMarking(
+  repo: PlatformRepo,
+  from: string,
+  to: string,
+  runId: string,
+): Promise<{ changed: boolean; name: string }> {
+  return repo.withBranch(repo.booksBranch, async (books) => {
+    const { byFqdn } = await indexMarkingsIn(books);
+    const standing = byFqdn.get(from);
+    const moved = byFqdn.get(to);
+    if (!standing) {
+      if (moved) return { changed: false, name: moved.name };
+      throw errValidation(`no cluster map for ${from} on ${books.branch} — there is nothing to move to ${to}`);
+    }
+    if (moved) throw errValidation(`${clusterMapPath(to)} already stands on ${books.branch} beside ${clusterMapPath(from)} — two maps would name one cluster`);
+    const buildPlaneFqdn = standing.buildPlaneFqdn === from ? to : standing.buildPlaneFqdn;
+    const write = [{ path: clusterMapPath(to), content: serializeMarking({ ...standing, fqdn: to, buildPlaneFqdn, buildPlane: buildPlaneFqdn === to }) }];
+    for (const other of byFqdn.values()) {
+      if (other.fqdn === from || other.buildPlaneFqdn !== from) continue;
+      write.push({ path: clusterMapPath(other.fqdn), content: serializeMarking({ ...other, buildPlaneFqdn: to }) });
+    }
+    await books.commit({
+      message: `deploy(clusters): move ${standing.name} from ${from} to ${to} [${runId}]`,
+      write,
+      remove: [clusterMapPath(from)],
+    });
+    return { changed: true, name: standing.name };
+  });
+}
+
 /** TAKE THE MAP AWAY — the cluster itself is gone. `cluster-remove-slave`'s last act on the books
  *  branch, after the slave part has been dropped and the master has torn the management plane down.
  *
@@ -607,7 +650,7 @@ export async function removeClusterMarking(
   if (!byFqdn.has(fqdn)) return { changed: false };
   await repo.withBranch(repo.booksBranch, (books) =>
     books.commit({
-      message: `revert(clusters): remove ${clusterShortName(fqdn)}'s map — the cluster is gone [${runId}]`,
+      message: `revert(clusters): remove the map of ${fqdn} — the cluster is gone [${runId}]`,
       remove: [clusterMapPath(fqdn)],
     }),
   );

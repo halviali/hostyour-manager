@@ -35,7 +35,7 @@ const stepOf = (h: Harness, name: string, serverId = SLAVE_ID): Step => {
 function seedLiveSlave(h: Harness): void {
   seedMasterCluster(h);
   h.db.db.insert(clusters).values({
-    id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
+    id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "active", slaveId: 1,
     planeState: "ready", planeJson: { v: 0, branch: PARAMS.domain },
   }).run();
   h.db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
@@ -44,7 +44,7 @@ function seedLiveSlave(h: Harness): void {
 describe("cluster-remove-slave", () => {
   afterEach(disposeHarnesses);
 
-  it("is seven steps opening with attest-target, in the order that keeps each route open for the next", () => {
+  it("is eight steps opening with attest-target, in the order that keeps each route open for the next", () => {
     // assertGuardsArmed refuses to boot a mutating definition whose step 0 is called anything else,
     // and Executor.skipStep refuses to wave exactly that name through. A rename here is silent
     // everywhere except this assertion and that boot check.
@@ -52,10 +52,11 @@ describe("cluster-remove-slave", () => {
     // THE THREE MACHINE-SIDE NAMES ARE THE ABORT'S OWN, and in the abort's order: the master-side
     // removal while the coordinator still knows the node, then the machine stripped, then the
     // password door back on, then the key line off LAST because it is the route the two before it
-    // travel. The map and the rows follow what has already happened.
+    // travel. The map and the rows follow what has already happened. The catalogue on the master is
+    // brought forward before the removal, which is read out of it and asks the slave's name.
     expect(removeSlaveSteps(SLAVE_ID, { }).map((s) => s.name))
       .toEqual([
-        "attest-target", "remove-slave",
+        "attest-target", "place-ansiwise-master", "remove-slave",
         "leave-host", "restore-password-login", "remove-manager-key",
         "drop-cluster-map", "retire-rows",
       ]);

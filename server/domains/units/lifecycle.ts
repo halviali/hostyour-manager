@@ -39,6 +39,8 @@ export interface AppCluster {
   /** The public host label the row attests — what the unit's address is composed from, never the name. */
   host: string;
   domain: string;
+  /** The cluster's name, fixed at its adoption (cluster-marking.ts header). */
+  clusterName: string;
   stage: Stage;
   clusterId: string;
 }
@@ -50,7 +52,7 @@ export function loadAppCluster(db: Db, appId: string): AppCluster {
   if (!app) throw errNotFound(`app ${appId}`);
   const cluster = db.select().from(clusters).where(eq(clusters.id, app.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${app.clusterId} for app ${appId}`);
-  return { name: app.name, host: app.host, domain: cluster.domain, stage: app.stage, clusterId: cluster.id };
+  return { name: app.name, host: app.host, domain: cluster.domain, clusterName: cluster.name, stage: app.stage, clusterId: cluster.id };
 }
 
 /** Fail-closed deploy-state gate, shared by every consumer AND tenant attest-target step: the target

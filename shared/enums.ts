@@ -378,7 +378,11 @@ export const RUN_KIND = [
   // the master's whole per-slave management plane, then the cluster's map, then the rows. Every one
   // of its acts is on the MASTER and none on the slave, because a slave being removed is very often
   // a machine that no longer answers at all.
-  "cluster-deploy-slave", "cluster-redeploy", "cluster-remove-slave",
+  // `cluster-rename` moves a live slave onto another FQDN — its map, its rows and the unit records
+  // that point at it — and then reconciles the machine under the new FQDN the way a redeploy does.
+  // The cluster's NAME stays (cluster-marking.ts), so nothing named after the slave moves and
+  // nothing ArgoCD generates for it is replaced.
+  "cluster-deploy-slave", "cluster-redeploy", "cluster-remove-slave", "cluster-rename",
   // The tailnet run kinds, on a host that is already deployed. Three repairs and a reading, not one
   // with a switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it
   // there, `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
@@ -475,7 +479,7 @@ export type RunKind = (typeof RUN_KIND)[number];
 export const RUN_FAMILY = {
   fixture: ["noop"],
   cluster: [
-    "cluster-deploy-slave", "cluster-redeploy", "cluster-remove-slave",
+    "cluster-deploy-slave", "cluster-redeploy", "cluster-remove-slave", "cluster-rename",
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin", "cluster-tailnet-read",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",

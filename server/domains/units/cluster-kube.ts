@@ -158,7 +158,7 @@ export function makeClusterKubeResolver(deps: ClusterKubeDeps): ClusterKubeResol
       // namespace moves to the slave cluster's short name (the per-slave ArgoCD instance on the master).
       // The slave's kube-apiserver URL + CA bundle come straight from the plane (plane.kube, sealed at
       // the deployment) — no derivation from lan, no cross-namespace read of the master's cluster-slave Secret.
-      const plane = readSlavePlane(cluster.planeJson, clusterShortName(cluster.domain));
+      const plane = readSlavePlane(cluster.planeJson, cluster.name);
       const bearer = await deps.openCredential(plane.clusterBearerId);
       let clusterReader: ClusterReader;
       try {

@@ -1,25 +1,19 @@
 import type { OwnersListView, OwnerCredentialInput } from "../../shared/api-types-owners.ts";
 import type { UnitCheck } from "../../shared/preflight.ts";
-import type {
-  ClustersView, ReleasesView, RunView, ServerView, HealthView,
-  BranchesView, BranchDiffView, ResetRequest, ResetResult, ApiErrorCode,
-  // The tenant-purge targeting surface + the two reads that name one. Declared
+import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, BranchesView, BranchDiffView, ResetRequest, ResetResult, ApiErrorCode, // The tenant-purge targeting surface + the two reads that name one. Declared
   // ONCE in shared/api-types.ts and returned by the server domain module itself (tenant-orphans.ts), so
   // the shapes this client resolves to are the shapes that module answers in — there is no browser-side
   // twin of them left to fall behind a server change, which is exactly how a `not-deployed` state the
   // callout had never heard of once unmounted the whole Run screen.
-  TenantPurgeInput, OrphanScanView, RunTenantStateView,
-  // The two live-reconciliation payloads. Same rule, same reason: the server
+  TenantPurgeInput, OrphanScanView, RunTenantStateView, // The two live-reconciliation payloads. Same rule, same reason: the server
   // answers in these exact shapes and this client resolves to them, so the `argo` union the cards
   // narrow on `.ok` is the server's OWN union — a member added there stops THIS build, instead of
   // reaching a ternary chain that has never heard of it.
-  ConsumerLiveView, TenantLiveView,
-  // The DETECTED-consumer surface: the scan result the Detected tab renders and
+  ConsumerLiveView, TenantLiveView, // The DETECTED-consumer surface: the scan result the Detected tab renders and
   // the row-less live probe its rows are verified with. One declaration, both ends — as above.
-  DetectedScanView, ConsumerLiveProbeView,
-  // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
-  OperatorKeyView,
-} from "../../shared/api-types.ts";
+  DetectedScanView, ConsumerLiveProbeView, // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
+  OperatorKeyView } from "../../shared/api-types.ts";
+import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
 import type { ChannelStagesView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
@@ -190,6 +184,12 @@ export async function removeDnsRecords(
  *  act runs on the MASTER and the slave is not reached at all, which is what makes it the run kind
  *  for a machine that has stopped answering. */
 export const removeSlave = (serverId: string): Promise<{ runId: string }> => planRun("cluster-remove-slave", { serverId });
+/** Move a live slave onto another FQDN and adopt it there (cluster-rename). The FQDN it stands at now
+ *  goes with the ask, so a page that is out of date is refused rather than acted on. */
+export const renameSlave = (serverId: string, fromFqdn: string, newFqdn: string): Promise<{ runId: string }> =>
+  planRun("cluster-rename", { serverId, fromFqdn, newFqdn });
+/** Whether this manager reaches the machine now, at the SSH port of the host its row names. */
+export const readServerReach = (serverId: string): Promise<ServerReachView> => req(`/api/servers/${encodeURIComponent(serverId)}/reach`);
 
 // The three tailnet repair run kinds and the reading beside them. Each takes ONLY the server: the
 // address they reach it on is the public one and the plan states it, and a rejoin reads the FQDN and

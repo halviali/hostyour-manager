@@ -63,7 +63,7 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 // inventory rows on both).
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 // The slave a tenant lands on. Its server row is deliberately named "s1" while its cluster domain
@@ -72,7 +72,7 @@ function seedCluster(): void {
 // The machine name is a machine name and takes no part in it.
 function seedSlaveCluster(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
 }
 
 /** A cluster-marking resolver that answers every cluster short name at "prod" — every fixture in this

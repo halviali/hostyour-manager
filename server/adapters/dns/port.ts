@@ -44,6 +44,17 @@ export interface DnsProvider {
   listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]>;
 }
 
+/** A name no zone of this provider's token covers: the token is scoped elsewhere, or the domain is
+ *  not on the provider. Its own type because a caller may be asked to act only where this
+ *  installation manages the zone — a record in a zone nobody here manages is nobody's here to
+ *  write or remove — and that caller tells this apart from a failure by type, never by text. */
+export class DnsZoneUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DnsZoneUnknownError";
+  }
+}
+
 /** Any DNS API failure — a transport error, a non-2xx, or a body whose `success` flag is false.
  *  Carries the provider's own error text verbatim (never a generic mask): the run step surfaces it,
  *  and an API failure breaks the run: a record that may or may not exist is exactly the leftover

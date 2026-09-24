@@ -28,7 +28,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
   it("mark-slave composes the slave's map FROM the master's and writes it onto the books branch — one address for the map and the handshake", async () => {
     const h = await makeHarness({ marking: false }); // a fresh deploy: no slave map yet
     h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     const armed: Cleanup[] = [];
     const checkpoints: unknown[] = [];
@@ -40,7 +40,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     // every installation-wide value is the MASTER's, never asked a second time.
     for (const want of [
       // The identity is `global.domain`; the file is named for the cluster, so no `fqdn` key.
-      "stage: prod", "role: slave", "  domain: s1.example.com", "  master: m1.example.com",
+      "stage: prod", "role: slave", "  domain: s1.example.com", "  clusterName: s1", "  master: m1.example.com",
       // booksCluster is the slaves ApplicationSet's SELECTOR key, and a selector matches FLAT
       // top-level keys only — so it stands at the top, where a map without it is invisible to
       // the generator.
@@ -68,7 +68,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     // asking for the address of the secret store, measured on a real machine.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
-      id: "cls_s2", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s2", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
 
@@ -104,7 +104,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     // map is what says what a cluster runs, and this said it ran a store it does not.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
-      id: "cls_s4", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s4", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
 
@@ -128,7 +128,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     // wherever it is next read from.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
-      id: "cls_s5", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s5", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
 
@@ -144,7 +144,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     // worse than a run that stops here saying why.
     const h = await makeHarness({ marking: false, hosts: scriptedHosts({ hostAddressesOut: "" }) });
     h.db.db.insert(clusters).values({
-      id: "cls_s6", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s6", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
 
     await expect(stepOf(h, "mark-slave").run(hostedStepCtx(h))).rejects.toThrow(/lists no address of its own/);
@@ -157,7 +157,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     // own map out of the tree beside it without a second copy being written anywhere.
     const h = await makeHarness({ marking: false });
     h.db.db.insert(clusters).values({
-      id: "cls_s3", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s3", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
 
@@ -170,12 +170,12 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
     const h = await makeHarness({
       marking: [
         "stage: prod", "role: slave", "release: 1.0.0-stable-20260801120000",
-        "", "global:", "  domain: s1.example.com", "  buildPlane: m1.example.com",
+        "", "global:", "  domain: s1.example.com", "  clusterName: s1", "  buildPlane: m1.example.com",
         "  master: m1.example.com", "  apiHost: 100.64.0.11", "  apiPort: 16443",
       ].join("\n") + "\n",
     });
     h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     await stepOf(h, "mark-slave").run(hostedStepCtx(h));
     const map = h.platformRepo.read(h.platformRepo.booksBranch, clusterMapPath(PARAMS.domain)) ?? "";
@@ -186,7 +186,7 @@ describe("a slave's cluster map, as mark-slave composes it", () => {
   it("mark-slave in REDEPLOY mode arms NO cleanup — dropping the map part of a live slave cascades its teardown", async () => {
     const h = await makeHarness();
     h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "active", slaveId: 1,
     }).run();
     const steps = deploySlaveSteps(
       { target: statedTarget(SLAVE_ID, PARAMS.domain, "prod"), mode: "redeploy" },

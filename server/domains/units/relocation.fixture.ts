@@ -48,9 +48,9 @@ export function openFixtureDb(): DbHandle {
 /** Both prod clusters, source + target. */
 export function seedClusters(db: DbHandle): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: SOURCE.clusterId, serverId: "srv_1", stage: "prod", domain: SOURCE.domain, status: "active" }).run();
+  db.db.insert(clusters).values({ id: SOURCE.clusterId, serverId: "srv_1", stage: "prod", domain: SOURCE.domain, name: (SOURCE.domain).split(".")[0]!, status: "active" }).run();
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: TARGET.clusterId, serverId: "srv_2", stage: "prod", domain: TARGET.domain, status: "active" }).run();
+  db.db.insert(clusters).values({ id: TARGET.clusterId, serverId: "srv_2", stage: "prod", domain: TARGET.domain, name: (TARGET.domain).split(".")[0]!, status: "active" }).run();
 }
 
 export function seedConsumerRow(db: DbHandle, status: AppStatus = "active"): void {

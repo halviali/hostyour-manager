@@ -56,14 +56,14 @@ async function seedTwoStages(reg: Registrations): Promise<void> {
 /** prod: the master cluster s1.example + acme's row there (app_1) — the offboard under test. */
 function seedProdApp(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 }
 
 /** dev: its OWN server, cluster and row (app_2) on s2. The row the "last stage" offboard is driven from. */
 function seedDevApp(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "dev", domain: "s2.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "dev", domain: "s2.example", name: "s2", status: "active" }).run();
   db.db.insert(apps).values({ id: "app_2", clusterId: "cls_2", name: "acme", stage: "dev", host: "acme", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 }
 

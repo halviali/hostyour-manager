@@ -139,7 +139,7 @@ function makeExecutor(ports: OnboardPorts): { executor: Executor; store: Credent
 
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 // What the API handler hands the executor AFTER sealing the operator's raw PAT: the request minus

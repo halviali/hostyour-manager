@@ -31,7 +31,7 @@ const SLAVE_HOST = "10.1.1.11";
 async function world(): Promise<Harness> {
   const h = await makeHarness();
   h.db.db.insert(clusters).values({
-    id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+    id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
   }).run();
   seedMasterCluster(h);
   return h;

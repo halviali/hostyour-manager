@@ -53,7 +53,7 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 // The master self-cluster cls_1 — the consumer row and the master-FQDN lookup both resolve off it.
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 /** The onboarded consumer `acme` on cls_1. The status is a parameter because it decides which

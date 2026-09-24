@@ -87,7 +87,7 @@ function ctx(runId: string, stepName: string, params: Record<string, unknown>, l
 // and the watch-set filter is keyed on it — so a test has to be able to set the two independently.
 function seedTenant(opts: { status?: TenantStatus; appStatus?: TenantStatus; suspended?: boolean; apps?: string[] } = {}): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   db.db.insert(tenants).values({
     id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "simetrix", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth",
     suspended: opts.suspended ?? false, status: opts.status ?? "active",

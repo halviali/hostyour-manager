@@ -201,7 +201,7 @@ function planCtx(): PlanStreamCtx {
 
 function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 /** Insert an inventory row for the old tenant (the INVENTORIED replace case). */
@@ -265,7 +265,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     // standing at s2's address — with the old tenant already gone. So the plan refuses first.
     seedClusters();
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_2", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration({ cluster: "s2" }), runId: "run_old" });

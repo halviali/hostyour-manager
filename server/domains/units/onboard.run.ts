@@ -38,7 +38,7 @@ import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader, ClusterRe
 import { AppError, errNotFound } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
-import { clusterShortName, type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
+import { type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
 import { assertChannelReaches, type ChannelStages } from "../inventory/channel-stages.ts";
 import { resolveMasterCluster } from "./tenant-values.ts";
 import { consumerUnitHost, standingHostFrom } from "./unit-dns.ts";
@@ -498,7 +498,7 @@ export function resolveTarget(db: Db, req: { clusterId: string; consumerName: st
   return {
     target: { domain: cluster.domain, stage: req.stage, chartPath: req.chartPath },
     clusterId: cluster.id,
-    cluster: clusterShortName(cluster.domain),
+    cluster: cluster.name,
     // The identity law: manifest name == chart name == repo name == unit, and the namespace is the
     // unit at its stage. The generated Application carries the same name (consumerArgoAppName).
     namespace: consumerNamespace(req.consumerName, req.stage),

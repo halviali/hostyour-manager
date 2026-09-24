@@ -40,7 +40,7 @@ let db: DbHandle;
 beforeEach(() => {
   db = openDb(":memory:");
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   // The owner of the repository records a repository PAT — a consumer is a foreign repository, and
   // its identity is its owner's (#226).
   seedCredentialRow(db.db, { id: "cred_pat_ahkutun", kind: "pat", label: "repository PAT (ahkutun)", subject: { kind: "owner", id: "ahkutun" }, purpose: "repository-pat" });

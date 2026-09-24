@@ -94,7 +94,7 @@ async function readStageRegistration(ports: AdoptConsumerPorts, t: AdoptTarget):
 function loadAdoptTarget(db: Db, p: AdoptConsumerParams): AdoptTarget {
   const cluster = db.select().from(clusters).where(eq(clusters.id, p.clusterId)).get();
   if (!cluster) throw errNotFound(`cluster ${p.clusterId}`);
-  return { name: p.consumerName, domain: cluster.domain, stage: p.stage, clusterId: cluster.id };
+  return { name: p.consumerName, domain: cluster.domain, clusterName: cluster.name, stage: p.stage, clusterId: cluster.id };
 }
 
 /** The UNSETTLED apps row of this (name, stage), on any cluster, or undefined. Present ⇒ the

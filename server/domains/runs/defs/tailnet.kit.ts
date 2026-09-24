@@ -9,7 +9,6 @@ import { resolveTransport, VIA_LABEL } from "../../../executor/transport.ts";
 import { isMasterRole, type RunKind, type ServerTailnetState } from "../../../../shared/enums.ts";
 import { registerSecret } from "../../../security/redact.ts";
 import { recordTailnetReading } from "../tailnet-probe.ts";
-import { clusterShortName } from "../../inventory/cluster-marking.ts";
 import { dropCoordinatorNodes } from "./tailnet.coordinator.ts";
 import { placeAnsiwiseOnMasterStep, placeAnsiwiseStep } from "./place-ansiwise.step.ts";
 import { clusterMapPath } from "../../../../shared/cluster-values.ts";
@@ -148,11 +147,11 @@ async function readLoginServer(ports: TailnetPorts, domain: string): Promise<str
 }
 
 /** WHERE tailnet-mint-join-key leaves the credential on the master — the program's own key_file
- *  contract: /tmp/ansiwise-tailnet-join-key-<slave short name>, mode 0600, owned by the account
- *  the surface runs as. The name is the slave's first DNS label, the one derivation the whole
- *  platform files a slave under (clusterShortName). */
-function mintedKeyPath(domain: string): string {
-  return `/tmp/ansiwise-tailnet-join-key-${clusterShortName(domain)}`;
+ *  contract: /tmp/ansiwise-tailnet-join-key-<slave cluster name>, mode 0600, owned by the account
+ *  the surface runs as. The name is the cluster's own, fixed at its adoption, which this manager
+ *  answers the program with (slave_cluster_name). */
+function mintedKeyPath(name: string): string {
+  return `/tmp/ansiwise-tailnet-join-key-${name}`;
 }
 
 /** Read the minted credential off the master and remove the file. stdout carries ONLY the key and
@@ -160,8 +159,8 @@ function mintedKeyPath(domain: string): string {
  *  private network. Every captured byte is registered with the redactor BEFORE anything can throw
  *  (mintTailnetJoinKey's idiom, deploy-slave.kit.ts). The removal is best-effort: a leftover file
  *  holds a spent or replaced key at worst, and the next mint run rewrites it. */
-async function readMintedKey(ctx: StepCtx, session: SshSession, domain: string, signal: AbortSignal): Promise<string> {
-  const path = mintedKeyPath(domain);
+async function readMintedKey(ctx: StepCtx, session: SshSession, name: string, signal: AbortSignal): Promise<string> {
+  const path = mintedKeyPath(name);
   const lines: string[] = [];
   const read = await session.exec(`cat ${path}`, {
     signal,
@@ -218,7 +217,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
     name: "rejoin",
     title: "Mint on the master, then log the host out and join it again (one program run)",
     run: async (ctx) => {
-      const { domain, stage } = target.resolve(ctx.db);
+      const { domain, stage, name } = target.resolve(ctx.db);
       const password = requireElevationPassword(ctx);
       const cp = ctx.readCheckpoint<ProgramCheckpoint>() ?? { program: REJOIN_PROGRAM };
       const save = (): void => ctx.checkpoint(cp);
@@ -254,7 +253,7 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
           //
           // The coordinator's USER for this machine stays, with its keys: the mint is idempotent
           // against a standing credential, and destroying the user would mint a fresh one every run.
-          await dropCoordinatorNodes(ctx, mSession, stage, clusterShortName(domain));
+          await dropCoordinatorNodes(ctx, mSession, stage, name);
           const mint = await openServeConversation(ctx, mSession, ports, signal, masterMachine(ctx.db, master));
           try {
             const mintCp: ProgramCheckpoint = { program: MINT_PROGRAM };
@@ -274,11 +273,11 @@ export function rejoinStep(target: SlaveTarget, serverId: string, ports: Tailnet
                 "was not touched; read the master's run record, then retry the step (the mint is create-only, so asking again is safe)",
               );
             }
-            ctx.log("meta", `${MINT_PROGRAM}: dry ${proof.id} proved the coordinator answers, run ${minted.id} minted — the credential stands in ${mintedKeyPath(domain)} on the master`);
+            ctx.log("meta", `${MINT_PROGRAM}: dry ${proof.id} proved the coordinator answers, run ${minted.id} minted — the credential stands in ${mintedKeyPath(name)} on the master`);
           } finally {
             mint.close();
           }
-          fresh["auth_key"] = await readMintedKey(ctx, mSession, domain, signal);
+          fresh["auth_key"] = await readMintedKey(ctx, mSession, name, signal);
           fresh["login_server"] = loginServer;
         }
         const session = await ctx.ssh();

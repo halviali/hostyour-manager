@@ -12,7 +12,6 @@ import { consumerArgoAppName, consumerNamespace, ConsumerRegistrationSchema, typ
 import { localTx } from "../../executor/stepkit.ts";
 import { unitRepoCredentialId } from "./repo-identity.ts";
 import { readOwnerIdentity } from "./owners.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { serializePointer, parseRegistration } from "./registration-laws.ts";
 import type { Registrations } from "./registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
@@ -82,7 +81,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       stage: ac.stage,
       sourceClusterId: ac.clusterId,
       sourceDomain: ac.domain,
-      sourceCluster: clusterShortName(ac.domain),
+      sourceCluster: ac.clusterName,
       publicHost: consumerUnitHost(ac.host, ac.stage, await unitApex()),
       namespaces: [namespace],
       homeNamespace: namespace,

@@ -83,7 +83,7 @@ describe("onboard scope — a second stage beside a live one", () => {
     const dns = new FakeDnsProvider();
     dns.seed("acme.example.com", "CNAME", "s2.example"); // the same stage on the other cluster, under the shared apex
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "203.0.113.20", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active", slaveId: 2 }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active", slaveId: 2 }).run();
     const step = provisionDnsStep({ dns } as unknown as OnboardPorts, params() as DeployableOnboardParams);
     await expect(step.run(ctx("provision-dns", []))).rejects.toThrow(/already points at s2\.example, a cluster of this installation/);
     expect(dns.record("acme.example.com", "CNAME")).toBe("s2.example"); // untouched

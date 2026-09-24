@@ -156,14 +156,14 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 // cluster of these tests, so the consumer/tenant rows below all live on it.
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 // A slave-hosted cluster next to the master self-cluster — the target-picker tests seed both to
 // prove both pickers offer the clusters whose server carries the slave part, and not the pure master.
 function seedSlaveCluster(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
 }
 
 const RAW_PAT = "github_pat_raw_secret_value";

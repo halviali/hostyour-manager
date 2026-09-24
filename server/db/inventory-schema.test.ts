@@ -31,7 +31,7 @@ describe("inventory tenants + tenant_apps", () => {
 
   function seedCluster(db: DbHandle): void {
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   }
 
   it("inserts a tenant + a tenant_app row and reads them back (booleans, defaults, ULID ids)", () => {
@@ -77,7 +77,7 @@ describe("inventory tenants + tenant_apps", () => {
     const db = fresh();
     seedCluster(db);
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     const base = { clusterId: "cls_1", guid: "e2e8ymj86dk8", subdomain: "acme", stage: "prod" as const, members: ["auth", "jobs", "report"], identityProvider: "auth" };
     const first = tenantId();
     db.db.insert(tenants).values({ id: first, ...base }).run();
@@ -125,7 +125,7 @@ describe("apps.stage", () => {
 
   function seedCluster(db: DbHandle): void {
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   }
 
   const insert = (db: DbHandle, id: string, stage: string | null): void => {
@@ -143,7 +143,7 @@ describe("apps.stage", () => {
     const db = fresh();
     seedCluster(db);
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     insert(db, "app_1", "prod");
     expect(() => insert(db, "app_2", "prod")).toThrow(/UNIQUE/i);
     // The same (name, stage) on ANOTHER cluster is the same unit twice — refused.

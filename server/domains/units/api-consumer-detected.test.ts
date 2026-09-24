@@ -34,7 +34,7 @@ let db: DbHandle;
 beforeEach(() => {
   db = openDb(":memory:");
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 });
 afterEach(() => db.sqlite.close());
 
@@ -93,7 +93,7 @@ describe("GET /api/consumers/detected — the two halves composed", () => {
     // slave being unreachable must not empty the answer for the cluster that was read fine, and must
     // not vanish either.
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.6", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     const registrations = new Registrations(new FakePlatformRepo());
     const resolver = resolverHolding(["ghost"]);
     resolver.set("cls_2", {

@@ -17,7 +17,6 @@ import { clusters, servers } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
 
 /** The cluster SHORT NAME of ONE cluster row — the FORWARD direction of resolveClusterIdByName
  *  below. The teardown resolver (tenant-replace.ts) needs it whenever a tenant's target must be
@@ -27,21 +26,18 @@ import { clusterShortName } from "../inventory/cluster-marking.ts";
  *  null when no such cluster row exists — a caller that requires the name says so itself rather than
  *  substituting an id. */
 export function resolveClusterNameById(db: Db, clusterId: string): string | null {
-  const row = db.select({ domain: clusters.domain }).from(clusters).where(eq(clusters.id, clusterId)).get();
-  return row ? clusterShortName(row.domain) : null;
+  const row = db.select({ name: clusters.name }).from(clusters).where(eq(clusters.id, clusterId)).get();
+  return row ? row.name : null;
 }
 
-/** The inverse, for the create-tenant replace lookup: find the cluster row whose short name matches
+/** The inverse, for the create-tenant replace lookup: find the cluster row whose name matches
  *  `cluster`, returning its id + domain. Resolves an ORPHAN tenant's target cluster from its
  *  pointer's `cluster` field alone (no tenants row to read a clusterId from). null when no such
  *  cluster is registered. The cluster's stage is not asked: a registration at any stage names any
  *  active cluster, and the short name is unique across an installation (cluster-marking.ts). */
 export function resolveClusterIdByName(db: Db, cluster: string): { clusterId: string; domain: string } | null {
-  const rows = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).all();
-  for (const r of rows) {
-    if (clusterShortName(r.domain) === cluster) return { clusterId: r.id, domain: r.domain };
-  }
-  return null;
+  const row = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).where(eq(clusters.name, cluster)).get();
+  return row ? { clusterId: row.id, domain: row.domain } : null;
 }
 
 /** The cluster a tenant is created on, from its row: the domain (never trusted from wizard input),
@@ -55,7 +51,7 @@ export function resolveClusterIdByName(db: Db, cluster: string): { clusterId: st
  *  would log into a role that does not exist. */
 export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): ResolvedTenantCluster {
   const row = db
-    .select({ id: clusters.id, domain: clusters.domain, status: clusters.status, stage: clusters.stage })
+    .select({ id: clusters.id, domain: clusters.domain, name: clusters.name, status: clusters.status, stage: clusters.stage })
     .from(clusters)
     .where(eq(clusters.id, clusterId))
     .get();
@@ -68,7 +64,7 @@ export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): R
       `entry would be refused with a 403 and its SecretStore would name a role that does not exist; create it at ${row.stage}`,
     );
   }
-  return { clusterId: row.id, domain: row.domain, cluster: clusterShortName(row.domain), stage: row.stage };
+  return { clusterId: row.id, domain: row.domain, cluster: row.name, stage: row.stage };
 }
 
 export interface ResolvedTenantCluster {

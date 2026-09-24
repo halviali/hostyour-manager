@@ -215,7 +215,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   it("attest-target refuses a LIVE cluster and names the run kind that does this job", async () => {
     const { db, executor } = await makeHarness({ keystore: "keyfile" });
     db.db.insert(clusters).values({
-      id: "cls_live", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "active", slaveId: 1,
+      id: "cls_live", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "active", slaveId: 1,
     }).run();
     db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
     const { runId } = await executor.plan("cluster-deploy-slave", PARAMS);
@@ -328,7 +328,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     // same manager.
     const { db, executor } = await makeHarness();
     db.db.insert(servers).values({ id: "srv_other", name: "s2", host: "s2.example.com", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", status: "active", slaveId: 7 }).run();
+    db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", name: "s2", status: "active", slaveId: 7 }).run();
     db.sqlite.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES (?,?,?,?,?,?,?,?)")
       .run("cred_other", "kubeconfig", "s2 cluster bearer (argocd-manager)", "server", "srv_other", "cluster-bearer", "plain:v0:t", "sha256:t");
 
@@ -343,7 +343,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
   async function verifyWorld(hostsOver: Parameters<typeof scriptedHosts>[0] = {}): Promise<Harness> {
     const h = await makeHarness({ hosts: scriptedHosts(hostsOver) });
     h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
     }).run();
     // The master's own cluster row: the two master-side gates resolve their kube access through it.
     seedMasterCluster(h);
@@ -443,7 +443,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db, store } = await makeHarness();
     // The world create-mgmt leaves behind: the row with the kube facts, the two sealed creds.
     db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
       planeJson: { kube: { server: "https://100.64.0.11:16443", caData: "TFMtQ0EtREFUQQ==" } },
     }).run();
     const ctx = bareStepCtx(db, store);

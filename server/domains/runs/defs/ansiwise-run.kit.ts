@@ -410,12 +410,16 @@ export async function composeAnswers(
 ): Promise<Record<string, string | string[]>> {
   const server = loadServer(ctx.db, target.serverId);
   const extraAnswers = extra ? await extra(ctx) : {};
-  let cluster: { domain: string; stage: Stage } | undefined;
-  const resolved = (): { domain: string; stage: Stage } => (cluster ??= target.resolve(ctx.db));
+  let cluster: { domain: string; stage: Stage; name: string } | undefined;
+  const resolved = (): { domain: string; stage: Stage; name: string } => (cluster ??= target.resolve(ctx.db));
   const inventory = (name: string): string | undefined => {
     switch (name) {
       case "fqdn": return resolved().domain;
       case "stage": return resolved().stage;
+      // THE SLAVE'S NAME, as its row states it: fixed at its adoption and left by a rename of its
+      // domain, so the programs that name the slave's resources are told it and never work it out
+      // of the FQDN (cluster-marking.ts header).
+      case "slave_cluster_name": return resolved().name;
       // The row's role, as the catalogue's programs allow it on their role answers.
       case "role": return server.role;
       case "operator_user": return server.sshUser;

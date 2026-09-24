@@ -28,7 +28,7 @@ const TARGET = statedTarget(SLAVE_ID, PARAMS.domain, FIXTURE_STAGE);
 async function world(opts: { withoutCarriedValues?: boolean } = {}): Promise<Harness> {
   const h = await makeHarness(opts);
   h.db.db.insert(clusters).values({
-    id: "cls_pull", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, status: "provisioning", slaveId: 1,
+    id: "cls_pull", serverId: SLAVE_ID, stage: "prod", domain: PARAMS.domain, name: (PARAMS.domain).split(".")[0]!, status: "provisioning", slaveId: 1,
   }).run();
   return h;
 }

@@ -81,7 +81,7 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
       role: "master", status: "healthy",
     }).run();
     db.db.insert(clusters).values({
-      id: "cls_1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1,
+      id: "cls_1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", name: "s1", status: "active", slaveId: 1,
     }).run();
     return db;
   }
@@ -162,7 +162,7 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
     const db = setup();
     // The rejoin's live-cluster guard resolves against the master's own cluster row.
     db.db.insert(clusters).values({
-      id: "cls_m", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com", status: "active",
+      id: "cls_m", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com", name: "m1", status: "active",
     }).run();
     const plan = await DEFS["cluster-tailnet-rejoin"].plan({ serverId: MASTER_ID }, { db: db.db });
     expect(plan.steps.map((s) => s.name)).toEqual([ATTEST_TARGET_STEP, "place-ansiwise", "place-ansiwise-master", "rejoin", "read-membership"]);

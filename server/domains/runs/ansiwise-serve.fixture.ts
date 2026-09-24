@@ -248,7 +248,7 @@ export async function liveMaster(serve: ServeFixture, overrides: Partial<HostsSc
   });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   h.db.db.insert(clusters).values({
-    id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com",
+    id: "cls_master", serverId: MASTER_ID, stage: "prod", domain: "m1.example.com", name: "m1",
     status: "active", planeState: "ready",
   }).run();
   return h;
@@ -268,7 +268,7 @@ export async function tailnetHost(serve: ServeFixture, opts: { cluster?: boolean
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   if (opts.cluster ?? true) {
     h.db.db.insert(clusters).values({
-      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: SLAVE_FQDN, status: "active", slaveId: 1,
+      id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: SLAVE_FQDN, name: (SLAVE_FQDN).split(".")[0]!, status: "active", slaveId: 1,
     }).run();
     if (opts.tailnetUrl !== undefined) {
       const stated = `    tailnet:\n      url: ${MAP_TAILNET_URL}\n`;
@@ -336,7 +336,7 @@ export async function liveSlaveWorld(serve: ServeFixture, overrides: Partial<Hos
   });
   const h = await makeHarness({ hosts, keystore: "keyfile", ansiwiseServeCommand: "ansiwise-rest serve" });
   h.db.db.insert(clusters).values({
-    id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", status: "active", slaveId: 1, planeState: "ready",
+    id: "cls_s1", serverId: SLAVE_ID, stage: "prod", domain: "s1.example.com", name: "s1", status: "active", slaveId: 1, planeState: "ready",
   }).run();
   h.db.db.update(servers).set({ status: "healthy" }).where(eq(servers.id, SLAVE_ID)).run();
   seedMasterCluster(h);

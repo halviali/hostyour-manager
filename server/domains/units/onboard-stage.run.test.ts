@@ -23,7 +23,7 @@ afterEach(() => { db.sqlite.close(); });
 /** ONE cluster, marked prod. Every test here onboards onto it. */
 function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 const request = (over: Record<string, unknown>): Record<string, unknown> => ({

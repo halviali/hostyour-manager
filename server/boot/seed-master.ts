@@ -156,7 +156,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
     const cid = clsId();
     try {
       db.insert(clusters)
-        .values({ id: cid, serverId: master.id, stage: m.stage, domain: m.fqdn, status: "active", slaveId: null })
+        .values({ id: cid, serverId: master.id, stage: m.stage, domain: m.fqdn, name: clusterShortName(m.fqdn), status: "active", slaveId: null })
         .run();
       // Audit + log ONLY on a real insert (inside the try) so a clash below never writes a false
       // "seeded" record.
@@ -176,10 +176,11 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
         throw err;
       }
     }
-  } else if (cluster.stage !== m.stage || cluster.domain !== m.fqdn) {
+  } else if (cluster.stage !== m.stage || cluster.domain !== m.fqdn || cluster.name !== clusterShortName(m.fqdn)) {
     // Reconcile config drift onto the existing self-cluster row (stage/domain can change across
-    // installs), mirroring the role=master server-row reconcile above.
-    db.update(clusters).set({ stage: m.stage, domain: m.fqdn }).where(eq(clusters.id, cluster.id)).run();
+    // installs), mirroring the role=master server-row reconcile above. A master's name follows its
+    // FQDN, as the branch program writes it into the master's own map on every regeneration.
+    db.update(clusters).set({ stage: m.stage, domain: m.fqdn, name: clusterShortName(m.fqdn) }).where(eq(clusters.id, cluster.id)).run();
     writeAudit(db, { actor: "system", action: "cluster.master_reconciled", targetKind: "cluster", targetId: cluster.id, detail: { domain: m.fqdn, stage: m.stage } });
     logger.warn({ id: cluster.id, domain: m.fqdn, stage: m.stage }, "reconciled the master self-cluster row to the configured MASTER_* values");
   }

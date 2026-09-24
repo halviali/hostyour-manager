@@ -51,7 +51,7 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 // both resolve off it, so argocdUrl derives from s1.example.
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 // A live tenant (guid TGUID, one app "erp") pinned at SHA on cls_1. `over` lets a test seed the

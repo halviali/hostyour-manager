@@ -94,7 +94,7 @@ function ctx(stepName: string, logs: string[], creds: CredentialStore = credsWit
  *  an onboard that died before record-inventory left cluster/Vault artifacts but no inventory row. */
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 /** The cluster PLUS the consumer's inventory row (a healthy, fully-onboarded consumer). */

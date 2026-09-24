@@ -135,7 +135,7 @@ describe("the streaming plan path runs the guard table", () => {
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_h','h','3.3.3.3','root','slave')").run();
-    db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain) VALUES ('cls_h','srv_h','prod','h.example')").run();
+    db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, name) VALUES ('cls_h','srv_h','prod','h.example','h')").run();
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions = new Map<RunKind, AnyRunDefinition>([["tenant-create", streamingCreateTenantDef()]]);
     const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });

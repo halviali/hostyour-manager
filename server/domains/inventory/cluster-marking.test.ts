@@ -6,13 +6,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import {
-  clusterShortName,
-  resolveClusterMarking,
-  buildPlaneFqdnFromMarkings,
-  projectClusterMarking,
-  removeSlaveMarkingPart,
-  writeClusterMarking,
-  CLUSTER_MARKING_FILE_KEYS,
+  clusterShortName, resolveClusterMarking, buildPlaneFqdnFromMarkings, projectClusterMarking, removeSlaveMarkingPart, writeClusterMarking, CLUSTER_MARKING_FILE_KEYS, moveClusterMarking,
 } from "./cluster-marking.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -41,8 +35,8 @@ function globalKeysOf(text: string): string[] {
   return [...block.matchAll(/^ {2}([A-Za-z][A-Za-z0-9-]*):/gm)].map((m) => m[1] ?? "").filter((k) => k !== "").sort();
 }
 
-const masterMap = `stage: prod\nrole: master\n\nglobal:\n  domain: ${MASTER}\n  buildPlane: ${MASTER}\n`;
-const slaveMap = `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n  master: ${MASTER}\n`;
+const masterMap = `stage: prod\nrole: master\n\nglobal:\n  domain: ${MASTER}\n  clusterName: ${(MASTER).split(".")[0]}\n  buildPlane: ${MASTER}\n`;
+const slaveMap = `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  clusterName: ${(SLAVE).split(".")[0]}\n  buildPlane: ${MASTER}\n  master: ${MASTER}\n`;
 
 function repoWith(maps: Record<string, string>): FakePlatformRepo {
   const repo = new FakePlatformRepo();
@@ -76,7 +70,7 @@ describe("resolveClusterMarking", () => {
     expect((await resolveClusterMarking(repo, "m1")).buildPlane).toBe(true);
     expect((await resolveClusterMarking(repo, "s1")).buildPlane).toBe(false);
     // ...and a master that builds ELSEWHERE names that cluster in the same one field.
-    const consumer = repoWith({ [MASTER]: `stage: prod\nrole: master\n\nglobal:\n  domain: ${MASTER}\n  buildPlane: build1.example.com\n` });
+    const consumer = repoWith({ [MASTER]: `stage: prod\nrole: master\n\nglobal:\n  domain: ${MASTER}\n  clusterName: ${(MASTER).split(".")[0]}\n  buildPlane: build1.example.com\n` });
     const m = await resolveClusterMarking(consumer, "m1");
     expect([m.buildPlane, m.buildPlaneFqdn]).toEqual([false, "build1.example.com"]);
   });
@@ -101,7 +95,7 @@ describe("resolveClusterMarking", () => {
   });
 
   it("a map missing build-plane is a typed error naming the file and the field", async () => {
-    const repo = repoWith({ [SLAVE]: `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n` });
+    const repo = repoWith({ [SLAVE]: `stage: prod\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  clusterName: ${(SLAVE).split(".")[0]}\n` });
     await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/clusters\/active\/s1\.example\.com\.yaml.*buildPlane/s);
   });
 
@@ -142,8 +136,8 @@ describe("resolveClusterMarking", () => {
 
   it("two clusters sharing a first fqdn label are a typed error, not a last-one-wins silent pick", async () => {
     const other = "s1.example";
-    const repo = repoWith({ [SLAVE]: slaveMap, [other]: `stage: dev\nrole: slave\n\nglobal:\n  domain: ${other}\n  buildPlane: ${MASTER}\n` });
-    await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/both derive the short name "s1"/);
+    const repo = repoWith({ [SLAVE]: slaveMap, [other]: `stage: dev\nrole: slave\n\nglobal:\n  domain: ${other}\n  clusterName: ${(other).split(".")[0]}\n  buildPlane: ${MASTER}\n` });
+    await expect(resolveClusterMarking(repo, "s1")).rejects.toThrow(/both carry the name "s1"/);
   });
 });
 
@@ -152,12 +146,12 @@ describe("projectClusterMarking", () => {
   beforeEach(() => {
     db = openDb(":memory:");
     db.db.insert(servers).values({ id: "srv_1", name: "box-a", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "dev", domain: SLAVE, status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "dev", domain: SLAVE, name: (SLAVE).split(".")[0]!, status: "active" }).run();
   });
   afterEach(() => { db.sqlite.close(); });
 
   it("moves servers.role + clusters.stage onto what the map says, and audits the move", async () => {
-    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: prod\nrole: master\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n` }), SLAVE);
+    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: prod\nrole: master\n\nglobal:\n  domain: ${SLAVE}\n  clusterName: ${(SLAVE).split(".")[0]}\n  buildPlane: ${MASTER}\n` }), SLAVE);
     expect(projectClusterMarking(db.db, marking, { actor: "op_test", runId: "run_1" })).toEqual({
       stage: { from: "dev", to: "prod" },
       role: { from: "slave", to: "master" },
@@ -170,7 +164,7 @@ describe("projectClusterMarking", () => {
   });
 
   it("is a silent no-op — and writes NO audit row — when the two already agree", async () => {
-    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: dev\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  buildPlane: ${MASTER}\n` }), SLAVE);
+    const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: dev\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  clusterName: ${(SLAVE).split(".")[0]}\n  buildPlane: ${MASTER}\n` }), SLAVE);
     expect(projectClusterMarking(db.db, marking, { actor: "op_test" })).toEqual({});
     expect(db.sqlite.prepare("SELECT count(*) AS n FROM audit").get()).toEqual({ n: 0 });
   });
@@ -390,5 +384,57 @@ describe("map-writer contract", () => {
       fromTemplate.filter((k) => !globalKeysOf(FULL_MAP).includes(k)),
       "the map template writes global keys the map this suite proves a rewrite on does not carry — add them to FULL_MAP, or the rewrite is proven against a map no installation has",
     ).toEqual([]);
+  });
+});
+
+describe("moveClusterMarking", () => {
+  const TO = "s1.elsewhere.example.org";
+  const OTHER = "s2.example.com";
+
+  it("moves one map in one commit and keeps its name, and every map naming the old FQDN as its build plane names the new one", async () => {
+    const repo = repoWith({
+      [MASTER]: masterMap,
+      [SLAVE]: `stage: prod
+role: slave
+
+global:
+  domain: ${SLAVE}
+  clusterName: s1
+  buildPlane: ${SLAVE}
+  master: ${MASTER}
+`,
+      [OTHER]: `stage: prod
+role: slave
+
+global:
+  domain: ${OTHER}
+  clusterName: s2
+  buildPlane: ${SLAVE}
+  master: ${MASTER}
+`,
+    });
+    const commits = repo.commits.length;
+    expect(await moveClusterMarking(repo, SLAVE, TO, "run_1")).toEqual({ changed: true, name: "s1" });
+    expect(repo.commits.length).toBe(commits + 1);
+    expect(await resolveClusterMarking(repo, TO)).toMatchObject({ fqdn: TO, name: "s1", buildPlane: true, buildPlaneFqdn: TO });
+    expect(await resolveClusterMarking(repo, "s1")).toMatchObject({ fqdn: TO });
+    expect((await resolveClusterMarking(repo, OTHER)).buildPlaneFqdn).toBe(TO);
+    await expect(resolveClusterMarking(repo, SLAVE)).rejects.toThrow(/no cluster map for "s1\.example\.com"/);
+    // A SECOND RUN FINDS THE MOVE MADE and commits nothing.
+    expect(await moveClusterMarking(repo, SLAVE, TO, "run_2")).toEqual({ changed: false, name: "s1" });
+    expect(repo.commits.length).toBe(commits + 1);
+  });
+
+  it("refuses to move onto an FQDN a map already stands at, and a cluster no map names", async () => {
+    const repo = repoWith({ [MASTER]: masterMap, [SLAVE]: slaveMap, [TO]: `stage: prod
+role: slave
+
+global:
+  domain: ${TO}
+  clusterName: s9
+  buildPlane: ${MASTER}
+` });
+    await expect(moveClusterMarking(repo, SLAVE, TO, "run_1")).rejects.toThrow(/already stands on .* beside/);
+    await expect(moveClusterMarking(repo, OTHER, "s2.new.example.com", "run_1")).rejects.toThrow(/no cluster map for s2\.example\.com/);
   });
 });

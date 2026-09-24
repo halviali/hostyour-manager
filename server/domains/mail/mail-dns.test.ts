@@ -100,7 +100,7 @@ describe("readMailDns", () => {
 
   function seed(): FakePlatformRepo {
     db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "m1.example.com", sshUser: "m1", role: "master", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example.com", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example.com", name: "m1", status: "active" }).run();
     const platformRepo = new FakePlatformRepo();
     platformRepo.seed(platformRepo.booksBranch, clusterMapPath("m1.example.com"), MAP);
     return platformRepo;
@@ -122,7 +122,7 @@ describe("readMailDns", () => {
   it("with a sender, mail leaves by the cluster it stands on, and the customer domain's DKIM is the sender's key", async () => {
     const platformRepo = seed();
     db.db.insert(servers).values({ id: "srv_a", name: "a1", host: "a1.example.com", sshUser: "a1", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_a", serverId: "srv_a", stage: "prod", domain: "a1.example.com", status: "active", slaveId: 1 }).run();
+    db.db.insert(clusters).values({ id: "cls_a", serverId: "srv_a", stage: "prod", domain: "a1.example.com", name: "a1", status: "active", slaveId: 1 }).run();
     db.db.insert(apps).values({ id: "app_post", clusterId: "cls_a", name: "post", stage: "prod", host: "post", dkimPublicKey: PEM }).run();
     const dns = published();
     dns.seedA("a1.example.com", EGRESS);

@@ -112,7 +112,11 @@ export const clusters = sqliteTable("clusters", {
   id: text("id").primaryKey(),                                     // "cls_" + ulid
   serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "restrict" }),
   stage: text("stage", { enum: STAGE }).notNull(),
-  domain: text("domain").notNull(),                                // == install branch == plane.branch
+  domain: text("domain").notNull(),                                // the cluster's FQDN; a rename moves it
+  // THE CLUSTER'S NAME, fixed at its adoption and never derived again: the map's global.clusterName,
+  // after which its per-slave plane, its Vault mount, its tailnet user and every registration's
+  // `cluster` are named. A rename moves `domain` and leaves this.
+  name: text("name").notNull(),
   status: text("status", { enum: CLUSTER_STATUS }).notNull().default("planned"),
   slaveId: integer("slave_id"),                                    // internal ordinal; NEVER in a resource name; NULL for the master
   planeState: text("plane_state", { enum: PLANE_STATE }).notNull().default("absent"),
@@ -125,6 +129,7 @@ export const clusters = sqliteTable("clusters", {
 }, (t) => [
   uniqueIndex("clusters_server_uq").on(t.serverId),                // one VM = one cluster
   uniqueIndex("clusters_domain_uq").on(t.domain),
+  uniqueIndex("clusters_name_uq").on(t.name),
   uniqueIndex("clusters_slave_id_uq").on(t.slaveId).where(sql`slave_id IS NOT NULL`), // ordinal never reused
 ]);
 

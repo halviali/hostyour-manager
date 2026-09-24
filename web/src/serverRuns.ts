@@ -23,6 +23,7 @@ export function relevantRun(serverId: string, runs: RunView[]): RunView | undefi
 const RUN_NOUN: Partial<Record<RunKind, string>> = {
   "cluster-deploy-slave": "deployment",
   "cluster-remove-slave": "slave removal",
+  "cluster-rename": "rename",
   "cluster-tailnet-disconnect": "tailnet disconnect",
   "cluster-tailnet-reconnect": "tailnet reconnect",
   "cluster-tailnet-rejoin": "tailnet rejoin",

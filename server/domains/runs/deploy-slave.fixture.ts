@@ -588,7 +588,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
  *  in a status their case is about, and two inserts would clash on clusters_server_uq. */
 export function seedMasterCluster(h: Harness): void {
   h.db.db.insert(clusters).values({
-    id: "cls_master", serverId: MASTER_ID, stage: FIXTURE_STAGE, domain: MASTER_FQDN, status: "active",
+    id: "cls_master", serverId: MASTER_ID, stage: FIXTURE_STAGE, domain: MASTER_FQDN, name: (MASTER_FQDN).split(".")[0]!, status: "active",
   }).run();
 }
 

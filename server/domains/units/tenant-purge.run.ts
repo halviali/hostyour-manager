@@ -14,7 +14,6 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
 import { tenantKeyName } from "./tenant-storage.ts";
 
@@ -211,14 +210,14 @@ interface TenantPurgeCluster {
 
 function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
   const row = db
-    .select({ id: clusters.id, domain: clusters.domain })
+    .select({ id: clusters.id, domain: clusters.domain, name: clusters.name })
     .from(clusters)
     .where(eq(clusters.id, p.clusterId))
     .get();
   if (!row) throw errNotFound(`cluster ${p.clusterId}`);
   // Cluster STATUS is deliberately not checked: leftovers on a cluster that is no longer active are
   // exactly what this run kind is for.
-  return { guid: p.guid, domain: row.domain, stage: p.stage, clusterId: row.id, cluster: clusterShortName(row.domain) };
+  return { guid: p.guid, domain: row.domain, stage: p.stage, clusterId: row.id, cluster: row.name };
 }
 
 /** The teardown target for a guid NEITHER live source knows — no live tenants row AND no live

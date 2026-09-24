@@ -6,7 +6,7 @@ import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
 import { MAIL_RECORD_TAG, mailRecordNames, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
-import { clusterShortName, resolveClusterMarking } from "../inventory/cluster-marking.ts";
+import { resolveClusterMarking } from "../inventory/cluster-marking.ts";
 
 // The mail DNS of the installation, MEASURED: what receivers find at public DNS, held against what the
 // master's map and address say they must find. Read-only — the writer is the catalogue's
@@ -151,7 +151,7 @@ export interface MailDnsDeps {
 export async function readMailEgress(deps: Pick<MailDnsDeps, "db" | "publicDns" | "smtpSenders">, stage: Stage, masterDomain: string): Promise<MailEgress> {
   const sender = (deps.smtpSenders ? await deps.smtpSenders(stage) : [])[0];
   if (sender === undefined) return { sender: null, name: masterDomain, address: (await deps.publicDns.a(masterDomain))[0] ?? null, dkimPublicKey: null };
-  const on = deps.db.select({ domain: clusters.domain }).from(clusters).all().find((c) => clusterShortName(c.domain) === sender.cluster);
+  const on = deps.db.select({ domain: clusters.domain }).from(clusters).where(eq(clusters.name, sender.cluster)).get();
   if (!on) throw errNotFound(`the mail sender ${sender.unit} stands on cluster "${sender.cluster}", which is no cluster of this Manager`);
   const row = deps.db.select({ key: apps.dkimPublicKey }).from(apps).where(and(eq(apps.name, sender.unit), eq(apps.stage, stage))).get();
   return {

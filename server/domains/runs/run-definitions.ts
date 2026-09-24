@@ -13,6 +13,7 @@ import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { MailEgress } from "../../../shared/mail.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { makeRemoveSlaveDef } from "./defs/remove-slave.ts";
+import { makeRenameSlaveDef, type UnitRecordsRepointer } from "./defs/rename-slave.ts";
 import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
@@ -41,6 +42,10 @@ export interface RunDefinitionsPorts extends DeploySlavePorts, AnsiwisePorts, Dn
   /** Where the stage's mail leaves and the key its sender signs with, for mail-dns-publish's answers
    *  — the Mail page's own reading, bound by the composition root. */
   mailEgress?: (stage: Stage, masterDomain: string) => Promise<MailEgress>;
+  /** The unit records of a renamed cluster repointed onto its new FQDN — cluster-rename's act on the
+   *  zones, bound from the units domain by the composition root. Absent without a DNS provider: the
+   *  rename then refuses at the step that needs it. */
+  unitRecords?: UnitRecordsRepointer;
 }
 
 export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDefinition[] = []): RunDefinitions {
@@ -65,6 +70,7 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // the remove-slave program, the books branch, the rows — so it takes the same ports the two
   // above do and reaches the slave not at all.
   register(runDefinitions, makeRemoveSlaveDef(ports));
+  register(runDefinitions, makeRenameSlaveDef(ports));
   // The tailnet run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
   // mints. Every act is a program of the machine's own catalogue driven over `ansiwise-rest serve`, so

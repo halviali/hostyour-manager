@@ -4,7 +4,7 @@
 // apex carries other services' TXT beside the SPF — and an upsert leaves exactly one, the way the
 // Cloudflare adapter does. A CNAME stands alone under its name: an upsert that would put one beside
 // another record, or another record beside one, is refused the way Cloudflare refuses it.
-import type { DnsProvider, DnsRecordType } from "../port.ts";
+import { DnsZoneUnknownError, type DnsProvider, type DnsRecordType } from "../port.ts";
 
 export class FakeDnsProvider implements DnsProvider {
   private readonly records = new Map<string, string[]>();
@@ -14,9 +14,18 @@ export class FakeDnsProvider implements DnsProvider {
   readonly deletes: Array<{ name: string; type: DnsRecordType; content?: string; deleted: number }> = [];
   /** When set, every call throws it — the API-failure path (an unreachable/refusing provider). */
   failWith: Error | null = null;
+  /** Zones this fake's token does not cover: every call on a name at or below one of them throws
+   *  DnsZoneUnknownError, as the provider does for a domain it holds no zone for. */
+  unmanaged: string[] = [];
 
   private key(name: string, type: DnsRecordType): string {
     return `${type} ${name}`;
+  }
+
+  private zoneOf(name: string): void {
+    const bare = name.replace(/^\*\./, "");
+    const outside = this.unmanaged.find((zone) => bare === zone || bare.endsWith(`.${zone}`));
+    if (outside !== undefined) throw new DnsZoneUnknownError(`fake: no zone found for any suffix of "${bare}"`);
   }
 
   /** Seed the records that pre-exist the run under one name. Several contents seed several records
@@ -32,6 +41,7 @@ export class FakeDnsProvider implements DnsProvider {
 
   async upsertRecord(input: { name: string; type: DnsRecordType; content: string }): Promise<{ created: boolean }> {
     if (this.failWith) throw this.failWith;
+    this.zoneOf(input.name);
     const own = this.key(input.name, input.type);
     const beside = [...this.records.keys()].some((key) => key !== own && key.endsWith(` ${input.name}`) && (input.type === "CNAME" || key.startsWith("CNAME ")));
     if (beside) throw new Error(`a CNAME stands alone under its name, and ${input.name} already carries another record`);
@@ -43,6 +53,7 @@ export class FakeDnsProvider implements DnsProvider {
 
   async deleteRecord(input: { name: string; type: DnsRecordType; content?: string }): Promise<{ deleted: number }> {
     if (this.failWith) throw this.failWith;
+    this.zoneOf(input.name);
     const key = this.key(input.name, input.type);
     const standing = this.records.get(key) ?? [];
     const kept = input.content === undefined ? [] : standing.filter((c) => c !== input.content);
@@ -59,6 +70,7 @@ export class FakeDnsProvider implements DnsProvider {
 
   async listRecordContents(input: { name: string; type: DnsRecordType }): Promise<string[]> {
     if (this.failWith) throw this.failWith;
+    this.zoneOf(input.name);
     return this.records.get(this.key(input.name, input.type)) ?? [];
   }
 }

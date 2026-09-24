@@ -7,7 +7,6 @@ import { eq } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
 
 export interface TargetCluster {
   clusterId: string;
@@ -19,10 +18,10 @@ export interface TargetCluster {
 /** Resolve a relocation target: the cluster must exist and be ACTIVE (a unit cannot land on a
  *  cluster that is not serving). Any active cluster takes a unit of any stage. */
 export function loadActiveTargetCluster(db: Db, clusterId: string): TargetCluster {
-  const row = db.select({ id: clusters.id, domain: clusters.domain, status: clusters.status }).from(clusters).where(eq(clusters.id, clusterId)).get();
+  const row = db.select({ id: clusters.id, domain: clusters.domain, name: clusters.name, status: clusters.status }).from(clusters).where(eq(clusters.id, clusterId)).get();
   if (!row) throw errNotFound(`cluster ${clusterId}`);
   if (row.status !== "active") throw errValidation(`cluster ${row.domain} is not active (status "${row.status}") — a unit cannot be relocated onto it`);
-  return { clusterId: row.id, domain: row.domain, cluster: clusterShortName(row.domain) };
+  return { clusterId: row.id, domain: row.domain, cluster: row.name };
 }
 
 /** The migrate admission: target active, source ≠ target. A move onto the unit's own cluster would

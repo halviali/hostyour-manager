@@ -25,7 +25,7 @@ beforeEach(() => {
   // land on any active cluster, m1 included. Its SHORT NAME is "s1" — the
   // stage registration's own `cluster` field, which the scan selects on.
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 });
 afterEach(() => db.sqlite.close());
 
@@ -118,7 +118,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
 
   it("scans ONLY active clusters — a planned/removed cluster's registration is not selected", async () => {
     db.db.insert(servers).values({ id: "srv_2", name: "s9", host: "1.2.3.5", sshUser: "root", role: "slave", status: "bare" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s9.example", status: "planned" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s9.example", name: "s9", status: "planned" }).run();
     // The registration targets the PLANNED cluster's short name only — an active-clusters scan must
     // never select it (cls_1 is the only active cluster, and it selects on ITS OWN short name "s1").
     const registrations = new Registrations(new FakePlatformRepo());
@@ -128,7 +128,7 @@ describe("scanDetectedConsumers (the registration-vs-inventory diff)", () => {
 
   it("is cluster-scoped: a row on ANOTHER cluster never covers this cluster's registration", async () => {
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     // ghost is TRACKED on cls_2 but its registration targets cls_1 ("s1") — that deployment is unknown.
     db.db.insert(apps).values({ id: "app_ghost2", clusterId: "cls_2", name: "ghost", stage: "prod", host: "ghost", provenance: "manager", status: "active" }).run();
     const registrations = new Registrations(new FakePlatformRepo());
@@ -280,7 +280,7 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
     // Silence read as an all-clear is the failure this whole scan exists to end, so an unreachable
     // slave gets named — while every other cluster still answers.
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.6", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     const registrations = new Registrations(new FakePlatformRepo());
     const resolver = resolverHolding(["ghost-prod"], { "ghost-prod": running(1) });
     resolver.set("cls_2", {
@@ -335,7 +335,7 @@ describe("scanClusterOrphanConsumers (the cluster-vs-both-books diff)", () => {
 
   it("scans ONLY active clusters, and answers empty for a cluster holding no consumer namespace", async () => {
     db.db.insert(servers).values({ id: "srv_3", name: "s3", host: "1.2.3.7", sshUser: "root", role: "slave", status: "bare" }).run();
-    db.db.insert(clusters).values({ id: "cls_3", serverId: "srv_3", stage: "prod", domain: "s3.example", status: "planned" }).run();
+    db.db.insert(clusters).values({ id: "cls_3", serverId: "srv_3", stage: "prod", domain: "s3.example", name: "s3", status: "planned" }).run();
     const registrations = new Registrations(new FakePlatformRepo());
     const found = await scanClusterOrphanConsumers({ db: db.db, registrations, resolver: resolverHolding([]) });
     expect(found).toEqual({ clusterOrphans: [], unscanned: [] });

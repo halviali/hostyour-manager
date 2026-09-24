@@ -57,6 +57,13 @@
       "when": 1790158046683,
       "tag": "0007_apps-dkim-public-key",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790258372267,
+      "tag": "0008_clusters-name",
+      "breakpoints": true
     }
   ]
 }

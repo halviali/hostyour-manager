@@ -32,7 +32,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { SkippedConsumerPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { AppError, errValidation } from "../../kernel/errors.ts";
-import { clusterShortName, resolveClusterMarkingIn } from "../inventory/cluster-marking.ts";
+import { resolveClusterMarkingIn } from "../inventory/cluster-marking.ts";
 import { makeRegistrationGuard, migrateRegistrationFiles, parseRegistration, schemaWhy, serializePointer, trailer, type RegistrationMigration } from "./registration-laws.ts";
 
 const REGISTRATION_GUARD = /^registrations\/[a-z0-9-]+\/(dev|test|prod|build)\.yaml$/;
@@ -269,9 +269,8 @@ export class Registrations {
    *  never dropped (a registration nobody hears about is a lie) and never a throw that wedges the whole
    *  scan on one drifted file. THROWS only when the branch itself cannot be read — the caller turns that
    *  into a visible "the scan failed", which must never flatten into an empty result. */
-  async listConsumerRegistrations(domain: string, stage: Stage): Promise<{ registrations: ScannedConsumer[]; skipped: SkippedConsumerPointerView[] }> {
+  async listConsumerRegistrations(cluster: string, stage: Stage): Promise<{ registrations: ScannedConsumer[]; skipped: SkippedConsumerPointerView[] }> {
     return this.repo.withBranch(this.branch, async (books) => {
-    const cluster = clusterShortName(domain);
     const registrations: ScannedConsumer[] = [];
     const skipped: SkippedConsumerPointerView[] = [];
     for (const name of await books.listDir("registrations")) {

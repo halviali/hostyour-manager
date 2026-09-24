@@ -40,7 +40,7 @@ describe("GET /api/dns", () => {
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "m1.example.com", sshUser: "m1", role: "master", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example.com", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example.com", name: "m1", status: "active" }).run();
     const dns = new FakeDnsProvider();
     dns.seed("post.example.net", "CNAME", "m1.example.com");
     const session = new SessionCodec(db.db, config);

@@ -38,6 +38,7 @@ export function seedClusterMaps(repo: FakePlatformRepo, stages: Record<string, S
       `role: "${own ? "master" : "slave"}"` + "\n\n" +
       "global:" + "\n" +
       `  domain: "${fqdn}"` + "\n" +
+      `  clusterName: "${fqdn.split(".")[0]}"` + "\n" +
       `  buildPlane: "${plane}"` + "\n" +
       (own ? "" : `  master: "${plane}"` + "\n") +
       `  unitApex: "example.com"` + "\n" +

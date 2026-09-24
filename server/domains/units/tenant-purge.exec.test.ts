@@ -129,13 +129,13 @@ function planCtx(logs: string[] = []): PlanStreamCtx {
  *  before record-inventory left GitOps + cluster artifacts but nothing in inventory. */
 function seedCluster(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
 /** A SECOND registered slave, so a test can prove the plan refuses to purge a tenant that lives elsewhere. */
 function seedSecondCluster(): void {
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
 }
 
 /** A cluster carrying the MASTER part. `role` picks which member — a pure master, or the union role a

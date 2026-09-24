@@ -9,7 +9,7 @@ describe("the two cluster-name resolvers", () => {
   beforeEach(() => {
     db = openDb(":memory:");
     db.db.insert(servers).values({ id: "srv_1", name: "box-a", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example.com", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example.com", name: "s1", status: "active" }).run();
   });
   afterEach(() => { db.sqlite.close(); });
 
@@ -58,7 +58,7 @@ describe("resolveMasterCluster", () => {
 
   it("resolves the ONE master-part server's cluster row", () => {
     db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example.com", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example.com", name: "m1", status: "active" }).run();
     expect(resolveMasterCluster(db.db)).toEqual({ clusterId: "cls_m", domain: "m1.example.com" });
   });
 
@@ -72,7 +72,7 @@ describe("resolveTenantCluster — the tenant's stage is the cluster's", () => {
   beforeEach(() => {
     db = openDb(":memory:");
     db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example.com", status: "active" }).run();
+    db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example.com", name: "s1", status: "active" }).run();
   });
   afterEach(() => { db.sqlite.close(); });
 

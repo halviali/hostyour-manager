@@ -131,7 +131,7 @@ describe("probeDns — the unit's record, judged as the step judges it", () => {
     dns.seed("acme.example.com", "CNAME", "apps4.gone.example");
     expect(await probeDns(prt, params(), ctx())).toMatchObject([{ status: "warn", detail: "stands as CNAME apps4.gone.example, which points at no cluster of this installation; the run replaces it" }]);
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "203.0.113.20", sshUser: "root", role: "slave", status: "healthy" }).run();
-    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", status: "active", slaveId: 2 }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active", slaveId: 2 }).run();
     dns.seed("acme.example.com", "CNAME", "s2.example");
     expect(await probeDns(prt, params(), ctx())).toMatchObject([{ status: "fail", severity: "hard", detail: "points at s2.example, a cluster of this installation", hint: "offboard the unit there first" }]);
   });

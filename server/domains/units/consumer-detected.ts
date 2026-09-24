@@ -115,7 +115,7 @@ export async function scanDetectedConsumers(deps: { db: Db; registrations: Regis
   for (const cluster of active) {
     const known = knownOnCluster(db, cluster.id);
     for (const stage of STAGE) {
-      const scan = await registrations.listConsumerRegistrations(cluster.domain, stage);
+      const scan = await registrations.listConsumerRegistrations(cluster.name, stage);
       skipped.push(...scan.skipped); // reported, never dropped — see DetectedScan
       for (const found of scan.registrations) {
         if (known.has(key(found.name, stage))) continue;
@@ -201,7 +201,7 @@ export async function scanClusterOrphanConsumers(deps: {
       // it as an orphan: without the registration names there is nothing to subtract, and every
       // healthy consumer would be listed as untracked — the loudest possible false positive.
       for (const stage of STAGE) {
-        const registered = await registrations.listConsumerRegistrations(cluster.domain, stage);
+        const registered = await registrations.listConsumerRegistrations(cluster.name, stage);
         for (const r of registered.registrations) known.add(key(r.name, stage));
         // A registration the reader could not PARSE is a name it could not learn, so a namespace of
         // that name would be reported here as an orphan although the file exists. Its directory name

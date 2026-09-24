@@ -16,7 +16,7 @@ const deploy = (over: { stage?: Stage; cluster?: string; smtpEntry?: { service: 
 function books(): { repo: FakePlatformRepo; reg: Registrations } {
   const repo = new FakePlatformRepo();
   repo.seed(repo.booksBranch, clusterMapPath(SLAVE_FQDN), SLAVE_MARKING_YAML);
-  repo.seed(repo.booksBranch, clusterMapPath("s2.example.com"), SLAVE_MARKING_YAML.replace(`domain: ${SLAVE_FQDN}`, "domain: s2.example.com").replace("apiHost: 100.64.0.11", "apiHost: 100.64.0.12"));
+  repo.seed(repo.booksBranch, clusterMapPath("s2.example.com"), SLAVE_MARKING_YAML.replace(`domain: ${SLAVE_FQDN}`, "domain: s2.example.com").replace("clusterName: s1", "clusterName: s2").replace("apiHost: 100.64.0.11", "apiHost: 100.64.0.12"));
   repo.seed(repo.booksBranch, clusterMapPath(MASTER_FQDN), MASTER_MARKING_YAML);
   return { repo, reg: new Registrations(repo) };
 }

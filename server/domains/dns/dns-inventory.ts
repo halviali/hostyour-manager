@@ -30,7 +30,6 @@
 import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { consumerUnitHost, tenantWildcardHost } from "../../../shared/unit-host.ts";
 import type { MailDnsRecord, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
@@ -45,7 +44,8 @@ export interface DnsInventoryDeps {
   dns?: DnsProvider;
   /** Every consumer registered at one stage on one cluster, with the host LABEL it stands on (the
    *  registration's `host`, never the name). */
-  consumers?: (domain: string, stage: Stage) => Promise<{ name: string; host: string }[]>;
+  /** The consumers registered on a cluster, named by the cluster's name, at one stage. */
+  consumers?: (cluster: string, stage: Stage) => Promise<{ name: string; host: string }[]>;
   /** Every tenant registered at one stage, with the subdomain its wildcard covers and the short
    *  name of the cluster it stands on. */
   tenants?: (stage: Stage) => Promise<{ subdomain: string; cluster: string }[]>;
@@ -104,16 +104,17 @@ function mailRow(domain: string, row: MailDnsRow): DnsRecordRow {
  *  composed by the one composer of each name (shared/unit-host.ts) and read at the provider. */
 async function unitRowsOf(
   deps: Required<Pick<DnsInventoryDeps, "dns" | "consumers" | "unitApex">>,
-  domain: string,
+  cluster: { domain: string; name: string },
   stage: Stage,
   tenants: { subdomain: string; cluster: string }[],
 ): Promise<DnsRecordRow[]> {
+  const { domain } = cluster;
   const apex = await deps.unitApex(domain, stage);
   const rows: DnsRecordRow[] = [];
-  for (const consumer of await deps.consumers(domain, stage)) {
+  for (const consumer of await deps.consumers(cluster.name, stage)) {
     rows.push(await unitRow(deps.dns, { kind: "consumer", name: consumer.name, stage }, consumerUnitHost(consumer.host, stage, apex), domain));
   }
-  for (const tenant of tenants.filter((t) => t.cluster === clusterShortName(domain))) {
+  for (const tenant of tenants.filter((t) => t.cluster === cluster.name)) {
     rows.push(await unitRow(deps.dns, { kind: "tenant", name: tenant.subdomain, stage }, tenantWildcardHost(tenant.subdomain, stage, apex), domain));
   }
   return rows;
@@ -128,7 +129,7 @@ export async function readDnsInventory(deps: DnsInventoryDeps): Promise<DnsInven
   const skipped: string[] = [];
   const { dns, consumers, tenants, unitApex } = deps;
   if (dns && consumers && tenants && unitApex) {
-    const clusterRows = deps.db.select({ domain: clusters.domain }).from(clusters).all();
+    const clusterRows = deps.db.select({ domain: clusters.domain, name: clusters.name }).from(clusters).all();
     for (const stage of STAGE) {
       let tenantsAt: { subdomain: string; cluster: string }[] = [];
       try {
@@ -138,7 +139,7 @@ export async function readDnsInventory(deps: DnsInventoryDeps): Promise<DnsInven
       }
       for (const cluster of clusterRows) {
         try {
-          rows.push(...(await unitRowsOf({ dns, consumers, unitApex }, cluster.domain, stage, tenantsAt)));
+          rows.push(...(await unitRowsOf({ dns, consumers, unitApex }, cluster, stage, tenantsAt)));
         } catch (e) {
           skipped.push(`the ${stage} records of ${cluster.domain} could not be listed: ${messageOf(e)}`);
         }

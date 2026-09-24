@@ -4,7 +4,7 @@ import type { RunView, ServerView } from "../../../shared/api-types.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
 import type { ServerStatus } from "../../../shared/enums.ts";
 import {
-  listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave, removeSlave,
+  listServers, listRuns, createServer, deleteServerById, deploySlave, redeploySlave, removeSlave, renameSlave,
   disconnectTailnet, reconnectTailnet, rejoinTailnet, readTailnet, disablePasswordLogin, enablePasswordLogin,
   readAuthorizedKeys, restateMachineIdentity,
 } from "../api.ts";
@@ -16,6 +16,7 @@ import { IconShield } from "../components/icons.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SlaveDeployForm } from "../components/SlaveDeployForm.tsx";
 import { TailnetActions } from "../components/TailnetActions.tsx";
+import { SlaveRename } from "../components/SlaveRename.tsx";
 import { MasterActions } from "../components/MasterActions.tsx";
 import { ServerReadings } from "../components/ServerReadings.tsx";
 
@@ -400,6 +401,15 @@ export function Servers() {
                               </button>
                             )}
                           </div>
+                        )}
+                        {/* A LIVE SLAVE'S REACH, AND THE RENAME BESIDE IT: out of reach at the host its row
+                            names, the card says why and offers the FQDN the machine answers at now. */}
+                        {lc.next === "clusters" && s.cluster && (
+                          <SlaveRename
+                            server={s}
+                            fromFqdn={s.cluster.domain}
+                            onRename={(newFqdn) => planServerRunKind(() => renameSlave(s.id, s.cluster!.domain, newFqdn))}
+                          />
                         )}
                       </>
                     );

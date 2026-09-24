@@ -35,7 +35,7 @@ let db: DbHandle;
 beforeEach(() => {
   db = openDb(":memory:"); recordTestOwners(db.db);
   db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", name: "m1", status: "active" }).run();
 });
 afterEach(() => { db.sqlite.close(); });
 

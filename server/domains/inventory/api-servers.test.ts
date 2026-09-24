@@ -12,6 +12,7 @@ import { CredentialStore } from "../../security/store.ts";
 import { runActor } from "../../kernel/actor.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerServerRoutes } from "./api.ts";
+import { FakeTcpProbe } from "../../adapters/net-probe/testing/fake.ts";
 import { serverCredFlags } from "./write.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ApiError, OperatorKeyView, ServerView } from "../../../shared/api-types.ts";
@@ -48,6 +49,7 @@ interface Harness {
   db: DbHandle;
   store: CredentialStore;
   cookie: string;
+  probe: FakeTcpProbe;
 }
 
 describe("server inventory API", () => {
@@ -64,6 +66,7 @@ describe("server inventory API", () => {
     // directly, so it seeds the row itself.
     db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run();
     const store = new CredentialStore({ db: db.db, logger });
+    const probe = new FakeTcpProbe();
     const session = new SessionCodec(db.db, config);
     const app = createApp({
       config,
@@ -72,10 +75,10 @@ describe("server inventory API", () => {
       session,
       registerAuth: () => undefined,
       registerProtected: (a) =>
-        registerServerRoutes(a, { db: db.db, creds: store, actor: runActor }),
+        registerServerRoutes(a, { db: db.db, creds: store, actor: runActor, probe }),
     });
     const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
-    return { app, db, store, cookie };
+    return { app, db, store, cookie, probe };
   }
 
   afterEach(() => {
@@ -108,7 +111,7 @@ describe("server inventory API", () => {
       ["srv_s", "s1", "slave", "cls_s", SLAVE],
     ] as const) {
       db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES (?,?,?,'root',?,'healthy')").run(id, name, domain, role);
-      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain) VALUES (?,?,'prod',?)").run(cls, id, domain);
+      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, name) VALUES (?,?,'prod',?,?)").run(cls, id, domain, domain.split(".")[0]);
     }
     db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_b','b1','203.0.113.9','root','slave','bare')").run();
   }
@@ -231,6 +234,20 @@ describe("server inventory API", () => {
       expect(res.status).toBe(403);
       expect(((await res.json()) as ApiError).code).toBe("CSRF_REFUSED");
       expect(await listServersOverHttp(h)).toEqual([]);
+    });
+  });
+
+  describe("GET /api/servers/:id/reach", () => {
+    it("answers whether the machine takes a connection at the SSH port of the host its row names, and why not", async () => {
+      const h = await make();
+      const { server } = (await (
+        await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s6", host: "s6.example.com", sshUser: "hostyour6" })
+      ).json()) as { server: ServerView };
+      const read = async (): Promise<unknown> => (await h.app.request(`/api/servers/${server.id}/reach`, authed(h.cookie))).json();
+      expect(await read()).toEqual({ host: "s6.example.com", port: 22, reachable: true });
+      h.probe.answers.set("s6.example.com:22", { reachable: false, reason: "the name s6.example.com does not resolve" });
+      expect(await read()).toEqual({ host: "s6.example.com", port: 22, reachable: false, reason: "the name s6.example.com does not resolve" });
+      expect(h.probe.asked).toEqual(["s6.example.com:22", "s6.example.com:22"]);
     });
   });
 
