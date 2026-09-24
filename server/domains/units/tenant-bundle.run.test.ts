@@ -18,7 +18,7 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { ports as onboardPorts, type FakeSeeder } from "./onboard.fixture.ts";
-import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import type { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
@@ -277,7 +277,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     // The tenant's repository as the chain reads it back after write-tree: the manifest the run writes.
     const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
     unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     const onboard = onboardPorts({ repo: unitReader, consumerRepo, github: new FakeGitHubConsumer(), buildPlane });
     const buildRbac = new FakeBuildRbacWriter();
     const prt = ports({ onboard: () => ({ ports: onboard }), buildRbac });

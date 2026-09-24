@@ -1,68 +1,5 @@
-import type { PlanGuard, PlannerDeps, AnyRunDefinition } from "./types.ts";
+import type { AnyRunDefinition } from "./types.ts";
 import type { RunKind } from "../../shared/enums.ts";
-
-/**
- * Every run kind's plan-time guards, total over RUN_KIND — the Record type forces compile-time
- * exhaustiveness, so a new kind cannot forget to declare its guards.
- *
- * EVERY LIST IS EMPTY TODAY, and that is a fact about this build rather than a gap in it. A guard
- * asking whether `keystore.mode` is `plaintext` — and returning unless it is — refuses nothing that
- * can reach here. No booted manager answers yes: the composition root builds the
- * credential store with a Vault client where the installation configures one and with a local data
- * key where it does not (boot/wire.ts, jobs/registry-reaper.ts), and the manager chart configures
- * one unconditionally. `plaintext` is what a test that constructs the store with neither gets. A
- * guard that cannot refuse is read as a protection and is none, so no such guard stands here.
- */
-export const KIND_GUARDS: Record<RunKind, readonly PlanGuard[]> = {
-  noop: [],
-  "cluster-deploy-slave": [],
-  "cluster-redeploy": [],
-  "cluster-remove-slave": [],
-  "cluster-rename": [],
-  "cluster-tailnet-disconnect": [],
-  "cluster-tailnet-reconnect": [],
-  "cluster-tailnet-rejoin": [],
-  "cluster-tailnet-read": [],
-  "cluster-password-login-disable": [],
-  "cluster-password-login-enable": [],
-  "cluster-operator-key-place": [],
-  "cluster-operator-key-remove": [],
-  "cluster-authorized-keys-read": [],
-  "mail-dns-publish": [],
-  "dns-remove": [],
-  "mail-dns-unpublish": [],
-  "consumer-onboard": [],
-  "consumer-suspend": [],
-  "consumer-resume": [],
-  "consumer-offboard": [],
-  "consumer-purge": [],
-  "consumer-restart-workloads": [],
-  "consumer-set-size": [],
-  "consumer-set-secrets": [],
-  "consumer-adopt": [],
-  "consumer-backup": [],
-  "consumer-restore": [],
-  "consumer-migrate": [],
-  "tenant-check": [],
-  "tenant-create": [],
-  "tenant-add-app": [],
-  "tenant-remove-app": [],
-  "tenant-apps-repo": [],
-  "tenant-apps-repo-purge": [],
-  "tenant-suspend": [],
-  "tenant-resume": [],
-  "tenant-restart-workloads": [],
-  "tenant-set-size": [],
-  "tenant-offboard": [],
-  "tenant-purge": [],
-  "tenant-backup": [],
-  "tenant-restore": [],
-  "tenant-migrate": [],
-};
-
-export async function runGuards(kind: RunKind, params: unknown, deps: PlannerDeps): Promise<void> {
-  for (const guard of KIND_GUARDS[kind]) await guard(params, deps);
-}
 
 /** The step name pinned as step 0 of every MUTATING run: its fail-closed precondition. Named once,
  *  here, because two places must key on the SAME string — the boot assertion below, which MAKES the
@@ -79,12 +16,7 @@ export function isMutatingPrecondition(def: AnyRunDefinition | undefined, stepNa
   return def?.mutating === true && stepName === ATTEST_TARGET_STEP;
 }
 
-/**
- * Backs the guards.armed self-check: every registered mutating def starts with attest-target.
- *
- * It asserts nothing about KIND_GUARDS: a demand that a table hold an entry is only worth making
- * while the entry can refuse something, and no entry stands there today.
- */
+/** Backs the guards.armed self-check: every registered mutating def starts with attest-target. */
 export function assertGuardsArmed(runDefinitions: Map<RunKind, AnyRunDefinition>): void {
   for (const def of runDefinitions.values()) {
     if (!def.mutating) continue;

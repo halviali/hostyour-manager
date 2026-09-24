@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { parseConfig, ConfigError, MAX_SOCKET_PATH_BYTES } from "./config.ts";
-import { GITHUB_APP_ENV, GITHUB_APP_PEM } from "./config.fixture.ts";
+import { REQUIRED_ENV, GITHUB_APP_ENV, GITHUB_APP_PEM } from "./config.fixture.ts";
 
 const validEnv = {
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://idp.m1.example.com/application/o/manager/",
   OIDC_CLIENT_ID: "manager",
@@ -186,6 +186,27 @@ describe("tenant onboarding config (catalog)", () => {
     const c = parseConfig({ ...validEnv, CATALOG_REPO: "acme/acme-catalog" });
     expect(c.catalog).toBeDefined();
     expect(c.onboarding).toBeUndefined(); // no ONBOARD_GATE_MANAGER_ADDR, yet tenant config still resolves
+  });
+});
+
+describe("the deployment programs repository (DEPLOY_PROGRAMS_REPO)", () => {
+  const { DEPLOY_PROGRAMS_REPO: _programs, ...withoutPrograms } = validEnv;
+  const issues = (env: NodeJS.ProcessEnv): string => {
+    try {
+      parseConfig(env);
+      return "";
+    } catch (e) {
+      return (e as ConfigError).issues.join(" ");
+    }
+  };
+
+  it("REFUSES a configuration without it, and names the key", () => {
+    expect(() => parseConfig(withoutPrograms as NodeJS.ProcessEnv)).toThrow(ConfigError);
+    expect(issues(withoutPrograms as NodeJS.ProcessEnv)).toContain("DEPLOY_PROGRAMS_REPO");
+  });
+
+  it("composes the clone URL from the owner/repo it is given", () => {
+    expect(parseConfig({ ...validEnv, DEPLOY_PROGRAMS_REPO: "example/programs" }).deployProgramsRepoUrl).toBe("https://github.com/example/programs.git");
   });
 });
 

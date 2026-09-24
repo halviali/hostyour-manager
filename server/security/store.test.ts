@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { openDb } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
 import { CredentialStore, holdsManagerKey } from "./store.ts";
 import { runAsActor } from "../kernel/actor.ts";
 import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
 
 const logger = createLogger(
   parseConfig({
-    ...GITHUB_APP_ENV,
+    ...REQUIRED_ENV,
     PUBLIC_URL: "https://m1.example",
     OIDC_ISSUER: "https://idp.example/",
     OIDC_CLIENT_ID: "c",

@@ -112,16 +112,16 @@ describe("openDb — migration phase + append-only invariants", () => {
     const standing = new Database(file);
     migrate(drizzle(standing), { migrationsFolder: upTo0002 });
     const cred = standing.prepare("INSERT INTO credentials (id, kind, label, encrypted_blob, fingerprint) VALUES (?,'pat',?,'plain:v0:eA==',?)");
-    cred.run("cred_pkg", "packages reader (digitaplatform)", "sha256:pkg");
-    cred.run("cred_pat", "repository PAT (digitaplatform)", "sha256:pat");
+    cred.run("cred_pkg", "packages reader (example-owner)", "sha256:pkg");
+    cred.run("cred_pat", "repository PAT (example-owner)", "sha256:pat");
     cred.run("cred_pkg_only", "packages reader (acme-org)", "sha256:pkg2");
-    standing.prepare("INSERT INTO organisation_identities (org, packages_credential_id, repo_credential_id) VALUES ('digitaplatform', 'cred_pkg', 'cred_pat'), ('acme-org', 'cred_pkg_only', NULL)").run();
+    standing.prepare("INSERT INTO organisation_identities (org, packages_credential_id, repo_credential_id) VALUES ('example-owner', 'cred_pkg', 'cred_pat'), ('acme-org', 'cred_pkg_only', NULL)").run();
     standing.close();
     const h = openDb(file);
     handles.push(h);
     expect(h.sqlite.prepare("SELECT id, subject_kind, subject_id, purpose FROM credentials ORDER BY id").all()).toEqual([
-      { id: "cred_pat", subject_kind: "owner", subject_id: "digitaplatform", purpose: "repository-pat" },
-      { id: "cred_pkg", subject_kind: "owner", subject_id: "digitaplatform", purpose: "packages-reader" },
+      { id: "cred_pat", subject_kind: "owner", subject_id: "example-owner", purpose: "repository-pat" },
+      { id: "cred_pkg", subject_kind: "owner", subject_id: "example-owner", purpose: "packages-reader" },
       { id: "cred_pkg_only", subject_kind: "owner", subject_id: "acme-org", purpose: "packages-reader" },
     ]);
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]);

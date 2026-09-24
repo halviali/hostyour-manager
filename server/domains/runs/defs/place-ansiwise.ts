@@ -24,7 +24,7 @@ import { ANSIWISE_RUN_ROOT, MANAGER_HANDS_OVER } from "./machine-state.ts";
 //                  needs no `curl`, no `ca-certificates` and no network of its own to be bootstrapped.
 //   THE READING    `<executable> --version` — one word, no arguments of ours in it, and it mutates
 //                  nothing. Both binaries answer their release tag on one line
-//                  (ansiwise-cli lib/installation.dart `answeredVersion`, simetrixch/ansiwise-cli#7),
+//                  (ansiwise-cli lib/installation.dart `answeredVersion`),
 //                  which is what makes the placed version READABLE without a naming convention this
 //                  module would have to invent and then be the only reader of.
 //
@@ -88,7 +88,7 @@ export const ANSIWISE_REST_TOOL = "ansiwise-rest";
  *  manager reaches a machine (ansiwise-cli `bin/ansiwise_rest.dart` `sessionProgram`). The binary
  *  answers every other word with `ansiwise-rest has no program called "<word>"` and exits 64, so a
  *  manager that invokes one is a run that fails on the machine, three systems away from the change
- *  that caused it. simetrixch/ansiwise-cli#14 deleted the second and third programs; the scripted
+ *  that caused it. The engine deleted the second and third programs; the scripted
  *  machine (deploy-slave.placement.fixture.ts) refuses every word but this one, so a manager that
  *  grows a second invocation is caught here instead of there. */
 export const ANSIWISE_SESSION_PROGRAM = "serve";
@@ -335,7 +335,7 @@ export interface PlacementMachine {
    *
    *  NOTHING THIS RUNS ANSWERS WITH A CREDENTIAL, so every line a machine writes goes into the run's
    *  record. The one command that read one — `sudo cat` of the resident service's token file — went
-   *  with the door it authenticated (simetrixch/ansiwise-cli#14), and the option that kept its answer
+   *  with the door it authenticated, and the option that kept its answer
    *  out of the log went with it: an option nothing sets is a guard nobody is holding. */
   run(argv: readonly string[], o: { timeoutMs: number; stdin?: Buffer }): Promise<CommandOutcome>;
   /** Where a line an operator reads goes. */

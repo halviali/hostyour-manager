@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
@@ -15,7 +15,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { ClustersView, LockView, StoreMode } from "../../../shared/api-types.ts";
 
 const config = parseConfig({
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example",
   OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c",

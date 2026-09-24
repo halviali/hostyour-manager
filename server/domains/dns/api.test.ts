@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
@@ -20,7 +20,7 @@ import { registerDnsRoutes } from "./api.ts";
 // rows judged at the provider against the content the book holds.
 
 const config = parseConfig({
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s",
   MANAGER_VERSION: "test", DATA_DIR: "/d", LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
 } as NodeJS.ProcessEnv);

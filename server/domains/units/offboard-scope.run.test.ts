@@ -8,7 +8,7 @@ import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
 import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { Registrations } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
-import { FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
@@ -122,7 +122,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     const projects = new FakeMasterProjectWriter();
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL);
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
     const seeder = new RecordingTeardownSeeder();
     const dns = new FakeDnsProvider();
@@ -178,7 +178,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     const buildRbac = await seedBuildGrants();
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL); // both stages' onboards resolved this one host, so there is one hook
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
     const seeder = new RecordingTeardownSeeder();
     const creds = {

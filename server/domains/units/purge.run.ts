@@ -12,7 +12,7 @@ import { assertDeployState, clearRelocationHold, unitStaysRegistered, type AppCl
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
-import type { ConsumerRepo } from "../../adapters/git/port.ts";
+import type { RepoWriter } from "../../adapters/git/port.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { removeConsumerWebhook } from "./onboard-webhook.ts";
 import { unitRepoCredentialId } from "./repo-identity.ts";
@@ -103,7 +103,7 @@ export type PurgePorts = LifecyclePorts & {
   /** The consumer-repo writer — purge git-rm's the release-kit (release/ + the workflow) from the
    *  consumer repo BY NAME, with the unit's LAST stage (self-contained, fail-soft). Optional: absent ⇒
    *  the remove-release-kit step logs + skips (never blocks purge). */
-  consumerRepo?: ConsumerRepo;
+  consumerRepo?: RepoWriter;
   /** The build-grant writer — purge deletes this stage's argo-sync Role + RoleBinding BY NAME, and the
    *  `<name>-build` pair with the unit's LAST stage (fail-soft). Optional: absent ⇒ the
    *  delete-build-rbac step logs + skips (never blocks purge). */
@@ -220,8 +220,8 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
           );
         } catch (err) {
           // A read failure here (ArgoCD unreachable) must NOT stop the teardown — if the master surface
-          // is genuinely down, the later master-side deletes (delete-appproject) fail loud + retryable
-          // on their own. Observe-and-continue keeps purge reaping everything it CAN reach.
+          // is genuinely down, the later master-side deletes (delete-repo-credential,
+          // delete-smtp-ops-grant) fail loud + retryable on their own. Observe-and-continue keeps purge reaping everything it CAN reach.
           ctx.checkpoint({ application: appName, pruned: false, watchError: err instanceof Error ? err.message : String(err) });
           ctx.log("meta", `could not confirm the prune of ${appName} (${err instanceof Error ? err.message : String(err)}) — continuing; delete-namespace will force-reap the workloads`);
         }

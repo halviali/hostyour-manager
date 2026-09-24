@@ -381,14 +381,14 @@ export function registerStep(target: SlaveTarget): Step {
       ctx.checkpoint({ clusterId: cluster.id, slaveId: cluster.slaveId, planeV: plane.v });
       ctx.log("meta", `cluster ${cluster.id} is ACTIVE — ${domain} (slave ${name}, ${stage}) now runs from its own branch under ns ${name}`);
       // The per-slave management surface on the master: argo has its
-      // own name-based Ingress under the *.<masterFqdn> wildcard, OIDC login via the master's
-      // Authentik (the local admin account is OFF). The kube dashboard is NOT per-slave — it's
+      // own name-based Ingress under the *.<masterFqdn> wildcard, OIDC login via the installation's
+      // identity provider (the local admin account is OFF). The kube dashboard is NOT per-slave — it's
       // the ONE shared Headlamp on the master (kube.<masterFqdn>) where this slave shows up as a
       // cluster-picker context (Piece B). The Vault surface is the master's per-slave KV mount and
       // stays that way — Vault is central on the master, so a slave never gets its own instance:
       ctx.log("meta",
         `slave management on the master (ns ${name}): ` +
-        `argo → https://argo-${name}.${masterFqdn} (ArgoCD; OIDC login via Authentik) · ` +
+        `argo → https://argo-${name}.${masterFqdn} (ArgoCD; OIDC login via the installation's identity provider) · ` +
         `kube → https://kube.${masterFqdn} (shared Headlamp; pick the "${name}" cluster) · ` +
         `vault → KV mount ${name} on https://vault.${masterFqdn}`);
     },

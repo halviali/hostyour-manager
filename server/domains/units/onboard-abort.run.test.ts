@@ -13,7 +13,7 @@ import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES } from "./onboard.fixture.ts";
 import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
-import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
@@ -173,7 +173,7 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     github: new FakeGitHubConsumer(),
     webhookSecret: "hmac_test",
     webhookSubdomain: "build",
-    consumerRepo: new FakeConsumerRepo(),
+    consumerRepo: new FakeRepoWriter(),
     buildRbac: new FakeBuildRbacWriter(),
     // The reader await-build-namespace waits through, scripted converged: this journey's
     // subject is the run and not that wait.

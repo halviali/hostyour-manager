@@ -1,7 +1,5 @@
-// The gate-runner report contract. Kept in shared/ so the
-// runner (which authors the sandbox gates G1/G2/G3/G6/G7/G8/G22 and, when its own fence did not
-// hold, the refusal row G25), the Manager (which authors the manager-side gates
-// G16/G17/G18/G19/G23/G24, the refusal row G26, and composes the report), and the web card all
+// The gate-runner report contract. Kept in shared/ so the runner (which authors the sandbox gates),
+// the Manager (which authors the manager-side gates and composes the report) and the web card all
 // agree on one shape. zod-backed; the inferred types are the single source of truth.
 //
 // every gate states, in full sentences, what was EXPECTED, what was FOUND, and — on a
@@ -36,7 +34,7 @@ const TEXT_MAX = 2000;
  *  so the text and the predicate cannot drift. */
 export const GateResultSchema = z
   .object({
-    id: z.string().regex(/^[GT][0-9]{1,2}$/), // consumer "G1"…"G26" / tenant "T1"…"T4" (same shape)
+    id: z.string().regex(/^[GT][0-9]{1,2}$/), // consumer "G<n>" / tenant "T<n>" (same shape)
     title: z.string(),
     severity: z.enum(["hard", "soft"]),
     status: z.enum(["pass", "warn", "fail"]),

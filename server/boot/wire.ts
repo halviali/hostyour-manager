@@ -25,7 +25,7 @@ import { HttpMetricsQuery } from "../adapters/metrics/metrics-http.ts";
 import { SessionCodec } from "../domains/access/session.ts";
 import { LoginTxCodec } from "../domains/access/login-tx.ts";
 import { registerAuthRoutes } from "../domains/access/routes.ts";
-import { createOidcAdapter } from "../adapters/oidc/authentik.ts";
+import { createOidcAdapter } from "../adapters/oidc/openid-client.ts";
 import { EmergencyStore, createEmergencyApp, serveAdminSocket } from "../domains/access/emergency.ts";
 import { registerRunRoutes } from "../domains/runs/api.ts";
 import { registerClustersRoutes, registerServerRoutes } from "../domains/inventory/api.ts";
@@ -151,7 +151,7 @@ export async function wire(): Promise<Wired> {
   const resolver = makeClusterKubeResolver({
     db: db.db,
     master: masterKube,
-    openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
+    openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
     buildClusterReader: (input) => new KubeClusterReader(input),
   });
   const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver }, githubApp);

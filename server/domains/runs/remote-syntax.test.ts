@@ -206,7 +206,7 @@ describe("the census: every shell a run sends to a host is in the collection", (
 // argument lists; raw `session.exec` at nine call sites that bypass stepkit entirely; and the
 // installation's own ANSIWISE_SERVE_COMMAND — and SENDERS above reaches only the first two, because
 // it matches an identifier call and the rest are property-access calls or configuration. The word
-// that went unnoticed (`install-service`, simetrixch/ansiwise-cli#14) stood in the third of those.
+// that went unnoticed (`install-service`) stood in the third of those.
 //
 // WHAT A WORD LIST IS: an ARRAY whose elements are text is one list, in its own order; any other
 // piece of text is its own contents split on whitespace. So `[`${BOOTSTRAP_HOME}${ANSIWISE_REST_TOOL}`,

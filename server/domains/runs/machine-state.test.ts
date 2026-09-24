@@ -35,7 +35,7 @@ import {
 //   remote-syntax.test.ts holds every one of those to a single line, so it is a line the reader of
 //   the call site sees whole — nor an argument list the placement composes for `machine.run`. The one
 //   of those that carried absolute paths was `installServiceArgv`, named here by hand until
-//   simetrixch/ansiwise-cli#14 deleted the program it invoked. Those argument lists ARE read now, by
+//   the engine deleted the program it invoked. Those argument lists ARE read now, by
 //   the second census in remote-syntax.test.ts, but only for the program word in them: that census
 //   asks which binary a word invokes and never which paths a command carries, so a path written into
 //   an argument list is still answered by nobody.

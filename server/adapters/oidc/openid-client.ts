@@ -4,7 +4,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import { errIdpUnreachable, errValidation } from "../../kernel/errors.ts";
 import type { OidcPort, OidcIdentity } from "./port.ts";
 
-const GROUPS_CLAIM = "groups"; // Authentik emits group memberships under `groups`.
+const GROUPS_CLAIM = "groups"; // The identity provider emits group memberships under `groups`.
 
 /**
  * OIDC via openid-client v6. Discovery is lazy + memoized with exponential
@@ -47,7 +47,7 @@ export function createOidcAdapter(config: Config, logger: Logger): OidcPort {
       return oidc
         .buildAuthorizationUrl(c, {
           redirect_uri: opts.redirectUri,
-          // MUST request `groups` — Authentik only emits a claim for the scopes the
+          // MUST request `groups` — the identity provider only emits a claim for the scopes the
           // client asks for, so without it the id_token carries no `groups` claim and
           // the staff gate (chokepoint.ts, ADMINS_GROUP) denies EVERYONE. The mock IdP
           // emits groups unconditionally, which is why tests didn't catch this.

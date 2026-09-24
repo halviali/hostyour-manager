@@ -1,7 +1,7 @@
 // The real git adapter behind port.ts: all IO is argv-array execFile via git-exec.ts —
 // no shell, and a credential can only travel through the askpass helper, never URL/argv/config.
 //
-//  - GitRepoReader clones a consumer repo into a fresh mkdtemp workdir (init + fetch + detached
+//  - GitRepoReader clones a repository into a fresh mkdtemp workdir (init + fetch + detached
 //    checkout, so a branch, a tag, and a 40-char SHA all resolve) to resolve + pin the SHA and read
 //    single files — the read credential stays Manager-side.
 //  - GitPlatformRepo keeps one persistent worktree per branch under deps.workRoot: fetch +
@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { errValidation } from "../../kernel/errors.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
-import type { BranchScope, ClonedRepo, CommitInput, ConsumerRepo, ConsumerRepoSession, PlatformRepo, RepoReader } from "./port.ts";
+import type { BranchScope, ClonedRepo, CommitInput, RepoWriter, RepoCheckout, PlatformRepo, RepoReader } from "./port.ts";
 import { runGit, withAskpass } from "./git-exec.ts";
 import { listWorkdirDir, readWorkdirFile, safePath } from "./git-workdir.ts";
 
@@ -497,9 +497,9 @@ export class GitPlatformRepo implements PlatformRepo {
 // defeats the match; the remote emits exactly one such symref line for HEAD.
 const HEAD_SYMREF_RE = /ref:\s+refs\/heads\/(\S+)\s+HEAD/;
 
-export interface GitConsumerRepoDeps {
-  /** Opens the consumer repo's push credential's token bytes by id (the CredentialStore seam) — the
-   *  SAME sealed one-PAT-per-consumer the reader clones with. Required: every consumer repo is private. */
+export interface GitRepoWriterDeps {
+  /** Opens the repository's push credential's token bytes by id (the CredentialStore seam) — the
+   *  SAME sealed credential the reader clones with. Required: a push always needs one. */
   openCredential: (credentialId: string) => Promise<Buffer>;
   committerName?: string; // default MANAGER_COMMITTER_NAME
   committerEmail?: string; // default MANAGER_COMMITTER_EMAIL
@@ -507,17 +507,17 @@ export interface GitConsumerRepoDeps {
   allowFileURLs?: boolean;
 }
 
-/** Writes into a CONSUMER's OWN repo (the release-kit lifecycle). It borrows
+/** Writes into a repository the Manager does not own (the release-kit lifecycle). It borrows
  *  GitRepoReader's disposable-clone model (a fresh mkdtemp per open, init + fetch + checkout, disposed
  *  by the caller) and GitPlatformRepo's commit body (the write/remove de-overlap, the empty-staged-diff
  *  no-op, the non-fast-forward push retry) — but adds the ONE primitive neither has: resolving the
- *  consumer repo's own default branch from the remote HEAD symref (main/master/… is not known up
+ *  repository's own default branch from the remote HEAD symref (main/master/… is not known up
  *  front, unlike the platform repo whose branch the domain passes in). The credential travels ONLY
  *  through the askpass helper: never the URL (assertRepoURL forbids userinfo), argv, or config. */
-export class GitConsumerRepo implements ConsumerRepo {
-  constructor(private readonly deps: GitConsumerRepoDeps) {}
+export class GitRepoWriter implements RepoWriter {
+  constructor(private readonly deps: GitRepoWriterDeps) {}
 
-  async open(input: { repoURL: string; credentialId: string; signal?: AbortSignal }): Promise<ConsumerRepoSession> {
+  async open(input: { repoURL: string; credentialId: string; signal?: AbortSignal }): Promise<RepoCheckout> {
     const { repoURL, credentialId } = input;
     assertRepoURL(repoURL, this.deps.allowFileURLs);
     const workdir = await mkdtemp(join(tmpdir(), "hostyour-consumer-"));

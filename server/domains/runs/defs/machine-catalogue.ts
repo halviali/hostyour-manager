@@ -9,7 +9,7 @@ import { CATALOG_CHECKOUT } from "./machine-state.ts";
 // CATALOGUE on that machine, while the engine is placed from the pin on the platform repo's trunk.
 // The catalogue is refreshed by a `git_clone` row of a program, and a program is itself read out of
 // the catalogue, so on the first run after any pin move a machine carries the new engine and the old
-// programs and the assertion fails. Measured on apps4.digitacloud.app on 2026-08-27, on every pin
+// programs and the assertion fails. Measured on a slave on 2026-08-27, on every pin
 // move that evening: "ansiwise is at 0.5.7-alpha-20260827121634 and the program pins
 // 0.5.3-alpha-20260826225248".
 //

@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
 import { CredentialStore } from "../security/store.ts";
 import { masterKubeClients } from "./master-kube.ts";
 import { KubeClusterReader } from "../adapters/kube/kube.ts";
@@ -28,11 +28,11 @@ const CONSUMER_KINDS: readonly string[] = RUN_FAMILY.consumer;
 const TENANT_KINDS: readonly string[] = RUN_FAMILY.tenant;
 
 // The full enable env for BOTH families — deliberately WITHOUT KUBECONFIG_PATH: the consumer gate
-// is ONBOARD_GATE_MANAGER_ADDR + github, the tenant gate is the catalog write PAT. MASTER_*
+// is ONBOARD_GATE_MANAGER_ADDR + github, the tenant gate is CATALOG_REPO. MASTER_*
 // is part of the enable set for both, because both write onto the branch this installation keeps its
 // books on and that branch is named after the cluster holding the master role.
 const enabledEnv = {
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example",
   OIDC_ISSUER: "https://idp.example/",
   OIDC_CLIENT_ID: "manager",
@@ -41,10 +41,9 @@ const enabledEnv = {
   ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
-  GITHUB_REPO: "simetrixch/hostyour-cloud",
+  GITHUB_REPO: "example/platform",
   GITHUB_WRITE_PAT: "ghp_platform",
   CATALOG_REPO: "acme/acme-catalog",
-  CATALOG_WRITE_PAT: "ghp_deploy",
   MASTER_FQDN: "m1.example.com",
   MASTER_SSH_USER: "m1",
   MASTER_STAGE: "prod",
@@ -94,7 +93,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     const resolver = makeClusterKubeResolver({
       db: h.db,
       master,
-      openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
+      openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
     return [config, store, h.db, logger, { master, resolver }, new FakeGitHubApp()];
@@ -157,7 +156,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     expect(buildUnits(...setup()).carryTrunkToBooksBranch).toBeTypeOf("function");
     // Without a catalog there is no repository to write into, so boot has nothing to call and must
     // not be handed something that would fail on every start-up.
-    expect(buildUnits(...setup({ CATALOG_WRITE_PAT: undefined, CATALOG_REPO: undefined })).carryTrunkToBooksBranch).toBeUndefined();
+    expect(buildUnits(...setup({ CATALOG_REPO: undefined })).carryTrunkToBooksBranch).toBeUndefined();
   });
 
   it("consumer stays off without the gate-runner config; the tenant family is independent", () => {
@@ -170,8 +169,8 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     expect(wiring.registrations).toBeUndefined();
   });
 
-  it("tenant stays off without the catalog write PAT; the consumer family is independent", () => {
-    const wiring = buildUnits(...setup({ CATALOG_WRITE_PAT: undefined, CATALOG_REPO: undefined }));
+  it("tenant stays off without CATALOG_REPO; the consumer family is independent", () => {
+    const wiring = buildUnits(...setup({ CATALOG_REPO: undefined }));
     expect(wiring.enabled).toBe(true);
     expect(wiring.tenantEnabled).toBe(false);
     expect(wiring.defs.map((d) => d.kind).sort()).toEqual([...CONSUMER_KINDS].sort());
@@ -181,7 +180,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
   });
 
   it("returns the empty wiring when neither family is configured (routes answer 501)", () => {
-    const wiring = buildUnits(...setup({ ONBOARD_GATE_MANAGER_ADDR: undefined, CATALOG_WRITE_PAT: undefined, CATALOG_REPO: undefined }));
+    const wiring = buildUnits(...setup({ ONBOARD_GATE_MANAGER_ADDR: undefined, CATALOG_REPO: undefined }));
     expect(wiring.enabled).toBe(false);
     expect(wiring.tenantEnabled).toBe(false);
     expect(wiring.defs).toHaveLength(0);
@@ -189,7 +188,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
 
   it("wires a REAL consumer-repo release-kit writer into the onboard def (https-only, not the fail-loud wiring gap)", async () => {
     // The release-kit writer is constructed in buildConsumerOnboarding and
-    // injected into onboard. Prove it is the real GitConsumerRepo (not an absent port): production is
+    // injected into onboard. Prove it is the real GitRepoWriter (not an absent port): production is
     // https-only, so running inject-release-kit against a file:// repoURL is rejected by the ADAPTER
     // ("must use https"), NOT by the step's own "none is wired" fail-loud guard.
     const wiring = buildUnits(...setup());

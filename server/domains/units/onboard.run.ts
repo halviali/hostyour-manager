@@ -44,7 +44,7 @@ import { resolveMasterCluster } from "./tenant-values.ts";
 import { consumerUnitHost, standingHostFrom } from "./unit-dns.ts";
 import type { Registrations } from "./registrations.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
-import type { RepoReader, ConsumerRepo } from "../../adapters/git/port.ts";
+import type { RepoReader, RepoWriter } from "../../adapters/git/port.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 
@@ -309,7 +309,7 @@ export interface OnboardPorts {
    *  scripts + .github/workflows/release.yml — into the consumer repo at onboard, and offboard/purge
    *  remove it. Optional but UNCONDITIONALLY needed by onboard — absent ⇒ inject-release-kit fails
    *  loud (no release kit → no release cycle), never a silent skip (setup-webhook precedent). */
-  consumerRepo?: ConsumerRepo;
+  consumerRepo?: RepoWriter;
   /** The consumer name of the PLATFORM'S OWN unit (config.ts PLATFORM_UNIT_NAME). The one unit that
    *  may be onboarded without a gate run, and only at the first installation in the master role —
    *  first-master.ts states the other three conditions. Absent ⇒ no onboarding on this Manager may

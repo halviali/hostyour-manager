@@ -18,7 +18,7 @@
 // to git-rm the release-kit NEVER blocks teardown — every failure path logs a warning and returns.
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
-import type { ConsumerRepo } from "../../adapters/git/port.ts";
+import type { RepoWriter } from "../../adapters/git/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { RELEASE_KIT_DIR, RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "./release-kit/release-kit.ts";
 
@@ -90,7 +90,7 @@ export function injectReleaseKitStep(ports: OnboardPorts, p: OnboardParams): Ste
 export async function removeReleaseKit(
   ctx: StepCtx,
   opts: {
-    consumerRepo: ConsumerRepo | undefined;
+    consumerRepo: RepoWriter | undefined;
     consumerName: string;
     repoURL: string | null | undefined;
     repoCredentialId: string | null | undefined;

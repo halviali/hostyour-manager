@@ -7,7 +7,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { computeBackoffMs, GitConsumerRepo, GitPlatformRepo, GitRepoReader, type PushBackoff } from "./git.ts";
+import { computeBackoffMs, GitRepoWriter, GitPlatformRepo, GitRepoReader, type PushBackoff } from "./git.ts";
 import { pathToFileURL } from "node:url";
 import { commitAll, dropRoots, git, makeOrigin, newRoot } from "./testing/origin-fixture.ts";
 
@@ -237,11 +237,11 @@ describe("GitPlatformRepo", () => {
   );
 });
 
-describe("GitConsumerRepo", () => {
+describe("GitRepoWriter", () => {
   // file:// origins need no auth, but the port opens a credential unconditionally — hand back a
   // fixed single-line token the askpass helper materializes (git never invokes it for file://).
   const openCredential = () => Promise.resolve(Buffer.from("unused-file-origin-token", "utf8"));
-  const makeConsumer = () => new GitConsumerRepo({ openCredential, allowFileURLs: true });
+  const makeConsumer = () => new GitRepoWriter({ openCredential, allowFileURLs: true });
 
   /** A bare file:// origin with a CHOSEN default branch (to prove branch resolution is not hardcoded
    *  to main), seeded with one file so open() has a tree to check out. */
@@ -353,7 +353,7 @@ describe("GitConsumerRepo", () => {
   );
 
   it("refuses a non-file:// origin in the production (no file:// opt-in) default", async () => {
-    const strict = new GitConsumerRepo({ openCredential }); // no allowFileURLs → https-only
+    const strict = new GitRepoWriter({ openCredential }); // no allowFileURLs → https-only
     const { originURL } = makeConsumerOrigin("main");
     await expect(strict.open({ repoURL: originURL, credentialId: "cred_x" })).rejects.toMatchObject({ code: "VALIDATION" });
   });

@@ -1,6 +1,4 @@
-// The boundary law. These rules are the machine enforcement of
-// the 17-law doctrine: one writer per table, one mutation path, IO libs only in adapters/.
-// A boundary change is a same-commit edit to this file + the domain README.
+// The boundary law: one writer per table, one mutation path, I/O libraries only in adapters/.
 
 // The processes this repo ships, each named by the file that starts it: server/index.ts (the
 // package.json `start` script), web/src/main.tsx (the module script in web/index.html, which vite

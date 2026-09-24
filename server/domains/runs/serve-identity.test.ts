@@ -15,15 +15,15 @@ import type { Stage } from "../../../shared/enums.ts";
 
 describe("serveIdentity — the three facts a serve cannot default", () => {
   it("says the role, the domain and the stage, in the form the binary takes", () => {
-    expect(serveIdentity({ role: "slave", fqdn: "apps4.digitacloud.app", stage: "prod" }))
-      .toBe("--role slave --fqdn apps4.digitacloud.app --stage prod");
+    expect(serveIdentity({ role: "slave", fqdn: "s4.example.invalid", stage: "prod" }))
+      .toBe("--role slave --fqdn s4.example.invalid --stage prod");
   });
 
   it("carries a role of two parts as it stands, because that is what the machine is", () => {
     // A machine can hold both parts; the engine reads the role's parts and a program naming either
     // applies. Splitting or shortening it here would be this module deciding what a machine is.
-    expect(serveIdentity({ role: "master", fqdn: "apps3.digitacloud.app", stage: "test" }))
-      .toBe("--role master --fqdn apps3.digitacloud.app --stage test");
+    expect(serveIdentity({ role: "master", fqdn: "s3.example.invalid", stage: "test" }))
+      .toBe("--role master --fqdn s3.example.invalid --stage test");
   });
 
   it("says the role alone for a host that carries no cluster, because a repair reaches such hosts", () => {
@@ -40,9 +40,9 @@ describe("serveIdentity — the three facts a serve cannot default", () => {
     // word into the record of every run the machine performs. Measured on apps6, a prod master:
     // record 20260903T220006Z-227727-07d5f8a7 carries "stage": "dev". Nothing reads the field back,
     // which is why the wrong value survived a rebuild — so what holds it is this, not a consumer.
-    expect(serveIdentity({ role: "master", fqdn: "apps6.digitacloud.app", stage: "prod" }))
+    expect(serveIdentity({ role: "master", fqdn: "s6.example.invalid", stage: "prod" }))
       .toContain("--stage prod");
-    expect(serveIdentity({ role: "master", fqdn: "apps6.digitacloud.app" })).not.toContain("--stage");
+    expect(serveIdentity({ role: "master", fqdn: "s6.example.invalid" })).not.toContain("--stage");
   });
 
   it("PLANTED DEFECT: a value that is not one plain word is refused, never quoted", () => {

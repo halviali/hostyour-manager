@@ -1,4 +1,4 @@
-/* Screen compositions — Clusters, Runs/RunDetail (steps + live log), Servers, AdoptWizard.
+/* Screen compositions — Clusters, Runs/RunDetail (steps + live log), Servers, the onboarding wizards.
    These compose the primitives in ui.css; only page-level arrangement lives here. */
 
 /* ---- Clusters: verdict + stat tiles ---- */
@@ -648,7 +648,7 @@
   gap: var(--sp-2);
 }
 
-/* ---- Servers: the lifecycle stepper (Added → Adopted → Deployed → Live) ---- */
+/* ---- Servers: the lifecycle stepper (Added → Deployed → Live) ---- */
 
 .lifecycle {
   display: flex;
@@ -774,7 +774,7 @@
   }
 }
 
-/* ---- AdoptWizard ---- */
+/* ---- The onboarding wizards (ConsumerOnboard, TenantCreate) ---- */
 
 .wizard-card {
   max-width: 30rem;

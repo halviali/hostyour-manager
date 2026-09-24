@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { parseConfig, type Config } from "../../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { EncryptJWT } from "jose";
 import { SessionCodec, loadOrCreateKey } from "./session.ts";
 import { revokeJti, bootEpochMs, __setBootEpochForTest } from "./revocation.ts";
 
 const config = parseConfig({
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example",
   OIDC_ISSUER: "https://idp.example/",
   OIDC_CLIENT_ID: "c",

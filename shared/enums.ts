@@ -226,8 +226,7 @@ export type DriftVerdict = (typeof DRIFT_VERDICT)[number];
 // Two literals, not three. One act gets ONE word: a consumer onboard and a tenant writer spelling the
 // same act differently — "imported" against "manager" — make a reader of either conclude they mean
 // different things, and a query for one then answers about one unit kind while silently leaving out
-// the other. Nor is there a literal for a consumer taken over from a cluster this platform did not
-// build: that belongs to a connect-cluster run kind, which is in no RUN_KIND, so nothing writes it.
+// the other.
 //
 // The word is the PRODUCT's name, and this is the surface an operator reads it on: the consumer and
 // tenant lists render the stored value straight into a chip (web/src/pages/Consumers.tsx,

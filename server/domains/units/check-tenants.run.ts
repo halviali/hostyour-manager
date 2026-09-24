@@ -2,8 +2,9 @@
 //
 // A tenant whose first-admin invitation was never accepted, or whose only administrator was removed,
 // is a tenant nobody can get into. Its pods run, its databases answer, its ingress serves — and no
-// human can administer it. Nothing noticed that state; a Kubernetes CronJob starts this run on a
-// schedule and it writes what it found onto each tenant's inventory row.
+// human can administer it. Nothing noticed that state; an in-process timer starts this run every
+// six hours (boot/check-tenants-schedule.ts) and it writes what it found onto each tenant's
+// inventory row.
 //
 // A RUN and not a job that does its own work, unlike the registry reaper beside it. The reaper's
 // output is a reaped tag and nobody needs to see the reaping; a tenant check exists to make

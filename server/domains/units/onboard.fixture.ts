@@ -5,7 +5,7 @@
 import { type OnboardPorts } from "./onboard.run.ts";
 import { Registrations } from "./registrations.ts";
 import { seedClusterMaps } from "./cluster-map.fixture.ts";
-import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
 import type { ExternalSecretRow } from "../../adapters/kube/port.ts";
@@ -175,7 +175,7 @@ export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts
     github: new FakeGitHubConsumer(),
     webhookSecret: "hmac_test",
     webhookSubdomain: "build",
-    consumerRepo: new FakeConsumerRepo(),
+    consumerRepo: new FakeRepoWriter(),
     buildRbac: new FakeBuildRbacWriter(),
     // The master-local reader await-build-namespace waits through. Scripted CONVERGED by default,
     // because that step's subject is the wait and not the outcome: a fixture whose build Application

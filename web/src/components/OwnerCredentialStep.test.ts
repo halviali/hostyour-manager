@@ -8,11 +8,11 @@ import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 describe("OwnerCredentialStep", () => {
   it("is not a form, and its Record is a plain button", () => {
     for (const need of [{ kind: "repository-pat" as const }, { kind: "packages-reader" as const, scopes: ["acme"] }]) {
-      const html = renderToStaticMarkup(createElement(OwnerCredentialStep, { owner: "ahkutun", need, onRecord: async () => undefined, subject: "The repository" }));
+      const html = renderToStaticMarkup(createElement(OwnerCredentialStep, { owner: "acme-owner", need, onRecord: async () => undefined, subject: "The repository" }));
       expect(html).not.toContain("<form");
       expect(html).toContain('type="button"');
       expect(html).not.toContain('type="submit"');
-      expect(html).toContain("ahkutun");
+      expect(html).toContain("acme-owner");
     }
   });
 });

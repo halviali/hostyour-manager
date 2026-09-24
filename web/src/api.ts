@@ -447,7 +447,7 @@ export const probeConsumerLive = (q: { clusterId: string; name: string; stage: S
 // whose run sits in `planning` while the T1..T4 fan-out gates validate — the operator watches
 // the live gate report on the Run screen and approves there. remove-app + the tenant-wide
 // lifecycle (suspend/resume/offboard) plan synchronously. The list/detail reads stay live even
-// when the mutating routes answer 501 NOT_CONFIGURED (the catalog write PAT is absent).
+// when the mutating routes answer 501 NOT_CONFIGURED (tenant onboarding is not configured).
 
 /** A cluster a tenant can be created on (mirrors OnboardTargetView; tenants share the clusters). */
 export interface TenantTargetView {

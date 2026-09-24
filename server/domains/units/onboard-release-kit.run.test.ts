@@ -4,7 +4,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { injectReleaseKitStep, removeReleaseKit } from "./onboard-release-kit.ts";
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "./release-kit/release-kit.ts";
-import { FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { AppError } from "../../kernel/errors.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -54,7 +54,7 @@ function ctx(logs: string[]): StepCtx {
 
 describe("onboard inject-release-kit step (replace, never layer)", () => {
   it("commits the 3 release-kit files on the consumer repo's default branch when none are present", async () => {
-    const consumerRepo = new FakeConsumerRepo({ branch: "trunk" }); // a non-main default proves branch resolution rides through
+    const consumerRepo = new FakeRepoWriter({ branch: "trunk" }); // a non-main default proves branch resolution rides through
     const logs: string[] = [];
     await step({ consumerRepo }).run(ctx(logs));
 
@@ -74,7 +74,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
   });
 
   it("is a NO-OP on a repo already carrying the current kit: no commit, no error", async () => {
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content); // present + current
     const logs: string[] = [];
     await step({ consumerRepo }).run(ctx(logs)); // resolves — a re-onboard is legitimate
@@ -95,7 +95,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
     //
     // Seeded with the bytes that actually stand in this repository — read off disk, not off the
     // assets — so the assertion measures the two copies rather than restating one.
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     const own: Record<string, string> = {};
     for (const path of ["release/release.sh", "release/release.ps1"]) {
       own[path] = readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
@@ -125,7 +125,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
   });
 
   it("REPLACES a divergent copy with the current asset bytes — the kit is platform-owned, and the trigger runs exactly these bytes", async () => {
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content);
     consumerRepo.seed(REPO_URL, ".github/workflows/release.yml", "name: OldKitRelease\n"); // an older kit's workflow
     const logs: string[] = [];
@@ -140,7 +140,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
   });
 
   it("REMOVES a stale file of an older kit under release/ in the same commit; consumer-owned paths are untouched", async () => {
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     for (const f of RELEASE_KIT_FILES) consumerRepo.seed(REPO_URL, f.path, f.content);
     consumerRepo.seed(REPO_URL, "release/release-legacy.sh", "old kit helper\n"); // stale — the current set no longer carries it
     consumerRepo.seed(REPO_URL, "src/app.ts", "consumer code\n"); // consumer-owned — never touched
@@ -157,7 +157,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
   });
 
   it("fails CLOSED when the push is unauthorized (a PAT without contents:write)", async () => {
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: remote: Permission to x/acme.git denied to token (403)"));
     // The step throws, so the run aborts before the release cycle is ever triggered.
     await expect(step({ consumerRepo }).run(ctx([]))).rejects.toThrow(/Permission to x\/acme\.git denied/);
@@ -171,7 +171,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
 
 describe("removeReleaseKit (shared offboard/purge teardown)", () => {
   it("git-rm's the kit directory + the workflow file and is fail-soft on a push refusal", async () => {
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     for (const p of RELEASE_KIT_PATHS) consumerRepo.seed(REPO_URL, p, "kit"); // present from onboard
     consumerRepo.seed(REPO_URL, "release/release-legacy.sh", "old kit helper\n"); // a stale leftover goes with the directory
     const logs: string[] = [];
@@ -182,7 +182,7 @@ describe("removeReleaseKit (shared offboard/purge teardown)", () => {
     expect(logs.some((l) => l.includes("release-kit removed from"))).toBe(true);
 
     // Fail-soft: a push refusal logs + returns, never throws.
-    const failing = new FakeConsumerRepo();
+    const failing = new FakeRepoWriter();
     failing.failCommit(new AppError("UPSTREAM", "git push failed: 403"));
     const warnLogs: string[] = [];
     await expect(removeReleaseKit(ctx(warnLogs), { consumerRepo: failing, consumerName: "acme", repoURL: REPO_URL, repoCredentialId: "cred_pat" })).resolves.toBeUndefined();
@@ -194,7 +194,7 @@ describe("removeReleaseKit (shared offboard/purge teardown)", () => {
     await removeReleaseKit(ctx(noWriterLogs), { consumerRepo: undefined, consumerName: "acme", repoURL: REPO_URL, repoCredentialId: "cred_pat" });
     expect(noWriterLogs.some((l) => l.includes("no consumer-repo git writer is wired"))).toBe(true);
 
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     const orphanLogs: string[] = [];
     await removeReleaseKit(ctx(orphanLogs), { consumerRepo, consumerName: "acme", repoURL: null, repoCredentialId: null });
     expect(consumerRepo.opened).toEqual([]); // never opened — nothing to remove

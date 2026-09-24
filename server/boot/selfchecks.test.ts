@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { parseConfig, type Config } from "../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { CredentialStore } from "../security/store.ts";
 import { masterKubeClients } from "./master-kube.ts";
@@ -26,7 +26,7 @@ import { FakeGitHubApp } from "../adapters/github-app/testing/fake.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf } from "./selfchecks.ts";
 
 const BASE_ENV = {
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://idp.example/o/manager/",
   OIDC_CLIENT_ID: "manager",
@@ -45,10 +45,9 @@ const config = parseConfig(BASE_ENV);
 const wiredConfig = parseConfig({
   ...BASE_ENV,
   ONBOARD_GATE_MANAGER_ADDR: "10.152.183.5:8484",
-  GITHUB_REPO: "simetrixch/hostyour-cloud",
+  GITHUB_REPO: "example/platform",
   GITHUB_WRITE_PAT: "ghp_platform",
   CATALOG_REPO: "acme/acme-catalog",
-  CATALOG_WRITE_PAT: "ghp_deploy",
   // Both onboarding families write onto the branch this installation keeps its books on, which is
   // named after the cluster holding the master role — so a fully configured manager states it.
   MASTER_FQDN: "m1.example.com",
@@ -70,7 +69,7 @@ describe("boot self-checks", () => {
     const resolver = makeClusterKubeResolver({
       db: db.db,
       master,
-      openCredential: (id) => store.open(id, { purpose: "consumer-onboard" }),
+      openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
     const onboarding = buildUnits(onboardingConfig, store, db.db, logger, { master, resolver }, new FakeGitHubApp());

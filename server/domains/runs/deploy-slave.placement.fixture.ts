@@ -140,9 +140,9 @@ export function answerPlacementCommand(
 
   // THE SERVING BINARY HAS ONE PROGRAM, and this is where a manager that invokes a second one is
   // caught. The real binary answers every other word with this sentence and exits 64
-  // (ansiwise-cli bin/ansiwise_rest.dart, simetrixch/ansiwise-cli#14), so the scripted machine does
+  // (ansiwise-cli bin/ansiwise_rest.dart), so the scripted machine does
   // too: a step that composed `install-service` again — or any word somebody invents next — fails
-  // HERE, in every suite that drives a deployment, instead of on a customer's machine three systems
+  // HERE, in every suite that drives a deployment, instead of on a machine three systems
   // away. It is a rule and not a list: the accepted word is the one the manager declares, and every
   // other is refused without this fixture having to know what it is called.
   const program = words[1];

@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as oidc from "openid-client";
 import { parseConfig, type Config } from "../../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
-import { createOidcAdapter } from "./authentik.ts";
+import { createOidcAdapter } from "./openid-client.ts";
 import { startMockIdp, type MockIdp } from "./testing/mock-idp.ts";
 import type { OidcPort } from "./port.ts";
 
@@ -17,7 +17,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
   function adapterFor(mock: MockIdp, groups: string[]): { adapter: OidcPort; config: Config } {
     mock.setGroups(groups);
     const config = parseConfig({
-      ...GITHUB_APP_ENV,
+      ...REQUIRED_ENV,
       PUBLIC_URL: "https://m1.example",
       OIDC_ISSUER: mock.issuer,
       OIDC_CLIENT_ID: mock.clientId,
@@ -45,7 +45,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
     expect(authUrl).toContain("code_challenge=");
     expect(authUrl).toContain(`state=${state}`);
     expect(authUrl).toContain(encodeURIComponent(config.redirectUri));
-    // MUST request the `groups` scope: real Authentik only emits a claim for the
+    // MUST request the `groups` scope: a real identity provider only emits a claim for the
     // scopes the client asks for, so without it the id_token carries no groups and
     // the staff gate denies everyone. (The mock emits groups unconditionally, so this
     // assertion — not the exchange below — is what guards the regression.)
@@ -87,7 +87,7 @@ describe("OIDC adapter against a real in-process mock IdP", () => {
 
   it("surfaces an unreachable IdP as IDP_UNREACHABLE", async () => {
     const config = parseConfig({
-      ...GITHUB_APP_ENV,
+      ...REQUIRED_ENV,
       PUBLIC_URL: "https://m1.example",
       OIDC_ISSUER: "http://127.0.0.1:1/", // nothing listening
       OIDC_CLIENT_ID: "c",

@@ -8,7 +8,6 @@ import type { RunKind } from "../../shared/enums.ts";
 import { RunSecretsMap } from "./secrets.ts";
 import { RunContext } from "./context.ts";
 import { hashPlan } from "./plan-hash.ts";
-import { runGuards } from "./guards.ts";
 import type { ExecutorDeps } from "./executor.ts";
 import type { AnyRunDefinition, Plan, PlanSnapshot } from "./types.ts";
 import { runProbes } from "./probe.ts";
@@ -135,12 +134,6 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
       return;
     }
     const params = def.paramsSchema.parse(result.params);
-    // Guard parity with executor.plan(): run the kind's KIND_GUARDS against the RESOLVED params
-    // before the plan is frozen. A kind planned through planStream works its params out DURING the
-    // plan, so a guard keyed on a resolved field would never fire if only executor.plan() called
-    // runGuards. A refusal throws here and the catch below settles the run failed, exactly like a
-    // rejected validation.
-    await runGuards(def.kind, params, { db: deps.db });
     const impls = def.steps(params);
     if (impls.map((s) => s.name).join(",") !== result.plan.steps.map((s) => s.name).join(",")) {
       throw new AppError("INTERNAL", `planner/steps name mismatch for ${def.kind}`);

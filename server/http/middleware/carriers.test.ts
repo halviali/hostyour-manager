@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../app.ts";
 import { parseConfig } from "../../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../../domains/access/session.ts";
 import type { ApiError } from "../../../shared/api-types.ts";
 
 const config = parseConfig({
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://idp.example/o/manager/",
   OIDC_CLIENT_ID: "manager",

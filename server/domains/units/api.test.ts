@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import type { Hono } from "hono";
 import { pino } from "pino";
 import { createApp } from "../../http/app.ts";
-import { parseConfig } from "../../kernel/config.ts"; import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { parseConfig } from "../../kernel/config.ts"; import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { CredentialStore } from "../../security/store.ts";
@@ -45,7 +45,7 @@ import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
 import { ORG, TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
 const SHA = "a".repeat(40);
-const config = parseConfig({ ...GITHUB_APP_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
+const config = parseConfig({ ...REQUIRED_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 

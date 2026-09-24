@@ -8,7 +8,7 @@ import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
 import { renderSmtpOpsGrant } from "./build-rbac.ts";
 import { Registrations } from "./registrations.ts";
 import { BUILD_HOOK_URL } from "./cluster-map.fixture.ts";
-import { FakePlatformRepo, FakeConsumerRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
+import { FakePlatformRepo, FakeRepoWriter, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
@@ -441,7 +441,7 @@ describe("offboard run definition", () => {
 
   it("remove-release-kit git-rm's the release-kit's three paths from the consumer repo with the sealed PAT", async () => {
     seedApp();
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     // The release-kit is present (committed at onboard) so the git-rm actually reaps it.
     for (const path of ["release/release.ps1", "release/release.sh", ".github/workflows/release.yml"]) consumerRepo.seed("https://github.com/x/acme.git", path, "kit");
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
@@ -459,7 +459,7 @@ describe("offboard run definition", () => {
 
   it("remove-release-kit is FAIL-SOFT: a push refusal logs a warning and never blocks offboard", async () => {
     seedApp();
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: remote: Permission denied (403)"));
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
@@ -471,7 +471,7 @@ describe("offboard run definition", () => {
     seedApp();
     const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     consumerRepo.failOpen(new AppError("UPSTREAM", "clone failed: 403")); // the release-kit removal cannot even open the repo
     const creds = credsWith({ revoke: () => Promise.resolve() } as unknown as Partial<CredentialStore>);
     const logs: string[] = [];

@@ -13,7 +13,6 @@ const HTTP_BY_CODE: Record<ApiErrorCode, number> = {
   NOT_FOUND: 404,
   ILLEGAL_TRANSITION: 409,
   RESOURCE_BUSY: 409,
-  PLAN_REFUSED: 409,
   IDP_UNREACHABLE: 503,
   NOT_CONFIGURED: 501,
   UPSTREAM: 502,
@@ -51,8 +50,6 @@ export const errCsrfRefused = (): AppError => new AppError("CSRF_REFUSED", "Cros
 export const errIllegalTransition = (message: string): AppError => new AppError("ILLEGAL_TRANSITION", message);
 export const errResourceBusy = (detail: { resource: string; key: string; holderRunId: string }): AppError =>
   new AppError("RESOURCE_BUSY", "Resource busy", { detail });
-export const errPlanRefused = (message: string, detail?: Record<string, unknown>): AppError =>
-  new AppError("PLAN_REFUSED", message, detail ? { detail } : undefined);
 export const errUndeclaredTarget = (serverId: string): AppError =>
   new AppError("UNDECLARED_TARGET", `Step reached an undeclared target: ${serverId}`);
 // A one-time run secret (e.g. the machine account's password) is absent — never stored, so lost on a

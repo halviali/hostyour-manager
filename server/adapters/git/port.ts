@@ -88,25 +88,25 @@ export interface PlatformRepo {
   withBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T>;
 }
 
-/** A disposable checkout of a CONSUMER repo's default branch (ConsumerRepo.open). Unlike PlatformRepo
- *  — which owns ONE platform repo whose branch is passed in — the consumer repo is a DIFFERENT repo
- *  per consumer, and its default branch (main vs master vs …) is not known up front, so open resolves
+/** A disposable checkout of a repository's default branch (RepoWriter.open). Unlike PlatformRepo
+ *  — which owns ONE platform repo whose branch is passed in — a written repository is a DIFFERENT repo
+ *  per caller, and its default branch (main vs master vs …) is not known up front, so open resolves
  *  and returns it for commitPush to push back to. */
-export interface ConsumerRepoSession {
+export interface RepoCheckout {
   workdir: string; // a disposable checkout directory (dispose after use)
   branch: string; // the resolved default branch (main/master/…) — the ref commitPush pushes to
 }
 
-/** The Manager's writer of a CONSUMER's OWN repo: the release-kit lifecycle
- *  (onboard commits release/ + the workflow into the consumer repo, offboard/purge git-rm's them).
+/** The Manager's writer of a repository it does not own: the release-kit lifecycle
+ *  (onboarding commits release/ + the workflow into the repository, removal git-rm's them).
  *  Distinct from PlatformRepo — that owns the ONE platform repo (a persistent per-branch worktree);
- *  this clones an arbitrary consumer repo fresh per call (RepoReader's disposable-clone model) and
+ *  this clones an arbitrary repository fresh per call (RepoReader's disposable-clone model) and
  *  resolves its default branch. The credential is opened by the adapter (askpass) from the
  *  credentialId per call — the domain never handles the raw token, exactly like RepoReader.cloneAtRef. */
-export interface ConsumerRepo {
-  /** Clone the consumer repo's default branch into a fresh disposable workdir; resolve + return the
+export interface RepoWriter {
+  /** Clone the repository's default branch into a fresh disposable workdir; resolve + return the
    *  default branch. The credentialId opens the (private-repo) push credential per use. */
-  open(input: { repoURL: string; credentialId: string; signal?: AbortSignal }): Promise<ConsumerRepoSession>;
+  open(input: { repoURL: string; credentialId: string; signal?: AbortSignal }): Promise<RepoCheckout>;
   readFile(workdir: string, relPath: string): Promise<string | null>;
   /** List the immediate entry names directly under `relPath`, or [] when the directory is absent —
    *  the same non-recursive contract as RepoReader.listDir. The release-kit replace derives its

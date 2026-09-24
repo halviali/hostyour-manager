@@ -14,7 +14,7 @@ import { assertApprovable } from "./approve.ts";
 import { runProbes } from "./probe.ts";
 import { assertRunTransition, isDeletableRun } from "./transitions.ts";
 import { acquireLocks, releaseLocks, deriveServerLocks } from "./locks.ts";
-import { runGuards, isMutatingPrecondition } from "./guards.ts";
+import { isMutatingPrecondition } from "./guards.ts";
 import { RunSecretsMap } from "./secrets.ts";
 import { RunContext } from "./context.ts";
 import { hashPlan } from "./plan-hash.ts";
@@ -61,7 +61,6 @@ export class Executor {
     const def = this.deps.runDefinitions.get(kind);
     if (!def) throw errValidation(`unknown run kind: ${kind}`);
     const params = def.paramsSchema.parse(rawParams);
-    await runGuards(kind, params, { db: this.deps.db });
     const planned = await def.plan(params, { db: this.deps.db });
     const impls = def.steps(params);
     if (impls.map((s) => s.name).join(",") !== planned.steps.map((s) => s.name).join(",")) {

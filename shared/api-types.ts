@@ -17,7 +17,6 @@ export type ApiErrorCode =
   | "NOT_FOUND"
   | "ILLEGAL_TRANSITION"
   | "RESOURCE_BUSY"
-  | "PLAN_REFUSED"
   | "IDP_UNREACHABLE"
   | "NOT_CONFIGURED"
   | "UPSTREAM"
@@ -30,7 +29,7 @@ export type ApiErrorCode =
 export interface ApiError {
   code: ApiErrorCode;
   message: string;
-  /** Structured payload for codes that carry one (RESOURCE_BUSY, PLAN_REFUSED, …). */
+  /** Structured payload for codes that carry one (RESOURCE_BUSY, …). */
   detail?: Record<string, unknown>;
 }
 
@@ -753,7 +752,7 @@ export interface OrphanScanView extends OrphanScan {
  * its onboard died before record-inventory (the LAST onboard step), or the pointer was written by
  * hand. Such a consumer is INVISIBLE in the Manager: the Consumers list is a projection of the apps
  * rows, and offboard resolves its target BY that row. Unlike a tenant orphan (whose remedy is purge,
- * removal), a detected consumer is usually HEALTHY — swissbookai is the founding case — so the remedy
+ * removal), a detected consumer is usually HEALTHY, so the remedy
  * is ADOPT: reconstruct the row from the pointer, via a Run with a live cluster attest. */
 
 /** What ONE detected consumer's REGISTRATION claims — copied VERBATIM from the ConsumerRegistration

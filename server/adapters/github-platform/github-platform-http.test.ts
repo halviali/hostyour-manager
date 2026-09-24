@@ -17,14 +17,14 @@ function stubFetch(routes: Record<string, { status: number; body?: unknown }>): 
   }) as unknown as typeof fetch;
 }
 
-const cfg = { owner: "simetrixch", repo: "hostyour-cloud", token: "tkn" };
+const cfg = { owner: "example", repo: "platform", token: "tkn" };
 
 describe("github adapter", () => {
   it("lists + sorts branches, following pagination", () => {
     const page1 = Array.from({ length: 100 }, (_, i) => ({ name: `b${String(i).padStart(3, "0")}`, commit: { sha: `s${i}` } }));
     const client = createGitHubPlatform(cfg, stubFetch({
-      "GET /repos/simetrixch/hostyour-cloud/branches?per_page=100&page=1": { status: 200, body: page1 },
-      "GET /repos/simetrixch/hostyour-cloud/branches?per_page=100&page=2": { status: 200, body: [{ name: "aaa", commit: { sha: "sx" } }] },
+      "GET /repos/example/platform/branches?per_page=100&page=1": { status: 200, body: page1 },
+      "GET /repos/example/platform/branches?per_page=100&page=2": { status: 200, body: [{ name: "aaa", commit: { sha: "sx" } }] },
     }));
     return client.listBranches().then((bs) => {
       expect(bs).toHaveLength(101);
@@ -35,7 +35,7 @@ describe("github adapter", () => {
 
   it("compares base…head into ahead/behind + files, flags no truncation", async () => {
     const client = createGitHubPlatform(cfg, stubFetch({
-      "GET /repos/simetrixch/hostyour-cloud/compare/master...s1.example.com": {
+      "GET /repos/example/platform/compare/master...s1.example.com": {
         status: 200,
         body: {
           ahead_by: 3, behind_by: 0, total_commits: 3,
@@ -51,14 +51,14 @@ describe("github adapter", () => {
 
   it("deleteBranch tolerates an already-gone ref (404/422)", async () => {
     const client = createGitHubPlatform(cfg, stubFetch({
-      "DELETE /repos/simetrixch/hostyour-cloud/git/refs/heads/s9.example.com": { status: 422, body: { message: "Reference does not exist" } },
+      "DELETE /repos/example/platform/git/refs/heads/s9.example.com": { status: 422, body: { message: "Reference does not exist" } },
     }));
     await expect(client.deleteBranch("s9.example.com")).resolves.toBeUndefined();
   });
 
   it("surfaces GitHub's error message (not a generic mask) on a real failure", async () => {
     const client = createGitHubPlatform(cfg, stubFetch({
-      "DELETE /repos/simetrixch/hostyour-cloud/git/refs/heads/master": { status: 403, body: { message: "protected branch" } },
+      "DELETE /repos/example/platform/git/refs/heads/master": { status: 403, body: { message: "protected branch" } },
     }));
     await expect(client.deleteBranch("master")).rejects.toThrow(GitHubPlatformError);
     await expect(client.deleteBranch("master")).rejects.toThrow(/protected branch/);
@@ -66,7 +66,7 @@ describe("github adapter", () => {
 
   it("listBranches throws a GitHubPlatformError (not 'not iterable') on a 404", async () => {
     const client = createGitHubPlatform(cfg, stubFetch({
-      "GET /repos/simetrixch/hostyour-cloud/branches?per_page=100&page=1": { status: 404, body: { message: "Not Found" } },
+      "GET /repos/example/platform/branches?per_page=100&page=1": { status: 404, body: { message: "Not Found" } },
     }));
     await expect(client.listBranches()).rejects.toThrow(GitHubPlatformError);
     await expect(client.listBranches()).rejects.toThrow(/Not Found/);
@@ -75,7 +75,7 @@ describe("github adapter", () => {
   it("listBranches THROWS on a truncated enumeration (20 full pages => >2000 branches) — a partial list must never feed a safety set", async () => {
     const fullPage = Array.from({ length: 100 }, (_, i) => ({ name: `b${i}`, commit: { sha: `s${i}` } }));
     const routes: Record<string, { status: number; body?: unknown }> = {};
-    for (let p = 1; p <= 20; p++) routes[`GET /repos/simetrixch/hostyour-cloud/branches?per_page=100&page=${p}`] = { status: 200, body: fullPage };
+    for (let p = 1; p <= 20; p++) routes[`GET /repos/example/platform/branches?per_page=100&page=${p}`] = { status: 200, body: fullPage };
     const client = createGitHubPlatform(cfg, stubFetch(routes));
     await expect(client.listBranches()).rejects.toThrow(GitHubPlatformError);
     await expect(client.listBranches()).rejects.toThrow(/truncated enumeration/);
@@ -92,9 +92,9 @@ describe("github adapter", () => {
 // (sha:null deletes) → commit → fast-forward ref.
 const B = "m1.example.com";
 const treeRoutes = (blobs: { path: string; type: string }[], truncated = false): Record<string, { status: number; body?: unknown }> => ({
-  [`GET /repos/simetrixch/hostyour-cloud/git/ref/heads/${B}`]: { status: 200, body: { object: { sha: "HEAD1" } } },
-  "GET /repos/simetrixch/hostyour-cloud/git/commits/HEAD1": { status: 200, body: { tree: { sha: "TREE1" } } },
-  "GET /repos/simetrixch/hostyour-cloud/git/trees/TREE1?recursive=1": { status: 200, body: { truncated, tree: blobs } },
+  [`GET /repos/example/platform/git/ref/heads/${B}`]: { status: 200, body: { object: { sha: "HEAD1" } } },
+  "GET /repos/example/platform/git/commits/HEAD1": { status: 200, body: { tree: { sha: "TREE1" } } },
+  "GET /repos/example/platform/git/trees/TREE1?recursive=1": { status: 200, body: { truncated, tree: blobs } },
 });
 
 describe("github adapter — git-data (reset)", () => {
@@ -104,9 +104,9 @@ describe("github adapter — git-data (reset)", () => {
         { path: "clusters/active/s1.example.com.yaml", type: "blob" },
         { path: "README.md", type: "blob" },
       ]),
-      "POST /repos/simetrixch/hostyour-cloud/git/trees": { status: 201, body: { sha: "TREE2" } },
-      "POST /repos/simetrixch/hostyour-cloud/git/commits": { status: 201, body: { sha: "COMMIT2" } },
-      [`PATCH /repos/simetrixch/hostyour-cloud/git/refs/heads/${B}`]: { status: 200, body: {} },
+      "POST /repos/example/platform/git/trees": { status: 201, body: { sha: "TREE2" } },
+      "POST /repos/example/platform/git/commits": { status: 201, body: { sha: "COMMIT2" } },
+      [`PATCH /repos/example/platform/git/refs/heads/${B}`]: { status: 200, body: {} },
     }));
     const res = await client.deletePaths(B, ["clusters/active/s1.example.com.yaml", "clusters/active/ghost.example.com.yaml"], "msg");
     expect(res.removed).toEqual(["clusters/active/s1.example.com.yaml"]); // ghost absent ⇒ skipped
@@ -127,7 +127,7 @@ describe("github adapter — git-data (reset)", () => {
 
   it("deletePaths throws when the branch is gone (404 ref)", async () => {
     const client = createGitHubPlatform(cfg, stubFetch({
-      [`GET /repos/simetrixch/hostyour-cloud/git/ref/heads/${B}`]: { status: 404, body: { message: "Not Found" } },
+      [`GET /repos/example/platform/git/ref/heads/${B}`]: { status: 404, body: { message: "Not Found" } },
     }));
     await expect(client.deletePaths(B, ["x"], "m")).rejects.toThrow(/branch not found/);
   });
@@ -148,12 +148,12 @@ describe("github adapter — git-data (reset)", () => {
     const capture = (async (_url: string | URL | Request, init?: RequestInit) => {
       const u = typeof _url === "string" ? _url : _url.toString();
       const key = `${init?.method ?? "GET"} ${u.replace("https://api.github.com", "")}`;
-      if (key === "POST /repos/simetrixch/hostyour-cloud/git/trees") seen = init?.headers as Record<string, string>;
+      if (key === "POST /repos/example/platform/git/trees") seen = init?.headers as Record<string, string>;
       const routes: Record<string, unknown> = {
         ...treeRoutes([{ path: "clusters/active/s1.example.com.yaml", type: "blob" }]),
-        "POST /repos/simetrixch/hostyour-cloud/git/trees": { status: 201, body: { sha: "T2" } },
-        "POST /repos/simetrixch/hostyour-cloud/git/commits": { status: 201, body: { sha: "C2" } },
-        [`PATCH /repos/simetrixch/hostyour-cloud/git/refs/heads/${B}`]: { status: 200, body: {} },
+        "POST /repos/example/platform/git/trees": { status: 201, body: { sha: "T2" } },
+        "POST /repos/example/platform/git/commits": { status: 201, body: { sha: "C2" } },
+        [`PATCH /repos/example/platform/git/refs/heads/${B}`]: { status: 200, body: {} },
       };
       const r = routes[key] as { status: number; body?: unknown } | undefined;
       if (!r) throw new Error(`unexpected fetch: ${key}`);

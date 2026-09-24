@@ -36,8 +36,6 @@ export const credentials = sqliteTable("credentials", {
   // Plain (NON-unique) lookup index. The fingerprint is a public CORRELATOR, not a key:
   // the same secret bytes legitimately appear on more than one row — a slave's stable
   // long-lived SA token re-sealed under a renamed label (which a global unique index over
-  // the fingerprint would refuse), a
-  // rotate() that keeps the superseded row, and the constant "bootstrap-password" marker
-  // (inventory/write.ts) shared by every server carrying a password sealed beside its row.
+  // the fingerprint would refuse), and a rotate() that keeps the superseded row.
   index("credentials_fingerprint_ix").on(t.fingerprint),
 ]);

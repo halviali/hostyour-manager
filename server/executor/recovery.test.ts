@@ -6,7 +6,7 @@ import { z } from "zod";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
 import { CredentialStore } from "../security/store.ts";
 import { errValidation } from "../kernel/errors.ts";
 import { RunEventBus } from "./bus.ts";
@@ -18,7 +18,7 @@ import type { SshFactory } from "../adapters/ssh/port.ts";
 
 const logger = createLogger(
   parseConfig({
-    ...GITHUB_APP_ENV,
+    ...REQUIRED_ENV,
     PUBLIC_URL: "https://x.example",
     OIDC_ISSUER: "https://i.example/",
     OIDC_CLIENT_ID: "c",
@@ -68,9 +68,8 @@ const testSteps: Step[] = [
     },
   },
 ];
-// A MUTATING definition alongside it, registered under the valid kind "consumer-purge" (whose KIND_GUARDS entry
-// is empty, so plan() needs no crypto-gate fixture). guards.assertGuardsArmed pins step 0 of every
-// mutating def to attest-target; this one exercises what that step MEANS at run time — a fail-closed
+// A MUTATING definition alongside it, registered under the valid kind "consumer-purge".
+// guards.assertGuardsArmed pins step 0 of every mutating def to attest-target; this one exercises what that step MEANS at run time — a fail-closed
 // gate that refuses on the world as it is now (tenant-purge's attest-target re-asks the live-tenant
 // rule there), followed by the mutation it stands in front of.
 let refuseAttest: string | null = null;

@@ -14,7 +14,7 @@ import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { tenantArgocdUrl } from "../../../shared/tenant.ts";
 // The live reconciliation comparison — driftOf/the per-kind EXPECTED records/the consumer live probe —
-// lives in live-recon.ts (one implementation for every card; this file stays the thin route layer).
+// lives in live-recon.ts (one implementation for every card).
 import { driftOf, probeConsumerLive, readUnitHost, smokeTenant } from "./live-recon.ts";
 import { getRunParams } from "../../executor/read.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
@@ -45,7 +45,7 @@ import { resolveNextVersion } from "./release-version.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
-// Consumer API. Deliberately THIN: the onboard trigger and the lifecycle
+// Consumer API. The onboard trigger and the lifecycle
 // triggers create Runs, and everything after — the live gate/step log (SSE), approve, discard,
 // cancel, retry, soft-delete — flows through the SAME kind-agnostic Runs API (/api/runs/:id/*).
 // So the wizard POSTs here to get a runId, then watches /api/runs/:id/events and approves via
@@ -340,13 +340,13 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
   });
 }
 
-// The tenant (multi-app) API — the SAME thin shape as
+// The tenant (multi-app) API — the same shape as
 // the consumer routes above: a trigger creates a Run and everything after (the live gate/step log,
 // approve, discard, retry) flows through the kind-agnostic Runs API (/api/runs/:id/*). create-tenant
 // and add-app are the two validated triggers, so they POST through planStreamed (the streaming gate-
 // by-gate planner) exactly like consumer onboard; remove-app + tenant-suspend/-resume/-offboard carry
 // no gate-runner and plan synchronously. onboardingEnabled here is the TENANT family's flag
-// (wire-units's tenantEnabled) — when the catalog write PAT is absent the mutating
+// (wire-units's tenantEnabled) — when tenant onboarding is not configured the mutating
 // routes answer 501 NOT_CONFIGURED while the read routes (the tenant list/detail) stay live.
 
 /** One-line 400 mapping of a zod parse failure — the consumer route's inline shape, lifted to a
@@ -670,7 +670,7 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
   // immediately; the run sits in `planning` while the T1..T4 fan-out gates validate, streaming gate
   // lines to /api/runs/:id/events, then settles `planned` (approve to deploy) or `failed` (rejected).
   app.post("/api/tenants", async (c) => {
-    if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager — the catalog write PAT must be wired first");
+    if (!onboardingEnabled) throw errNotConfigured("tenant onboarding is not configured on this manager — it needs CATALOG_REPO and the platform repository (GITHUB_REPO, GITHUB_WRITE_PAT)");
     const parsed = CreateTenantRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) invalid("tenant-create", parsed.error);
     return c.json(await executor.planStreamed("tenant-create", parsed.data), 201);

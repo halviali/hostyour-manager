@@ -18,7 +18,7 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { ports as onboardPorts, FakeBuildPlaneClusterReader, type FakeSeeder } from "./onboard.fixture.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
-import { FakeRepoReader, FakePlatformRepo, FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoReader, FakePlatformRepo, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
@@ -51,7 +51,7 @@ interface Harness {
   catalogReader: FakeRepoReader;
   /** The consumer family's reader: serves the tenant's repository once a test scripts it. */
   unitReader: FakeRepoReader;
-  consumerRepo: FakeConsumerRepo;
+  consumerRepo: FakeRepoWriter;
   github: FakeGitHubConsumer;
   seeder: FakeSeeder;
   buildPlane: FakeBuildPlane;
@@ -65,7 +65,7 @@ function harness(over: { catalog?: string; ports?: Partial<TenantOnboardPorts>; 
   const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
   const catalogReader = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: over.catalog ?? catalogManifest() } });
   catalogReader.scriptFor(TEMPLATE_URL, { resolvedSha: SHA, files: TEMPLATE_FILES });
-  const consumerRepo = new FakeConsumerRepo();
+  const consumerRepo = new FakeRepoWriter();
   const github = new FakeGitHubConsumer();
   const buildPlane = new FakeBuildPlane();
   buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true, imageTag: IMAGE_TAG });

@@ -225,19 +225,15 @@ const EnvSchema = z.object({
   // ansiwise.yaml out of. It is `owner/name`, and the URL is composed the same way every other
   // repository's is (https, never with embedded credentials).
   //
-  // IT DEFAULTS, AND CATALOG_REPO ABOVE DELIBERATELY DOES NOT. CATALOG_REPO names the INSTALLATION's
-  // own repository, where one installation's name is another installation's mistake, so a default
-  // there would bind a tenant family to somebody else's books. This one names the PRODUCT's own
-  // repository: every installation of this platform runs the same deployment programs, the way every
-  // installation runs the same manager image, so the name is a platform constant and standing it here
-  // is what spares an installation from having to know it. An operator overrides it to run a fork of
-  // the programs.
+  // REQUIRED, WITH NO DEFAULT: the repository is the installation's answer, and a default here would
+  // write one owner's repository into every installation of this code. A missing one refuses the
+  // boot by name.
   //
   // AND IT CARRIES NO CREDENTIAL, which is why it is one key and not a pair. The programs repository
   // is PUBLIC, so a clone of it authenticates with nothing and there is no partner secret to demand:
   // pairing it with a PAT the way GITHUB_REPO and CATALOG_REPO are paired would make an installation
   // mint a credential for a repository that turns nobody away.
-  DEPLOY_PROGRAMS_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'DEPLOY_PROGRAMS_REPO must be "owner/repo"').default("simetrixch/hostyour-deploy"),
+  DEPLOY_PROGRAMS_REPO: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'DEPLOY_PROGRAMS_REPO must be "owner/repo"'),
   // The machine-side deployment programs. The redeploy master arm drives deploy-cluster /
   // deploy-platform-services through the serving binary's SESSION door on the target machine; this is the
   // command that starts that surface over the run's SSH session — and so names WHICH catalogue

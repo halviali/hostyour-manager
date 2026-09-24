@@ -1,9 +1,10 @@
 // The TENANT (multi-app) family of the unit composition, apart from wire-units.ts the way the
 // consumer family stands there: a SECOND GitPlatformRepo bound to catalog + the manager-side
 // HelmRenderer (tenant charts are trusted first-party, validated manager-side — NO gate-runner).
-// Goes live when the catalog write PAT is configured; it is NOT gated on the consumer
-// prerequisites, a cluster can run tenants without a consumer gate-runner. buildUnits calls it and
-// merges what it returns with the consumer family's.
+// Goes live when CATALOG_REPO and the platform repository are configured; it is NOT gated on the
+// consumer prerequisites, but a tenant's own apps are built by the consumer's build chain at run time
+// (wire-units.ts `lateBuild`). buildUnits calls it and merges what it returns with the consumer
+// family's.
 import { join } from "node:path";
 import type { Config } from "../kernel/config.ts";
 import type { Logger } from "../kernel/logger.ts";
@@ -295,8 +296,8 @@ export function buildTenantOnboarding(
   const defs: AnyRunDefinition[] = [
     makeCreateTenantDef(onboardPorts),
     // The periodic administrator check. It reads only — a Secret off each target cluster and one
-    // GET per tenant — and writes what it found onto the inventory row. A CronJob starts it; the
-    // schedule lives in Kubernetes so this process has none to keep across a restart.
+    // GET per tenant — and writes what it found onto the inventory row. The in-process timer of
+    // boot/check-tenants-schedule.ts starts it.
     makeCheckTenantsDef({
       resolver: onboardPorts.resolver,
       resolveUnitApex: onboardPorts.resolveUnitApex,

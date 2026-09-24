@@ -27,7 +27,7 @@ import type { AnyRunDefinition } from "../../executor/types.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, TEMPLATE_MANIFEST, TENANT_URL, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { ports as onboardPorts, FakeBuildPlaneClusterReader } from "./onboard.fixture.ts";
-import { FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -111,7 +111,7 @@ function harness(): Harness {
   // The tenant repository as the build-only chain reads it back: the manifest write-tree commits.
   const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
   unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, TEST_BUNDLE.appsImage) } });
-  const onboard = onboardPorts({ repo: unitReader, consumerRepo: new FakeConsumerRepo(), github: new FakeGitHubConsumer(), buildPlane, buildClusterReader: new FakeBuildPlaneClusterReader(TEST_BUNDLE.appsImage) });
+  const onboard = onboardPorts({ repo: unitReader, consumerRepo: new FakeRepoWriter(), github: new FakeGitHubConsumer(), buildPlane, buildClusterReader: new FakeBuildPlaneClusterReader(TEST_BUNDLE.appsImage) });
   const ports: TenantOnboardPorts = {
     onboard: () => ({ ports: onboard }),
     buildUnitRegistration: async () => null,

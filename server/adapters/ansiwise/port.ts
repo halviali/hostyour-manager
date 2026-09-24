@@ -9,7 +9,7 @@
 // AND THERE IS NO ADDRESS HERE, WHICH IS THE POINT. The client is handed an already-open
 // conversation with `ansiwise-rest serve` and nothing else, so a host, a port and a bearer token
 // cannot be given to it at all: the manager reaches a machine over the session sshd has already
-// authenticated, and the type is what says there is no second way (simetrixch/ansiwise-cli#14).
+// authenticated, and the type is what says there is no second way.
 
 import { z } from "zod";
 

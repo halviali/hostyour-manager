@@ -12,9 +12,8 @@
 //
 // NOTHING HERE LISTENS, AND NOTHING HERE HOLDS A CREDENTIAL. The installation is placed once and
 // every caller opens `serve` on it for itself, so the fixture proves the manager against the door
-// the manager actually uses. It started `ansiwise-rest service --listen 127.0.0.1:0` until
-// simetrixch/ansiwise-cli#14 deleted that program: the only proof this repository had against the
-// real engine was standing on the door nothing dialled.
+// the manager actually uses. The engine has no `ansiwise-rest service` program any more, and a
+// fixture standing on a door nothing dials would prove nothing against the real engine.
 //
 // WHERE THEY COME FROM: $ANSIWISE_BIN / $ANSIWISE_REST_BIN, or the sibling checkout's build output
 // (../ansiwise-cli/build/). Absent ⇒ the suites that need them REFUSE THE RUN, unless the person

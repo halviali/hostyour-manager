@@ -7,7 +7,7 @@ import { z } from "zod";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
 import { CredentialStore } from "../security/store.ts";
 import { registerSecret } from "../security/redact.ts";
 import { RunEventBus } from "./bus.ts";
@@ -20,7 +20,7 @@ import type { RunKind } from "../../shared/enums.ts";
 
 const logger = createLogger(
   parseConfig({
-    ...GITHUB_APP_ENV,
+    ...REQUIRED_ENV,
     PUBLIC_URL: "https://x.example",
     OIDC_ISSUER: "https://i.example/",
     OIDC_CLIENT_ID: "c",

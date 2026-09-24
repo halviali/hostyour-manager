@@ -15,9 +15,9 @@ three succeeded.
 that gap is where an orphan is born. On failure the run unwinds in reverse and records what it
 undid.
 
-**Everything outside is a port.** Fourteen of them — git, GitHub, Kubernetes, Helm, Vault, OIDC,
-SSH, DNS, the registry — each an interface with a real implementation and a fake shipped beside it.
-A boundary check fails the build when a route reaches past a port to an implementation, or when a
+**Everything outside goes through an adapter** under `server/adapters/`: git, GitHub, Kubernetes,
+Helm, Vault, OIDC, SSH, DNS, the registry and more, most with a fake beside them for the tests. A
+boundary check fails the build when `routes.ts` reaches past a port to an implementation, or when a
 domain imports another.
 
 **A credential is checked before anything is touched.** The scopes a supplied credential must carry
@@ -28,7 +28,7 @@ is worse than none.
 
 ```
 npm run check      # typecheck, eslint, module boundaries, stylelint, the web build
-npx vitest run     # 187 files, 1978 tests
+npx vitest run     # the test suite
 ```
 
 Both run locally. Nothing hosted runs them.

@@ -1,9 +1,9 @@
 // In-memory git fakes for the onboarding domain tests — no real git, no network. FakeRepoReader
-// serves a scripted consumer repo (SHA, files); FakePlatformRepo records every commit and
-// keeps a branch<->files map so a test can assert the exact pointer/report writes; FakeConsumerRepo
+// serves a scripted repository (SHA, files); FakePlatformRepo records every commit and
+// keeps a branch<->files map so a test can assert the exact pointer/report writes; FakeRepoWriter
 // (the release-kit writer) keeps a per-repoURL file map + a commit recorder.
 import { errNotFound } from "../../../kernel/errors.ts";
-import type { RepoReader, ClonedRepo, PlatformRepo, BranchScope, CommitInput, ConsumerRepo, ConsumerRepoSession } from "../port.ts";
+import type { RepoReader, ClonedRepo, PlatformRepo, BranchScope, CommitInput, RepoWriter, RepoCheckout } from "../port.ts";
 import { CLUSTER_MAP_DIR, PLATFORM_VALUES_COMMON, PLATFORM_VALUES_DIR } from "../../../../shared/cluster-values.ts";
 import { STAGE } from "../../../../shared/enums.ts";
 
@@ -213,7 +213,7 @@ export class FakePlatformRepo implements PlatformRepo {
 }
 
 /** A recorded consumer-repo commitPush (the release-kit writer). */
-export interface FakeConsumerRepoCommit {
+export interface FakeRepoWriterCommit {
   repoURL: string;
   branch: string;
   message: string;
@@ -221,15 +221,15 @@ export interface FakeConsumerRepoCommit {
   remove?: string[];
 }
 
-/** In-memory ConsumerRepo fake (the release-kit writer) — spiegelt FakePlatformRepo:
+/** In-memory RepoWriter fake (the release-kit writer) — mirrors FakePlatformRepo:
  *  a per-repoURL file map (so a test can pre-seed a divergent, consumer-edited file with seed()), a
  *  commit recorder (so a test can assert onboard committed exactly the absent paths / offboard removed
  *  the three), and a throw mode (failOpen/failCommit) to simulate a PAT without contents:write — a
  *  fail-CLOSED onboard abort, a fail-SOFT teardown warning. It does NOT open credentials (the real
  *  adapter does, via askpass); it just records the credentialId it was handed. */
-export class FakeConsumerRepo implements ConsumerRepo {
+export class FakeRepoWriter implements RepoWriter {
   readonly opened: { repoURL: string; credentialId: string }[] = [];
-  readonly commits: FakeConsumerRepoCommit[] = [];
+  readonly commits: FakeRepoWriterCommit[] = [];
   // "repoURL\0path" -> content
   private readonly store = new Map<string, string>();
   private readonly branch: string;
@@ -270,7 +270,7 @@ export class FakeConsumerRepo implements ConsumerRepo {
     return decodeURIComponent(workdir.slice("/fake-consumer/".length));
   }
 
-  async open(input: { repoURL: string; credentialId: string; signal?: AbortSignal }): Promise<ConsumerRepoSession> {
+  async open(input: { repoURL: string; credentialId: string; signal?: AbortSignal }): Promise<RepoCheckout> {
     if (this.openError) throw this.openError;
     this.opened.push({ repoURL: input.repoURL, credentialId: input.credentialId });
     return { workdir: `/fake-consumer/${encodeURIComponent(input.repoURL)}`, branch: this.branch };

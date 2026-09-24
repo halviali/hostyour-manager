@@ -127,8 +127,8 @@ describe("place-ansiwise", () => {
   it("places only the half that drifted, and leaves the one already at the pin alone", async () => {
     // The upgrade nobody plans for: a machine whose deployment tool was moved onto the pin by
     // deploy-cluster's install_pinned_tool row while the serving binary was left where it was —
-    // deliberately, because no step of the framework restarts the unit that runs it
-    // (simetrixch/ansiwise-plugins#141). Read as one fact, that machine looks placed.
+    // deliberately, because no step of the framework restarts the unit that runs it. Read as one
+    // fact, that machine looks placed.
     const hosts = scriptedHosts();
     const h = await makeHarness({ hosts });
     const factory = hostsFactory(hosts);
@@ -206,9 +206,9 @@ describe("the download address", () => {
 
   it("is refused by the installation's own settings when either slot is missing", async () => {
     const { parseConfig } = await import("../../kernel/config.ts");
-    const { GITHUB_APP_ENV } = await import("../../kernel/config.fixture.ts");
+    const { REQUIRED_ENV } = await import("../../kernel/config.fixture.ts");
     const base = {
-      ...GITHUB_APP_ENV,
+      ...REQUIRED_ENV,
       PUBLIC_URL: "https://c.example.invalid", OIDC_ISSUER: "https://i.example.invalid/",
       OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", DATA_DIR: "/data", MANAGER_VERSION: "0.0.0", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
     } as unknown as NodeJS.ProcessEnv;
@@ -237,7 +237,7 @@ describe("what may stand in a command on the machine", () => {
 // with no manager in it: no harness, no database, no StepCtx, no server row and no ports record —
 // only a session, two names and an address. A `placeAnsiwise` that reached for any of the rest could
 // not compile here.
-const FIRST_INSTALL_FQDN = "apps1.digitacloud.app";
+const FIRST_INSTALL_FQDN = "s1.example.invalid";
 /** The catalogue this manager would clone, and the account a slave is reached as — the two the
  *  clone is composed from, stated once so a test reads what a command carries. */
 const CATALOGUE_URL = "https://github.com/an-owner/a-catalogue.git";

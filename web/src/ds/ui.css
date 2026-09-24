@@ -132,7 +132,6 @@
 /* in flight — pulsing solid dot */
 .badge--running::before,
 .badge--approved::before,
-.badge--adopting::before,
 .badge--provisioning::before,
 .badge--draining::before {
   content: "";
@@ -183,7 +182,6 @@
 
 .badge--running,
 .badge--approved,
-.badge--adopting,
 .badge--provisioning {
   --c: var(--accent);
 }

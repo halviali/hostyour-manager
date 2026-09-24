@@ -327,13 +327,13 @@ describe("github-consumer adapter — listReleaseTags", () => {
 describe("github-consumer adapter — readTokenAccess (#252)", () => {
   it("answers the token's account, the owner's kind, and its highest right on the repository; one it cannot see is none", async () => {
     const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
-      "GET /user": { status: 200, body: { login: "kartalbas" } },
-      "GET /users/ahkutun": { status: 200, body: { login: "ahkutun", type: "User" } },
-      "GET /repos/ahkutun/swissbookai": { status: 200, body: { permissions: { admin: false, maintain: false, push: true, triage: true, pull: true } } },
-      "GET /repos/ahkutun/hidden": { status: 404, body: { message: "Not Found" } },
+      "GET /user": { status: 200, body: { login: "acme-operator" } },
+      "GET /users/acme-owner": { status: 200, body: { login: "acme-owner", type: "User" } },
+      "GET /repos/acme-owner/shop": { status: 200, body: { permissions: { admin: false, maintain: false, push: true, triage: true, pull: true } } },
+      "GET /repos/acme-owner/hidden": { status: 404, body: { message: "Not Found" } },
     }) });
-    expect(await client.readTokenAccess({ owner: "ahkutun", token: "tkn" })).toEqual({ login: "kartalbas", ownerKind: "User" });
-    expect(await client.readTokenAccess({ owner: "ahkutun", repo: "swissbookai", token: "tkn" })).toEqual({ login: "kartalbas", ownerKind: "User", permission: "push" });
-    expect(await client.readTokenAccess({ owner: "ahkutun", repo: "hidden", token: "tkn" })).toEqual({ login: "kartalbas", ownerKind: "User", permission: "none" });
+    expect(await client.readTokenAccess({ owner: "acme-owner", token: "tkn" })).toEqual({ login: "acme-operator", ownerKind: "User" });
+    expect(await client.readTokenAccess({ owner: "acme-owner", repo: "shop", token: "tkn" })).toEqual({ login: "acme-operator", ownerKind: "User", permission: "push" });
+    expect(await client.readTokenAccess({ owner: "acme-owner", repo: "hidden", token: "tkn" })).toEqual({ login: "acme-operator", ownerKind: "User", permission: "none" });
   });
 });

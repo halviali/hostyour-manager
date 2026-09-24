@@ -6,10 +6,9 @@ import { deleteRecord, ownedRecords, ownerSentence, removableRecord, removableRe
 
 // dns-remove: take records of this installation back at the DNS provider, one run for the whole
 // list — the records an abandoned installation leaves in the zone when its machines are restored
-// bare and its units are never offboarded (the leftover unit-dns.ts readStandingHost names, measured
-// on 2026-09-15 when post.digitacloud.app still answered with the address of an apps machine that
-// was gone). One run and one approve for the set, because a zone cleared one run at a time is a
-// dozen approves for a dozen records (hostyour-manager#172).
+// bare and its units are never offboarded (the leftover unit-dns.ts readStandingHost names: a host
+// that still answers with the address of a machine that is gone). One run and one approve for the
+// set, because a zone cleared one run at a time is a dozen approves for a dozen records.
 //
 // WHAT IT MAY DELETE is decided by the DNS inventory and never by the operator's typing: the plan
 // resolves every (name, type) in it and refuses the WHOLE list when any record is a name this

@@ -13,7 +13,7 @@ export const operators = sqliteTable("operators", {
   id: text("id").primaryKey(),                                     // "op_" + ulid
   username: text("username").notNull(),
   displayName: text("display_name").notNull(),
-  subject: text("subject"),                                        // Authentik OIDC `sub`
+  subject: text("subject"),                                        // the identity provider's OIDC `sub`
   email: text("email"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
 }, (t) => [

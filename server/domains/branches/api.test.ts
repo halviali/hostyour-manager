@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { createApp } from "../../http/app.ts";
 import { parseConfig, type Config } from "../../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
@@ -15,16 +15,16 @@ import type { AppEnv } from "../../http/app-env.ts";
 import type { BranchesView, BranchDiffView } from "../../../shared/api-types.ts";
 
 const baseEnv = {
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test",
   DATA_DIR: "/d", LOG_LEVEL: "silent", ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
 };
 const withGitHub = parseConfig({
   ...baseEnv, MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1", MASTER_STAGE: "prod",
-  GITHUB_REPO: "simetrixch/hostyour-cloud", GITHUB_WRITE_PAT: "pat",
+  GITHUB_REPO: "example/platform", GITHUB_WRITE_PAT: "pat",
 } as NodeJS.ProcessEnv);
-const noMaster = parseConfig({ ...baseEnv, GITHUB_REPO: "simetrixch/hostyour-cloud", GITHUB_WRITE_PAT: "pat" } as NodeJS.ProcessEnv);
+const noMaster = parseConfig({ ...baseEnv, GITHUB_REPO: "example/platform", GITHUB_WRITE_PAT: "pat" } as NodeJS.ProcessEnv);
 const logger = createLogger(withGitHub);
 
 function fakeGitHub(branches: BranchRef[], compareFn: (head: string) => BranchComparison) {
@@ -87,7 +87,7 @@ describe("branches API", () => {
     const { app, cookie } = await make(withGitHub, client);
 
     const body = (await (await app.request("/api/branches", authed(cookie))).json()) as BranchesView;
-    expect(body.repo).toBe("simetrixch/hostyour-cloud");
+    expect(body.repo).toBe("example/platform");
     const byName = Object.fromEntries(body.branches.map((b) => [b.name, b]));
     expect(byName["master"]?.compare).toBeUndefined();
     expect(byName["feature-x"]?.kind).toBe("other");

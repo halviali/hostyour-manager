@@ -5,7 +5,7 @@ import type { Logger } from "../kernel/logger.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { Db } from "../db/client.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
-import { GitRepoReader, GitPlatformRepo, GitConsumerRepo } from "../adapters/git/git.ts";
+import { GitRepoReader, GitPlatformRepo, GitRepoWriter } from "../adapters/git/git.ts";
 import type { PlatformRepo, RepoReader } from "../adapters/git/port.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
@@ -54,15 +54,17 @@ import { buildTenantOnboarding } from "./wire-tenants.ts";
 
 // The unit composition — the only place the real
 // unit adapters are constructed and handed to the Run families. Kept out of wire.ts to keep that
-// file focused. Two INDEPENDENT families are built:
+// file focused. Two families are built, and each reaches into the other:
 //
 //  - CONSUMER units, here: the Tekton gate-runner + platform/kube adapters. Goes live ONLY when
 //    BOTH the gate-runner config (ONBOARD_GATE_MANAGER_ADDR) and the platform repo (github) are
-//    configured — a partial config is a 501, never a half-wired feature.
+//    configured — a partial config is a 501, never a half-wired feature. It takes the tenant
+//    registrations, so the name checks see the tenants' names too.
 //  - TENANT (multi-app) units, in wire-tenants.ts: a SECOND GitPlatformRepo bound to catalog + the
 //    manager-side HelmRenderer (tenant charts are trusted first-party, validated manager-side —
-//    NO gate-runner). Goes live when the catalog write PAT is configured. It is NOT gated on
-//    the consumer prerequisites: a cluster can run tenants without a consumer gate-runner.
+//    NO gate-runner). Goes live when the catalog, the platform repo, the unit apex and the
+//    cluster value files are there. A tenant's own apps are built by the consumer's build chain,
+//    which reaches it at run time through `lateBuild` below.
 //
 // Kube access never gates either family: the clients reach the Manager's OWN cluster in-cluster
 // over the pod ServiceAccount (RBAC provisioned GitOps-side); a set KUBECONFIG_PATH is only the
@@ -94,7 +96,7 @@ export interface UnitsWiring {
   dns?: DnsProvider;
   /** Consumer onboarding routes go live (gate-runner + platform repo both configured). */
   enabled: boolean;
-  /** Tenant onboarding routes go live (the catalog write PAT is configured). */
+  /** Tenant onboarding routes go live (CATALOG_REPO and the platform repository are configured). */
   tenantEnabled: boolean;
   /** The consumer family's per-cluster kube resolver, threaded to registerConsumerRoutes so the
    *  per-consumer live reconciliation read (GET /api/consumers/:id/live) can reach the target
@@ -416,7 +418,7 @@ function buildConsumerOnboarding(
   // release workflow) into the CONSUMER's own repo at onboard, and offboard/purge git-rm it. It opens
   // the SAME sealed one-PAT-per-consumer the reader clones with (openCredential) via askpass; it
   // resolves the consumer repo's default branch itself. ONE stateless instance serves all three run kinds.
-  const consumerRepo = new GitConsumerRepo({ openCredential });
+  const consumerRepo = new GitRepoWriter({ openCredential });
 
   // The unit's build grants (provision-build-rbac + its teardown inverses). Master-local like the
   // AppProject writer: the unit's `<name>-build` namespace and the ArgoCD namespace both live on the

@@ -18,7 +18,6 @@ export function AnsiText({ text }: { text: string }) {
       {segments.map((seg, i) => {
         const cls = [
           seg.fg ? `${seg.fg}-fg` : "",
-          seg.bg ? `${seg.bg}-bg` : "",
           seg.decorations?.includes("bold") ? "ansi-bold" : "",
         ]
           .filter(Boolean)

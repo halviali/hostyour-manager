@@ -587,7 +587,7 @@ export async function appearedRecord(
  *  the real one and renames it over (ansiwise-core RunRecorder.save). On Windows that rename fails
  *  while any process holds run.json open and it carries no retry, so the end can be sitting in
  *  run.json.writing while run.json keeps the header the run began with — measured at 34 of 265 runs
- *  that had a reader, 0 of 100 that had none (simetrixch/ansiwise-core#65). A refusal that said only
+ *  that had a reader, 0 of 100 that had none. A refusal that said only
  *  "read the record on the machine" sent the operator to the ONE file that is guaranteed not to
  *  carry the answer in exactly that case. */
 async function endedRecord(ctx: StepCtx, client: AnsiwiseClient, id: string, signal: AbortSignal): Promise<AnsiwiseRunRecord> {

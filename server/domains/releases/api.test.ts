@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
@@ -20,7 +20,7 @@ import type { ReleasesView } from "../../../shared/api-types.ts";
 // files, and that a missing statement stays missing.
 
 const config = parseConfig({
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example.com",
   OIDC_ISSUER: "https://i.example/",
   OIDC_CLIENT_ID: "c",
@@ -118,19 +118,19 @@ describe("GET /api/releases — which release an installation stands on, and whi
     // `name: <image>` beside `image: <image>` — so a projection that read the chart directory where
     // the build name belongs, or the image where the chart belongs, produced identical output and
     // no case here could see it. This seed spells them apart: the chart directory is `post`, the
-    // builds[] entry is named `post-api`, and the image it names is `digita-post`.
+    // builds[] entry is named `post-api`, and the image it names is `acme-post`.
     const cloud = seededCloud();
     cloud.seed(
       MASTER,
       "clusters/inventories/post/values-prod.yaml",
-      ["builds:", "  - name: post-api", "    image: digita-post", '    tag: "2.0.0-stable-20260815000000-eee5555"', ""].join("\n"),
+      ["builds:", "  - name: post-api", "    image: acme-post", '    tag: "2.0.0-stable-20260815000000-eee5555"', ""].join("\n"),
     );
     const { app, cookie } = await make({ cloud });
 
     expect(view(await get(app, cookie), MASTER).apps).toContainEqual({
       app: "post",
       build: "post-api",
-      image: "digita-post",
+      image: "acme-post",
       tag: "2.0.0-stable-20260815000000-eee5555",
     });
   });

@@ -10,7 +10,7 @@ import { attestTargetStep, clearRelocationHold, loadAppCluster, unitStaysRegiste
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
-import type { ConsumerRepo } from "../../adapters/git/port.ts";
+import type { RepoWriter } from "../../adapters/git/port.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { removeConsumerWebhook } from "./onboard-webhook.ts";
 import { unitRepoCredentialId } from "./repo-identity.ts";
@@ -68,7 +68,7 @@ export type OffboardPorts = LifecyclePorts & {
   /** The consumer-repo writer — offboard git-rm's the release-kit (release/ + the workflow) from the
    *  consumer repo with the unit's LAST stage (self-contained, fail-soft). Optional: absent ⇒ the
    *  remove-release-kit step logs + skips (never blocks offboard). */
-  consumerRepo?: ConsumerRepo;
+  consumerRepo?: RepoWriter;
   /** The build-grant writer — offboard deletes this stage's mail-ops grant (fail-soft), then READS it
    *  back in assert-no-orphans. Optional: absent ⇒ the delete-smtp-ops-grant step logs + skips (never
    *  blocks offboard) and the scan reports that it could not look. */

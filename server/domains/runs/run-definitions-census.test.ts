@@ -2,8 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { RUN_KIND, type RunKind } from "../../../shared/enums.ts";
-import { KIND_GUARDS } from "../../executor/guards.ts";
+import { RUN_KIND } from "../../../shared/enums.ts";
 
 // A census over the run kind list, not a behaviour test. RUN_KIND is what the UI offers, what the plan
 // route accepts and what the runs table records, so a literal with no definition behind it is not an
@@ -58,17 +57,4 @@ describe("run-kind census: every RUN_KIND literal has a definition behind it", (
     expect(orphans, `RUN_KIND literals no run definition implements: ${orphans.join(", ")}`).toEqual([]);
   });
 
-  it("keeps the guard table total over the same list, with no entry for a run kind that is gone", () => {
-    // KIND_GUARDS is a Record<RunKind, …>, so TypeScript already forbids a missing entry. What it
-    // cannot forbid is the entry OUTLIVING its run kind — a key removed from RUN_KIND leaves the object
-    // literal compiling as an excess property in some positions — so the two lists are compared here.
-    expect(Object.keys(KIND_GUARDS).sort()).toEqual([...RUN_KIND].sort());
-  });
-
-  it("files every guard entry under a run kind the source implements", () => {
-    const implemented = implementedKinds();
-    const guarded = (Object.keys(KIND_GUARDS) as RunKind[]).filter((kind) => KIND_GUARDS[kind].length > 0);
-    const dangling = guarded.filter((kind) => !implemented.has(kind));
-    expect(dangling, `guards armed on run kinds nothing implements: ${dangling.join(", ")}`).toEqual([]);
-  });
 });

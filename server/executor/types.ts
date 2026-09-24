@@ -189,6 +189,3 @@ export interface RunDefinition<P = Record<string, unknown>> {
 }
 
 export type AnyRunDefinition = RunDefinition<Record<string, unknown>>;
-
-/** A plan guard. Throws PLAN_REFUSED; evaluated before the planner runs. */
-export type PlanGuard = (params: unknown, deps: PlannerDeps) => Promise<void>;

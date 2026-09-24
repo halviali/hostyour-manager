@@ -13,7 +13,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import { FakeConsumerRepo } from "../../adapters/git/testing/fake.ts";
+import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { AppError } from "../../kernel/errors.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -304,7 +304,7 @@ describe("purge run definition", () => {
 
   it("remove-release-kit git-rm's the release-kit BY NAME when a row carries the repo URL + PAT", async () => {
     seedApp();
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     // The release-kit is present (committed at onboard) so the git-rm actually reaps it.
     for (const path of ["release/release.ps1", "release/release.sh", ".github/workflows/release.yml"]) consumerRepo.seed("https://github.com/x/acme.git", path, "kit");
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
@@ -319,7 +319,7 @@ describe("purge run definition", () => {
 
   it("remove-release-kit fail-soft SKIPS for a true orphan (no inventory row → no repo URL / PAT)", async () => {
     seedCluster(); // NO app row — a true orphan
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-release-kit", logs))).resolves.toBeUndefined();
@@ -330,7 +330,7 @@ describe("purge run definition", () => {
 
   it("remove-release-kit is FAIL-SOFT: a push refusal never blocks the purge", async () => {
     seedApp();
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: 403"));
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
@@ -395,7 +395,7 @@ describe("purge run definition", () => {
     await buildRbac.applyBuildRbac([renderSmtpOpsGrant({ name: "acme", stage: "prod" }), renderSmtpOpsGrant({ name: "acme", stage: "dev" })]);
     const github = new FakeGitHubConsumer();
     github.seedHook("x", "acme", BUILD_HOOK_URL);
-    const consumerRepo = new FakeConsumerRepo();
+    const consumerRepo = new FakeRepoWriter();
     consumerRepo.seed("https://github.com/x/acme.git", "release/release.sh", "kit");
     const seeder = new RecordingTeardownSeeder();
     const creds = {

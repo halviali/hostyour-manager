@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pino } from "pino";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { parseConfig } from "../kernel/config.ts";
-import { GITHUB_APP_ENV } from "../kernel/config.fixture.ts";
+import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
 import { CredentialStore } from "../security/store.ts";
 import { storeBackend } from "./store-backend.ts";
 
@@ -22,7 +22,7 @@ import { storeBackend } from "./store-backend.ts";
 const logger = pino({ level: "silent" });
 
 const base = {
-  ...GITHUB_APP_ENV,
+  ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example",
   OIDC_ISSUER: "https://idp.example/",
   OIDC_CLIENT_ID: "c",

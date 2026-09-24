@@ -53,7 +53,7 @@ export async function readTemplateTree(repo: RepoReader, workdir: string, input:
       }
       // ponytail: the reader serves TEXT. A byte git stores that is not UTF-8 arrives here as U+FFFD
       // and would be written back changed — refused by name rather than copied wrong. A binary asset
-      // in the bundle needs a git-native copy on the ConsumerRepo port.
+      // in the bundle needs a git-native copy on the RepoWriter port.
       if (content.includes("�")) throw errValidation(`${path} of the template is not UTF-8 text — this run copies text files only and would corrupt it`);
       out.push({ path, content });
     }
