@@ -30,7 +30,7 @@ import type { DnsInventoryView, DnsRemoveInput, DnsWritesView } from "../../shar
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
-import type { AppProvenance, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
+import type { AppProvenance, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
 import type { UnitSize } from "../../shared/unit-size.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
@@ -465,6 +465,8 @@ export interface TenantView {
   clusterId: string;
   domain: string;
   stage: Stage;
+  /** How the members are addressed below the zone — a host each, or a path of the zone itself. */
+  routing: MemberRouting;
   seedUsers: boolean;
   suspended: boolean;
   owner: string | null;
@@ -631,6 +633,10 @@ export const restoreTenant = (tenantId: string, targetClusterId: string): Promis
  *  wildcard record updated; the source is cleared last. */
 export const migrateTenant = (tenantId: string, targetClusterId: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/migrate`, { targetClusterId });
+/** Plan the move onto the other member routing: the new record first, the old one removed once the
+ *  identity provider answers at its new address. */
+export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
 
 /** The invite-mail delivery outcome — a zod-free mirror of the server's ConsumerActivationMail, kept
  *  out of the web bundle deliberately (same rule as api-types.ts). */

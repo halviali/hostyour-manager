@@ -40,9 +40,10 @@ export interface RelocationWorld {
   sourceDomain: string;
   /** The source cluster's SHORT name (what the registration's cluster field carries). */
   sourceCluster: string;
-  /** The unit's public host — a consumer's `<label>.<stage apex>`, a tenant's auth member (every
-   *  tenant has one), which is what verify-quiesced probes from the outside. */
-  publicHost: string;
+  /** The unit's public base URL — a consumer's `https://<label>.<stage apex>`, a tenant's IdP member
+   *  (every tenant has one) at the address its routing gives it, which is what verify-quiesced
+   *  probes from the outside. */
+  publicUrl: string;
   /** Every namespace of the unit on its cluster (a consumer: one; a tenant: one per member). */
   namespaces: string[];
   /** Where the unit's secret-less jobs run (verify-dump, the registration read). */
@@ -191,7 +192,7 @@ export function verifyQuiescedStep(ports: RelocationPorts, worldOf: WorldOf): St
     run: async (ctx) => {
       const w = await worldOf(ctx);
       await w.watchConverged(ctx, w.sourceClusterId, "quiesced");
-      const url = `https://${w.publicHost}/`;
+      const url = `${w.publicUrl}/`;
       const seen = await ports.probe.probe(url, { signal: ctx.signal });
       if (seen.reachable) {
         throw errValidation(`${w.kindWord} ${w.unit} is flagged quiesced but its public address ${url} still answers (${seen.detail}) — a write landing now would be lost after the dump, refusing to continue`);

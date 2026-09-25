@@ -82,7 +82,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       sourceClusterId: ac.clusterId,
       sourceDomain: ac.domain,
       sourceCluster: ac.clusterName,
-      publicHost: consumerUnitHost(ac.host, ac.stage, await unitApex()),
+      publicUrl: `https://${consumerUnitHost(ac.host, ac.stage, await unitApex())}`,
       namespaces: [namespace],
       homeNamespace: namespace,
       setQuiesced: (q, runId) => ports.registrations.setQuiesced(ac.stage, ac.name, q, runId),

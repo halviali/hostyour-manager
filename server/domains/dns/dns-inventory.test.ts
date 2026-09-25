@@ -54,7 +54,7 @@ describe("readDnsInventory", () => {
     db: db.db,
     dns,
     consumers: async (cluster, stage) => (stage === "prod" && cluster === M1.split(".")[0] ? [{ name: "post", host: "post" }] : []),
-    tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", cluster: "m1" }, { subdomain: "beta", cluster: "s1" }] : []),
+    tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", routing: "host", cluster: "m1" }, { subdomain: "beta", routing: "host", cluster: "s1" }] : []),
     unitApex: async () => "example.net",
     mail: async () => mailView(),
     ...over,
@@ -73,6 +73,12 @@ describe("readDnsInventory", () => {
     const consumer = view.rows.find((r) => r.name === "post.example.net")!;
     expect(consumer).toMatchObject({ owner: { kind: "consumer", name: "post", stage: "prod" }, type: "CNAME", expected: M1, removable: true });
     expect(view.rows.find((r) => r.name === "*.beta.example.net")).toMatchObject({ owner: { kind: "tenant", name: "beta", stage: "prod" }, expected: S1, found: M1 });
+  });
+
+  it("names a path-routed tenant's record by its zone, which the wildcard does not cover", async () => {
+    dns.seed("gamma.example.net", "CNAME", M1);
+    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", routing: "path", cluster: "m1" }] : []) }));
+    expect(view.rows.filter((r) => r.owner.kind === "tenant").map((r) => `${r.name} ${r.verdict}`)).toEqual(["gamma.example.net standing"]);
   });
 
   it("shows an address record standing where a unit's CNAME belongs as what it is — never as an absence", async () => {

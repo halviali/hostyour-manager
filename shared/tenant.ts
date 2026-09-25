@@ -14,6 +14,7 @@ import { GateResultSchema } from "./gates.ts";
 import { ConsumerManifestSchema } from "./consumer.ts";
 import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
 import { SEED_SELECTIONS } from "./app-selections.ts";
+import { MEMBER_ROUTING } from "./enums.ts";
 
 /** GUID_ALPHABET — Crockford base32 (minus i/l/o/u): 32 symbols = 10 digits + 22 lower-case
  *  letters. mintTenantGuid() (server/kernel/ids.ts) draws 12 chars from this set; the `guid`
@@ -193,6 +194,10 @@ export const TenantRegistrationSchema = z
     // re-reading the product manifest would answer for the manifest as it stands today. One of
     // `members`, enforced below.
     identityProvider: memberName,
+    // How these members are addressed below the zone (MEMBER_ROUTING): the product's declaration at
+    // create time, moved on a standing file only by the run that also moves its DNS record. Defaulted
+    // to `host`, the addressing every file written before the field existed was made under.
+    routing: z.enum(MEMBER_ROUTING).default("host"),
     // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Manager from
     // its size table when it writes the registration and passed to hostyour-cloud/apps/unit-quota by the
     // tenant ApplicationSet. Per MEMBER and not per tenant, because a tenant owns one namespace per

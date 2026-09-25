@@ -67,9 +67,10 @@ import type { DnsWriteOwnerKind, Stage } from "../../../shared/enums.ts";
 /** The compositions themselves live in shared/unit-host.ts — ONE place for the Manager and, by the
  *  same strings, for hostyour-cloud's ApplicationSets — and are re-exported here for the callers of
  *  this module: a consumer stands at `<label>.<stage apex>`, a tenant's members at
- *  `<member>.<subdomain>.<stage apex>`, under ONE wildcard PER STAGE (the zones differ). The label is
+ *  `<member>.<subdomain>.<stage apex>` under ONE wildcard PER STAGE (host routing) or at
+ *  `<subdomain>.<stage apex>/<member>` under ONE record for the zone (path routing). The label is
  *  the registration's / the row's `host`, never the name (simetrixch/hostyour-cloud#208). */
-export { consumerUnitHost, tenantMemberHost, tenantWildcardHost, tenantZone, stageApex } from "../../../shared/unit-host.ts";
+export { consumerUnitHost, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, stageApex } from "../../../shared/unit-host.ts";
 
 function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
   if (!dns) {

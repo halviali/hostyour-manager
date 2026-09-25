@@ -16,7 +16,7 @@ import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { EPHEMERAL_STREAM } from "../../../shared/enums.ts";
 import { extractActivateUrl, extractMail, mailLine } from "./activation-result.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
-import { tenantMemberHost } from "./unit-dns.ts";
+import { tenantMemberUrl } from "./unit-dns.ts";
 // The bootstrap-token Secret coordinates live in tenant-admin-invite.ts so this step and the
 // operator-driven POST /api/tenants/:id/invite-admin route share ONE source (no drift).
 import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";
@@ -52,12 +52,12 @@ export function tenantActivateStep(ports: TenantOnboardPorts, p: CreateTenantPar
       if (!token) {
         throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — the tenant's crypto secret must exist after a green smoke; refusing to invite the first admin without it`);
       }
-      // The tenant's identity-provider host: <idp>.<subdomain>.<stage apex> (shared/unit-host.ts
-      // tenantMemberHost) — the same host its chart renders the ingress for. The apex is read off the
-      // TARGET cluster's own values chain (the resolver provision-dns composes the tenant's wildcard
-      // `*.<subdomain>.<stage apex>` from), so the host this posts to is one the wildcard covers.
-      const authFqdn = tenantMemberHost(p.identityProvider, p.stage, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage));
-      const url = `https://${authFqdn}/api/v1/bootstrap/invite-admin`;
+      // The tenant's identity-provider address: the one its routing gives the IdP member (shared/
+      // unit-host.ts tenantMemberUrl) — the address its chart renders the ingress for. The apex is read
+      // off the TARGET cluster's own values chain (the resolver provision-dns composes the tenant's
+      // record from), so the address this posts to is one that record covers.
+      const idpUrl = tenantMemberUrl(p.routing, p.identityProvider, p.stage, p.subdomain, await ports.resolveUnitApex(p.domain, p.stage));
+      const url = `${idpUrl}/api/v1/bootstrap/invite-admin`;
       // The token rides ONLY the declared header — never the URL, the body, or a log line.
       ctx.log("meta", `inviting the first tenant admin: POST ${url} with header X-Bootstrap-Token (token withheld)`);
       const res = await ports.activator.invoke({ url, method: "POST", tokenHeader: "X-Bootstrap-Token", token, body: { email: p.adminEmail }, signal: ctx.signal });

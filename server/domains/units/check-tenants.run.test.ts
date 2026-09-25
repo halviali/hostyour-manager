@@ -51,6 +51,7 @@ describe("check-tenants — who gets asked", () => {
     stage: "prod" as const,
     domain: "m1.example.com",
     identityProvider: "auth",
+    routing: "host" as const,
     clusterId: "clu_1",
   };
 

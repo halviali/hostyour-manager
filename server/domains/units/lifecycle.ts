@@ -10,7 +10,7 @@ import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters, tenants } from "../../db/schema/inventory.ts";
 import { AppError, errNotFound } from "../../kernel/errors.ts";
-import type { Stage } from "../../../shared/enums.ts";
+import type { MemberRouting, Stage } from "../../../shared/enums.ts";
 import type { Registrations } from "./registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { BuildRbacWriter, DeployState, ClusterKubeResolver, ClusterReader } from "../../adapters/kube/port.ts";
@@ -181,9 +181,9 @@ export interface TenantLifecyclePorts {
   resolver: ClusterKubeResolver;
   catalogRepoUrl: string;
   argoWatchTimeoutMs: number;
-  /** The tenant's ONE wildcard DNS record `*.<subdomain>.<unitApex>`: tenant-offboard and
-   *  tenant-purge remove it. Optional but UNCONDITIONALLY needed by those steps — absent ⇒ they fail
-   *  loud, never a silent skip. */
+  /** The tenant's ONE DNS record (the wildcard or the zone, as its routing names it): tenant-offboard
+   *  and tenant-purge remove it, tenant-set-routing moves it. Optional but UNCONDITIONALLY needed by
+   *  those steps — absent ⇒ they fail loud, never a silent skip. */
   dns?: DnsProvider;
   /** Deletes the tenant's argo-sync grant beside its member AppProjects. Optional and skipped when
    *  absent: the writer is what PROVISIONED the grant, so a removal running without it has none to
@@ -230,6 +230,9 @@ export interface TenantCluster {
    *  constant `auth` plus an implied trio stood here instead. */
   members: string[];
   identityProvider: string;
+  /** How the tenant's members are addressed below its zone, as recorded on its row: what its DNS
+   *  record is named and where its IdP answers (shared/unit-host.ts). */
+  routing: MemberRouting;
   /** The owner the tenant was onboarded under — what a bundle created later is onboarded under too. */
   owner: string;
 }
@@ -248,6 +251,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     clusterId: cluster.id,
     members: tenant.members,
     identityProvider: tenant.identityProvider,
+    routing: tenant.routing,
     owner: tenant.owner ?? tenant.subdomain,
   };
 }

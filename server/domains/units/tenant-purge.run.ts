@@ -4,7 +4,7 @@ import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
-import { STAGE, type Stage } from "../../../shared/enums.ts";
+import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
 import type { TenantPurgeInput } from "../../../shared/api-types.ts";
 import { guid as guidSchema } from "../../../shared/tenant.ts";
 import { assertDeployState, type TenantLifecyclePorts } from "./lifecycle.ts";
@@ -14,7 +14,7 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
+import { removeUnitDns, tenantRecordName } from "./unit-dns.ts";
 import { tenantKeyName } from "./tenant-storage.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
@@ -384,7 +384,12 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         }
         const c = loadPurgeCluster(ctx.db, p);
         const unitApex = await ports.resolveUnitApex(c.domain, c.stage);
-        await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantWildcardHost(p.target.subdomain, c.stage, unitApex) });
+        // The record under EVERY routing: a purge removes what may stand, and an orphan's routing is
+        // known to no row. Removing an absent record is a no-op (removeUnitDns), so the name the
+        // tenant never used costs one read and leaves nothing behind.
+        for (const routing of MEMBER_ROUTING) {
+          await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantRecordName(routing, p.target.subdomain, c.stage, unitApex) });
+        }
       },
     },
   ];

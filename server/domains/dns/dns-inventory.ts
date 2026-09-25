@@ -30,8 +30,8 @@
 import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import { STAGE, type Stage } from "../../../shared/enums.ts";
-import { consumerUnitHost, tenantWildcardHost } from "../../../shared/unit-host.ts";
+import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
+import { consumerUnitHost, tenantRecordName } from "../../../shared/unit-host.ts";
 import type { MailDnsRecord, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
 import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "../../../shared/dns.ts";
 
@@ -46,9 +46,9 @@ export interface DnsInventoryDeps {
    *  registration's `host`, never the name). */
   /** The consumers registered on a cluster, named by the cluster's name, at one stage. */
   consumers?: (cluster: string, stage: Stage) => Promise<{ name: string; host: string }[]>;
-  /** Every tenant registered at one stage, with the subdomain its wildcard covers and the short
-   *  name of the cluster it stands on. */
-  tenants?: (stage: Stage) => Promise<{ subdomain: string; cluster: string }[]>;
+  /** Every tenant registered at one stage, with its subdomain, the routing its record is named by
+   *  (the wildcard or the zone) and the short name of the cluster it stands on. */
+  tenants?: (stage: Stage) => Promise<{ subdomain: string; routing: MemberRouting; cluster: string }[]>;
   /** The public apex a cluster's units serve under at one stage (`global.unitApex` off its values
    *  chain) — the same resolution the tenant surface makes. */
   unitApex?: (domain: string, stage: Stage) => Promise<string>;
@@ -100,13 +100,13 @@ function mailRow(domain: string, row: MailDnsRow): DnsRecordRow {
   };
 }
 
-/** The unit records of one cluster at one stage: every consumer's host and every tenant's wildcard,
+/** The unit records of one cluster at one stage: every consumer's host and every tenant's record,
  *  composed by the one composer of each name (shared/unit-host.ts) and read at the provider. */
 async function unitRowsOf(
   deps: Required<Pick<DnsInventoryDeps, "dns" | "consumers" | "unitApex">>,
   cluster: { domain: string; name: string },
   stage: Stage,
-  tenants: { subdomain: string; cluster: string }[],
+  tenants: { subdomain: string; routing: MemberRouting; cluster: string }[],
 ): Promise<DnsRecordRow[]> {
   const { domain } = cluster;
   const apex = await deps.unitApex(domain, stage);
@@ -114,8 +114,8 @@ async function unitRowsOf(
   for (const consumer of await deps.consumers(cluster.name, stage)) {
     rows.push(await unitRow(deps.dns, { kind: "consumer", name: consumer.name, stage }, consumerUnitHost(consumer.host, stage, apex), domain));
   }
-  for (const tenant of tenants.filter((t) => t.cluster === cluster.name)) {
-    rows.push(await unitRow(deps.dns, { kind: "tenant", name: tenant.subdomain, stage }, tenantWildcardHost(tenant.subdomain, stage, apex), domain));
+  for (const { subdomain, routing } of tenants.filter((t) => t.cluster === cluster.name)) {
+    rows.push(await unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, tenantRecordName(routing, subdomain, stage, apex), domain));
   }
   return rows;
 }
@@ -131,11 +131,11 @@ export async function readDnsInventory(deps: DnsInventoryDeps): Promise<DnsInven
   if (dns && consumers && tenants && unitApex) {
     const clusterRows = deps.db.select({ domain: clusters.domain, name: clusters.name }).from(clusters).all();
     for (const stage of STAGE) {
-      let tenantsAt: { subdomain: string; cluster: string }[] = [];
+      let tenantsAt: { subdomain: string; routing: MemberRouting; cluster: string }[] = [];
       try {
         tenantsAt = await tenants(stage);
       } catch (e) {
-        skipped.push(`the tenant registrations at ${stage} could not be read, so no tenant wildcard of that stage is listed: ${messageOf(e)}`);
+        skipped.push(`the tenant registrations at ${stage} could not be read, so no tenant record of that stage is listed: ${messageOf(e)}`);
       }
       for (const cluster of clusterRows) {
         try {

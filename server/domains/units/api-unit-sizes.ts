@@ -8,7 +8,7 @@ import { errValidation, errNotFound, errNotConfigured } from "../../kernel/error
 import { UNIT_SIZE, SIZE_COMPONENT, type UnitSize, type SizeComponent } from "../../../shared/unit-size.ts";
 import { listUnitSizes, explainUnitQuota } from "./unit-size.ts";
 import { SetSizeParams, TenantSetSizeParams, TENANT_BRINGS, consumerComposition } from "./set-size.run.ts";
-import { assertTenantProvisioned, loadTenantStatus } from "./api.ts";
+import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
 import { loadAppCluster } from "./lifecycle.ts";
 import type { Registrations } from "./registrations.ts";
 import type { Executor } from "../../executor/executor.ts";

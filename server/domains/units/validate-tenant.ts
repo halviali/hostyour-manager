@@ -25,7 +25,7 @@ import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, type AppRef, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog } from "./app-catalog.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
-import { stageApex, tenantWildcardHost, tenantZone } from "../../../shared/unit-host.ts";
+import { stageApex, tenantRecordName, tenantZone } from "../../../shared/unit-host.ts";
 import { catalogPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { gateUnitHost } from "./gates/compose.ts";
@@ -312,11 +312,12 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
         streamGate(deps, g);
       }
       appsValidated = req.apps.map((a) => a.name);
-      // G27 reads the ZONE under the tenant's wildcard — the one obstacle the render gates cannot
+      // G27 reads the ZONE under the tenant's record — the wildcard or the zone itself, as the
+      // product's routing names it (tenantRecordName) — the one obstacle the render gates cannot
       // see, and the one that used to stop create-tenant at provision-dns with the crypto entry,
       // the bucket and the key already written. Same gate, same four readings as the consumer's.
       if (req.clusterFqdn !== undefined) {
-        const host = tenantWildcardHost(req.subdomain, req.stage, unitApex);
+        const host = tenantRecordName(t1.spec.routing, req.subdomain, req.stage, unitApex);
         const standing = deps.standingHost ? await deps.standingHost(host, req.clusterFqdn) : null;
         const g27 = gateUnitHost({ host, unitName: req.probeGuid, clusterFqdn: req.clusterFqdn, standing });
         gates.push(g27);

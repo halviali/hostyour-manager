@@ -17,6 +17,9 @@ export const TENANT_COLUMNS = {
   // the tenant's auth host derives it from these two, so they belong in the one projection.
   members: tenants.members,
   identityProvider: tenants.identityProvider,
+  // How the members are addressed below the zone: every view that shows or calls a member address
+  // composes it from this beside the two above.
+  routing: tenants.routing,
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,
   owner: tenants.owner,

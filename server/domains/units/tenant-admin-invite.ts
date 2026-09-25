@@ -2,8 +2,8 @@
 // (create-tenant-activate.ts, invite-only + idempotent inside a Run) and the operator-driven
 // Tenants-page action (POST /api/tenants/:id/invite-admin, which RESENDS when the admin was already
 // invited but the mail failed). Keeping the bootstrap-token key + the invite-or-resend orchestration
-// in ONE place so the two callers cannot drift. The host they call is NOT composed here: a tenant member's
-// public address is `<member>.<subdomain>.<unitApex>` (unit-dns.ts tenantMemberHost), and the apex is a
+// in ONE place so the two callers cannot drift. The address they call is NOT composed here: a tenant
+// member's public base URL follows its routing (unit-dns.ts tenantMemberUrl), and the apex is a
 // per-cluster fact both callers resolve before they call in.
 //
 // SECURITY: the bootstrap token rides ONLY the X-Bootstrap-Token header (never URL/body/log). On the
@@ -62,12 +62,13 @@ function readError(json: unknown): string | null {
 export async function inviteOrResendTenantAdmin(input: {
   activator: Activator;
   token: string;
-  authFqdn: string;
+  /** The IdP member's public base URL (tenantMemberUrl). */
+  idpUrl: string;
   email: string;
   signal?: AbortSignal;
 }): Promise<TenantAdminInviteResult> {
-  const { activator, token, authFqdn, email, signal } = input;
-  const base = `https://${authFqdn}/api/v1/bootstrap`;
+  const { activator, token, idpUrl, email, signal } = input;
+  const base = `${idpUrl}/api/v1/bootstrap`;
   // One shape for both bootstrap calls: token on the header only, signal spread conditionally
   // (exactOptionalPropertyTypes forbids passing signal: undefined explicitly).
   const call = (path: string, body: Record<string, string>) =>

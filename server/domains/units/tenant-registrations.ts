@@ -26,7 +26,7 @@
 import type { UnitQuota } from "../../../shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration } from "../../../shared/tenant.ts";
-import { STAGE, type Stage } from "../../../shared/enums.ts";
+import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the orphan scan (tenant-orphans.ts) hands these
 // to the browser verbatim, so it is declared once in shared/api-types.ts and used here rather than
 // declared here and mirrored there — see that file's tenants section for what a mirror costs.
@@ -68,6 +68,9 @@ export interface ScannedTenant {
   /** The unit name of the tenant's own apps bundle (`appsImage`), "" where it has none — what
    *  accounts for a build-only registration (tenant-apps-repo-purge.run.ts scanOrphanBuilds). */
   appsImage: string;
+  /** How the tenant's members are addressed below its zone, off its own registration — what the DNS
+   *  inventory names the tenant's record by (the wildcard or the zone). */
+  routing: MemberRouting;
 }
 
 /** The three HONEST outcomes of reading ONE tenant registration, kept apart because the callers act
@@ -142,7 +145,7 @@ export class TenantRegistrations {
     }
     const r = TenantRegistrationSchema.safeParse(parsed);
     if (!r.success) return { status: "unreadable", reason: `${path} failed its schema: ${schemaWhy(r.error)}` };
-    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), appsImage: r.data.appsImage } };
+    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), appsImage: r.data.appsImage, routing: r.data.routing } };
   }
 
   /** The ONE scan of the registrations at a stage: scanTenantDir over every guid directory, bucketed
@@ -291,6 +294,15 @@ export class TenantRegistrations {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, quota }, `size(${guid}) ${trailer(runId)}`);
+  }
+
+  /** Write how the tenant's members are addressed below its zone. One field of one file, like the
+   *  flips above; writing the routing it already has commits nothing. tenant-set-routing moves the
+   *  DNS record around this write. */
+  async setRouting(stage: Stage, guid: string, routing: MemberRouting, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    return this.write(stage, guid, { ...current.entry, routing }, `routing(${guid}): ${routing} ${trailer(runId)}`);
   }
 
   /** Write the tenant's own apps bundle — the repository, the image it builds and the tag its last

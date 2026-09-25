@@ -5,7 +5,7 @@
 // fails when this mirror drifts.
 import { z } from "zod";
 import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, type UnitQuota, type UnitSize, type MongodbMode } from "./unit-size.ts";
-import { STAGE, type Stage } from "./enums.ts";
+import { MEMBER_ROUTING, STAGE, type Stage } from "./enums.ts";
 import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "./unit-host.ts";
 
 /** WHERE a consumer repository keeps its manifest. One spelling, because two readers ask for it:
@@ -166,6 +166,11 @@ export const TenantSpecSchema = z.object({
    *  `values-<app>.yaml` overlays, as before the manifest existed (server/domains/units/app-catalog.ts). */
   appsBundle: z.string().regex(/^[a-z0-9-]+$/).optional(),
   appsRepo: gitRepoURL.optional(),
+  /** HOW THE PRODUCT ADDRESSES ITS MEMBERS below the zone (MEMBER_ROUTING, shared/enums.ts): `host`, a
+   *  host of their own each, or `path`, every member under a path of the zone itself. The product
+   *  says it because its charts are what route; the platform follows it with the DNS record and every
+   *  member address it composes. Absent is `host`, the addressing before the field existed. */
+  routing: z.enum(MEMBER_ROUTING).default("host"),
 }).superRefine((spec, ctx) => {
   if ((spec.appsBundle === undefined) !== (spec.appsRepo === undefined)) {
     ctx.addIssue({ code: "custom", path: [spec.appsBundle === undefined ? "appsBundle" : "appsRepo"], message: spec.appsBundle === undefined

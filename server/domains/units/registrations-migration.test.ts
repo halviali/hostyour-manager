@@ -30,7 +30,7 @@ function tenantParsed(): Record<string, unknown> {
   return {
     cluster: "s1", subdomain: "simetrix",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
-    members: testMembers(["erp"]), identityProvider: "auth",
+    members: testMembers(["erp"]), identityProvider: "auth", routing: "host",
     quota: seedQuota("small"), seedUsers: false, resetNonce: "1", suspended: false, quiesced: false,
   };
 }
@@ -83,6 +83,15 @@ describe("TenantRegistrations.migrateToSchema", () => {
     expect(second.commit).toBeNull();
     expect(second.rewritten).toEqual([]);
     expect(repo.commits).toHaveLength(1);
+  });
+
+  it("rewrites a registration written before the routing existed with host, the addressing it was made under", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
+    repo.seed(repo.booksBranch, TENANT_PATH, tenantFile({}, ["routing"]));
+    const outcome = await reg.migrateToSchema(MARKER);
+    expect(outcome.rewritten).toEqual([{ path: TENANT_PATH, fields: ["+routing"] }]);
+    expect(repo.read(repo.booksBranch, TENANT_PATH)).toBe(tenantFile());
   });
 
   it("commits nothing for a file the registry itself wrote — the serialization is byte-identical", async () => {

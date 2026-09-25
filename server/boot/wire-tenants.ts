@@ -28,6 +28,7 @@ import { Registrations } from "../domains/units/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import { makeTenantRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
 import { makeTenantSetSizeDef } from "../domains/units/set-size.run.ts";
+import { makeTenantSetRoutingDef } from "../domains/units/tenant-routing.run.ts";
 import type { TenantLifecyclePorts } from "../domains/units/lifecycle.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/create-tenant.run.ts";
 import type { RegisteredUnit, TenantBuildDeps } from "../domains/units/tenant-builds.ts";
@@ -52,6 +53,12 @@ import { makeTenantMigrateDef } from "../domains/units/migrate.run.ts";
 // A whole tenant fan-out (base + trio + N per-app stacks) has more to converge than a single consumer
 // app, so it gets a longer budget before the set-watch fails loudly.
 const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
+
+// How long the routing move waits for the IdP to answer at its new address, and how often it asks:
+// the product's charts reach the cluster through the catalog carry and an ArgoCD sync, which take
+// minutes, so the budget is the carry's interval twice over.
+const ROUTING_WAIT_MS = 30 * 60_000;
+const ROUTING_POLL_MS = 15_000;
 
 /** The credential id under which the tenant family's reader answers the catalog's configured read
  *  PAT — never a row of the store. Every other id the reader is handed is opened from the store. */
@@ -319,6 +326,9 @@ export function buildTenantOnboarding(
     // namespaces instead of a consumer's single one.
     makeTenantRestartWorkloadsDef(lifecyclePorts),
     makeTenantSetSizeDef(lifecyclePorts),
+    // The routing move reads the IdP at its new address with the same public probe the moves between
+    // clusters read with.
+    makeTenantSetRoutingDef({ ...lifecyclePorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
     makeOffboardTenantDef(lifecyclePorts),
     // tenant-purge / force-offboard removes a tenant's WHOLE footprint BY GUID even with no inventory
     // row (the orphaned partial create-tenant), and additionally destroys the crypto entry (the deprovision

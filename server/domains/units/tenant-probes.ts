@@ -19,7 +19,7 @@ import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 import { judgeRepoIdentity, patHookRefusal, resolveRepoCredentialId } from "./repo-identity.ts";
 import { readOwnerIdentity } from "./owners.ts";
-import { tenantWildcardHost } from "../../../shared/unit-host.ts";
+import { tenantRecordName } from "../../../shared/unit-host.ts";
 import { readStandingHost } from "./unit-dns.ts";
 import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
 import { webhookTargetUrl, WebhookScopeError } from "../../adapters/github-consumer/port.ts";
@@ -101,11 +101,11 @@ export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, po
   }
 }
 
-/** provision-dns's probe: the tenant's wildcard record, judged as the step judges it. A replace stands
+/** provision-dns's probe: the tenant's record (the wildcard or the zone, by its routing), judged as the step judges it. A replace stands
  *  on the SAME cluster (the plan refuses any other), so its record already answers "ours". */
 export async function probeTenantDns(ports: TenantOnboardPorts, p: CreateTenantParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
-  const recordName = tenantWildcardHost(p.subdomain, p.stage, unitApex);
+  const recordName = tenantRecordName(p.routing, p.subdomain, p.stage, unitApex);
   const title = `The DNS record ${recordName}`;
   if (!ports.dns) return [unmeasured("dns.record", title, "no DNS provider is wired on this manager")];
   const judged = await readStandingHost(ports.dns, ctx.db, { recordName, clusterFqdn: p.domain, signal: ctx.signal });

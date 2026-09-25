@@ -8,7 +8,7 @@ import { tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { attestTenantTargetStep, clearRelocationHold, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
-import { removeUnitDns, tenantWildcardHost } from "./unit-dns.ts";
+import { removeUnitDns, tenantRecordName } from "./unit-dns.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 
 // tenant-offboard — the tenant analogue of the consumer
@@ -118,12 +118,13 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
       title: "Remove the tenant's public DNS record",
       run: async (ctx) => {
         // The inverse of create-tenant's provision-dns (no address is left pointing nowhere
-        // — without exception, so this step is fail-CLOSED). The tenant's one record is the wildcard
-        // `*.<subdomain>.<unitApex>`; the apex comes off the target cluster's values chain, the same
-        // read the create side made.
+        // — without exception, so this step is fail-CLOSED). The tenant's one record is the one its
+        // recorded routing names (tenantRecordName: the wildcard under host routing, the zone under
+        // path routing); the apex comes off the target cluster's values chain, the same read the
+        // create side made.
         const tc = loadTenantCluster(ctx.db, tenantId);
         const unitApex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: tenantWildcardHost(tc.subdomain, tc.stage, unitApex) });
+        await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName: tenantRecordName(tc.routing, tc.subdomain, tc.stage, unitApex) });
       },
     },
     {

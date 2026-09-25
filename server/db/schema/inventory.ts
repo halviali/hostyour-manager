@@ -3,7 +3,7 @@ import { sqliteTable, text, integer, uniqueIndex, primaryKey } from "drizzle-orm
 import { sql } from "drizzle-orm";
 import {
   SERVER_STATUS, SERVER_ROLE, SERVER_TAILNET_STATE, SERVER_PASSWORD_LOGIN_STATE, SERVER_AUTHORIZED_KEYS_STATE,
-  STAGE, APP_STATUS, TENANT_STATUS, TENANT_ADMIN_STATE,
+  STAGE, APP_STATUS, TENANT_STATUS, TENANT_ADMIN_STATE, MEMBER_ROUTING,
   APP_PROVENANCE, CLUSTER_STATUS, PLANE_STATE,
 } from "../../../shared/enums.ts";
 
@@ -213,6 +213,9 @@ export const tenants = sqliteTable("tenants", {
   // replace union all work from rows, and a git read per call to learn a namespace name is a read
   // nobody should pay for. The registration carries it too — that copy is the one the CHARTS read.
   members: text("members", { mode: "json" }).$type<string[]>().notNull(),
+  // How the members are addressed below the zone (MEMBER_ROUTING), beside the IdP for the same reason:
+  // every path that reaches a member composes its address and its DNS record from it, and holds a row.
+  routing: text("routing", { enum: MEMBER_ROUTING }).notNull().default("host"),
   // Whether the tenant's IdP boot-seeds initial accounts. Also a registration field (the registration
   // is what the charts read); recorded here as the platform's own trace of what was asked for.
   seedUsers: integer("seed_users", { mode: "boolean" }).notNull().default(false),

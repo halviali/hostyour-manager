@@ -26,7 +26,7 @@ const notFound = (): ActivationResponse => ({ status: 404, ok: false, json: { er
 
 const INVITE_SUFFIX = "/api/v1/bootstrap/invite-admin";
 const RESEND_SUFFIX = "/api/v1/bootstrap/resend-admin-invite";
-const args = (activator: Activator) => ({ activator, token: "tok", authFqdn: "auth.acme.s1.example", email: "admin@acme.test" });
+const args = (activator: Activator, idpUrl = "https://auth.acme.s1.example") => ({ activator, token: "tok", idpUrl, email: "admin@acme.test" });
 
 describe("inviteOrResendTenantAdmin", () => {
   it("A0 (no admin): invite-admin 201 → invited, with the activate_url + mail; only invite is called", async () => {
@@ -87,5 +87,11 @@ describe("inviteOrResendTenantAdmin", () => {
   it("a 5xx invite throws with the status (no credential — a non-2xx body is an { error } shape)", async () => {
     const a = new TwoEndpointActivator({ invite: { status: 502, ok: false, json: { error: "bad_gateway" }, bodyText: '{"error":"bad_gateway"}' } });
     await expect(inviteOrResendTenantAdmin(args(a))).rejects.toThrow(/HTTP 502/);
+  });
+
+  it("calls the IdP under its path where the tenant is path-routed — the path stays in every URL", async () => {
+    const a = new TwoEndpointActivator({ invite: conflict("admin_exists"), resend: ok({ ok: true, activate_url: "https://acme.s1.example/auth/activate?token=re2", mail: { status: "sent", transport: "example-post" } }) });
+    await inviteOrResendTenantAdmin(args(a, "https://acme.s1.example/auth"));
+    expect(a.calls.map((c) => c.url)).toEqual([`https://acme.s1.example/auth${INVITE_SUFFIX}`, `https://acme.s1.example/auth${RESEND_SUFFIX}`]);
   });
 });

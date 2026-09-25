@@ -18,7 +18,7 @@
 // (api.ts, invite-admin). This takes the same route with the same grants.
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import type { Stage, TenantAdminState } from "../../../shared/enums.ts";
+import type { MemberRouting, Stage, TenantAdminState } from "../../../shared/enums.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import type { RunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import type { TenantHealthReader } from "../../adapters/tenant-health/port.ts";
@@ -26,7 +26,7 @@ import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { BOOTSTRAP_TOKEN_KEY } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
-import { tenantMemberHost } from "./unit-dns.ts";
+import { tenantMemberUrl } from "./unit-dns.ts";
 import { checkUnitsStep, type CheckUnitsPorts } from "./check-units.ts";
 
 /** The header the tenant's auth reads its bootstrap token from — the same one the invite uses. */
@@ -61,6 +61,7 @@ interface Candidate {
   stage: Stage;
   domain: string;
   identityProvider: string;
+  routing: MemberRouting;
   clusterId: string;
 }
 
@@ -107,6 +108,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
           subdomain: tenants.subdomain,
           stage: tenants.stage,
           identityProvider: tenants.identityProvider,
+          routing: tenants.routing,
           clusterId: tenants.clusterId,
           suspended: tenants.suspended,
           status: tenants.status,
@@ -147,13 +149,13 @@ function checkStep(ports: CheckTenantsPorts): Step {
             state = "unreachable";
             because = `the bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns}`;
           } else {
-            // WHERE the tenant's own auth serves: the apex comes off the target cluster's values
-            // chain and never off the cluster's own domain — composing from the domain asks a host
-            // nothing serves.
+            // WHERE the tenant's own auth serves: at the address its routing gives its IdP member,
+            // under the apex off the target cluster's values chain and never off the cluster's own
+            // domain — composing from the domain asks a host nothing serves.
             const apex = await ports.resolveUnitApex(t.domain, t.stage);
-            const authFqdn = tenantMemberHost(t.identityProvider, t.stage, t.subdomain, apex);
+            const idpUrl = tenantMemberUrl(t.routing, t.identityProvider, t.stage, t.subdomain, apex);
             const answer = await ports.health.read({
-              url: `https://${authFqdn}/api/v1/bootstrap/status`,
+              url: `${idpUrl}/api/v1/bootstrap/status`,
               tokenHeader: BOOTSTRAP_TOKEN_HEADER,
               token,
               ...(ctx.signal ? { signal: ctx.signal } : {}),

@@ -10,7 +10,7 @@ import { apps, clusters, tenants } from "../../db/schema/inventory.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { APP_SETTLED_STATUS, TENANT_SETTLED_STATUS, type DnsWriteOwnerKind, type Stage } from "../../../shared/enums.ts";
-import { consumerUnitHost, tenantWildcardHost } from "../../../shared/unit-host.ts";
+import { consumerUnitHost, tenantRecordName } from "../../../shared/unit-host.ts";
 
 export interface RepointUnitRecordsDeps {
   dns: DnsProvider | undefined;
@@ -45,11 +45,11 @@ export async function repointUnitRecords(
       .all()
       .map((a) => ({ kind: "consumer" as const, owner: a.name, stage: a.stage, record: (apex: string) => consumerUnitHost(a.host, a.stage, apex) })),
     ...ctx.db
-      .select({ guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage })
+      .select({ guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage, routing: tenants.routing })
       .from(tenants)
       .where(and(eq(tenants.clusterId, input.clusterId), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
       .all()
-      .map((t) => ({ kind: "tenant" as const, owner: t.guid, stage: t.stage, record: (apex: string) => tenantWildcardHost(t.subdomain, t.stage, apex) })),
+      .map((t) => ({ kind: "tenant" as const, owner: t.guid, stage: t.stage, record: (apex: string) => tenantRecordName(t.routing, t.subdomain, t.stage, apex) })),
   ];
   const moved: string[] = [];
   for (const unit of units) {

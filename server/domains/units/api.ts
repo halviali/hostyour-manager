@@ -8,7 +8,7 @@ import { resolveRepoCredentialId, resolveRepoIdentity } from "./repo-identity.ts
 import { readOwnerIdentity } from "./owners.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotConfigured, errNotFound, errValidation } from "../../kernel/errors.ts";
-import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type TenantStatus, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
+import { MASTER_ROLES, SLAVE_ROLES, TENANT_SETTLED_STATUS, type Stage, type ArgoSync, type ArgoHealth } from "../../../shared/enums.ts";
 import type { OrphanScanView, OrphanBuildView, DetectedScanView, LiveArgoView, ConsumerLiveView, ConsumerLiveProbeView, TenantLiveView } from "../../../shared/api-types.ts";
 import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
 import { singleSourceRevision, targetedRevisionFor, type ClusterKubeResolver, type ArgoAppStatus } from "../../adapters/kube/port.ts";
@@ -23,6 +23,8 @@ import { PurgeParams } from "./purge.run.ts";
 import { AdoptConsumerParams } from "./adopt-consumer.run.ts";
 import { RestoreParams, TenantRestoreParams } from "./restore.run.ts";
 import { MigrateParams, TenantMigrateParams } from "./migrate.run.ts";
+import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
+import { registerTenantRoutingRoutes } from "./api-tenant-routing.ts";
 import { scanClusterOrphanConsumers, scanDetectedConsumers } from "./consumer-detected.ts";
 // The channel ceiling is read from the ONE table in the platform repo, never restated here.
 import { readChannelStages, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
@@ -40,7 +42,7 @@ import type { Activator } from "../../adapters/activation/port.ts";
 import { TENANT_COLUMNS } from "./tenant-columns.ts";
 import { inviteOrResendTenantAdmin, BOOTSTRAP_TOKEN_KEY, InviteAdminRequest } from "./tenant-admin-invite.ts";
 import { TENANT_SECRET } from "./tenant-secrets.ts";
-import { tenantMemberHost } from "./unit-dns.ts";
+import { tenantMemberUrl } from "./unit-dns.ts";
 import { resolveNextVersion } from "./release-version.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
@@ -371,28 +373,6 @@ const TENANT_LIFECYCLE = [
   { path: "backup", kind: "tenant-backup", refuseWhenProvisioning: "backing it up" },
 ] as const;
 
-/** The two columns every provisional refusal needs; 404 when the tenant row is absent. */
-export function loadTenantStatus(db: Db, id: string): { subdomain: string; status: TenantStatus } {
-  const row = db.select({ subdomain: tenants.subdomain, status: tenants.status }).from(tenants).where(eq(tenants.id, id)).get();
-  if (!row) throw errNotFound(`tenant ${id}`);
-  return row;
-}
-
-/** Refuse an action that assumes a LIVE tenant when the tenant's create-tenant run never finished
- *. Since create-tenant now records its row BEFORE it deploys (record-provisional),
- *  a "provisioning" row means the tenant may have no namespace, no example-auth ingress and no fan-out at
- *  all — every such action would burn a watch timeout or hit a raw DNS/connect error and blame the wrong
- *  thing. SERVER-SIDE and unconditional: the Tenants UI hides these actions too, but a hidden button is a
- *  convenience, not a guard — this route is the only place the refusal actually holds. The message names
- *  the two ways out because they are genuinely the whole option set: finish the create-tenant run, or
- *  remove the tenant (offboard/purge). Modelled on the `suspended` refusal on the invite route. */
-export function assertTenantProvisioned(t: { subdomain: string; status: TenantStatus }, action: string): void {
-  if (t.status !== "provisioning") return;
-  throw errValidation(
-    `tenant ${t.subdomain} is still provisioning — its create-tenant run never finished, so it may not be deployed at all and ${action} would act on a tenant that is not there. Finish the create-tenant run, or offboard/purge the tenant.`,
-  );
-}
-
 /** The tenant routes' deps: the consumer set + the OPTIONAL app catalog provider. The provider
  *  clones the catalog and the apps repository it names to read the create-tenant wizard's apps; it
  *  is absent when tenant onboarding is not wired (no catalog access), in which case the catalog
@@ -457,6 +437,8 @@ function rollupFanoutStatus(statuses: readonly ArgoAppStatus[]): { sync: ArgoSyn
 
 export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): void {
   const { executor, db, onboardingEnabled, appCatalog, resolver, catalogRepoUrl, activator, registrations, orphanBuilds, resolveUnitApex } = deps;
+  // The routing move — a route file of its own, the way the resize is.
+  registerTenantRoutingRoutes(app, { db, executor, tenantEnabled: onboardingEnabled });
 
   // The tenant inventory: every onboarded tenant + which cluster it fans out on (JOIN clusters for
   // domain/stage). Always live — the read path never degrades on missing config.
@@ -732,15 +714,15 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     const { clusterReader } = await resolver.resolve(found.clusterId);
     const token = await clusterReader.readSecretValue(ns, TENANT_SECRET, BOOTSTRAP_TOKEN_KEY);
     if (!token) throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — cannot invite the first admin`);
-    // WHERE the tenant's own example-auth serves: <idp>-<stage>.<subdomain>.<unitApex>, the host its
-    // ingress renders and the tenant's wildcard record covers. The apex comes off the target
-    // cluster's values chain, never off `found.domain` — that column is where the CLUSTER is reached,
+    // WHERE the tenant's own example-auth serves: the address its routing gives the IdP member
+    // (tenantMemberUrl), the one its ingress renders and its record covers. The apex comes off the
+    // target cluster's values chain, never off `found.domain` — that column is where the CLUSTER is reached,
     // and install.sh defaults the apex to the cluster FQDN minus its first label, so composing from
     // the domain posts the bootstrap token at a host nothing serves.
     const result = await inviteOrResendTenantAdmin({
       activator,
       token,
-      authFqdn: tenantMemberHost(found.identityProvider, found.stage, found.subdomain, await resolveUnitApex(found.domain, found.stage)),
+      idpUrl: tenantMemberUrl(found.routing, found.identityProvider, found.stage, found.subdomain, await resolveUnitApex(found.domain, found.stage)),
       email: parsed.data.email,
       signal: c.req.raw.signal,
     });

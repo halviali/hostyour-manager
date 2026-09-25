@@ -1,4 +1,4 @@
-import { STAGE, type Stage } from "./enums.ts";
+import { STAGE, type MemberRouting, type Stage } from "./enums.ts";
 
 /** THE ONE PLACE A UNIT'S PUBLIC HOST IS COMPOSED (simetrixch/hostyour-cloud#208).
  *
@@ -40,11 +40,21 @@ export function tenantWildcardHost(subdomain: string, stage: Stage, unitApex: st
   return `*.${tenantZone(subdomain, stage, unitApex)}`;
 }
 
-/** ONE member's own public host at one stage — a single name the wildcard above covers, for the
- *  callers that must ADDRESS a member rather than resolve it (the first-admin invite over the
- *  tenant's identity provider, the relocation probe). */
-export function tenantMemberHost(member: string, stage: Stage, subdomain: string, unitApex: string): string {
-  return `${member}.${tenantZone(subdomain, stage, unitApex)}`;
+/** The ONE DNS record a package's members need at one stage, by their routing: `host` routing puts
+ *  every member on a host of its own below the zone, which the wildcard covers; `path` routing
+ *  serves every member under a path of the zone itself, which is a name the wildcard does NOT cover
+ *  (a wildcard matches one label more, never the zone). */
+export function tenantRecordName(routing: MemberRouting, subdomain: string, stage: Stage, unitApex: string): string {
+  return routing === "path" ? tenantZone(subdomain, stage, unitApex) : tenantWildcardHost(subdomain, stage, unitApex);
+}
+
+/** ONE member's public base URL at one stage, for the callers that must ADDRESS a member rather than
+ *  resolve it (the first-admin invite over the identity provider, the administrator check, the
+ *  relocation probe): `https://<member>.<zone>` under `host` routing, `https://<zone>/<member>` under
+ *  `path` routing. A caller appends its API path to it. */
+export function tenantMemberUrl(routing: MemberRouting, member: string, stage: Stage, subdomain: string, unitApex: string): string {
+  const zone = tenantZone(subdomain, stage, unitApex);
+  return routing === "path" ? `https://${zone}/${member}` : `https://${member}.${zone}`;
 }
 
 /** The words no label and no subdomain may be: the stage words are the zones themselves, so a

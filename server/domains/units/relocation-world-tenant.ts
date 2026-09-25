@@ -21,7 +21,7 @@ import { renderTenantArgoSync } from "./build-rbac.ts";
 
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { deleteTenantArgoSync } from "./tenant-teardown.ts";
-import { tenantMemberHost, tenantWildcardHost } from "./unit-dns.ts";
+import { tenantMemberUrl, tenantRecordName } from "./unit-dns.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
 import type { RelocationPorts, RelocationWorld, WorldOf } from "./relocation.ts";
 import {
@@ -111,9 +111,9 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       sourceClusterId: tc.clusterId,
       sourceDomain: tc.domain,
       sourceCluster: (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.cluster ?? "",
-      // Every tenant has its auth member, and every member sits one level below the subdomain — so
-      // the auth host is the probe target that exists for EVERY tenant.
-      publicHost: tenantMemberHost(tc.identityProvider, tc.stage, tc.subdomain, await ports.resolveUnitApex(tc.domain, tc.stage)),
+      // Every tenant has its IdP member, at the address its routing gives it — so the IdP is the probe
+      // target that exists for EVERY tenant.
+      publicUrl: tenantMemberUrl(tc.routing, tc.identityProvider, tc.stage, tc.subdomain, await ports.resolveUnitApex(tc.domain, tc.stage)),
       namespaces: tenantNamespaces(allMembers, tc.guid, tc.stage),
       homeNamespace: memberNamespace(tc.guid, tc.identityProvider, tc.stage),
       setQuiesced: (q, runId) => ports.registrations.setTenantQuiesced(tc.stage, tc.guid, q, runId),
@@ -209,7 +209,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         c.log("meta", `source fan-out for ${tc.guid} is pruned (${names.length} Application(s)) — the source released the tenant`);
       },
       // The chain is (the TARGET cluster's domain, the TENANT's stage).
-      dnsRecordName: async (_c, target) => tenantWildcardHost(tc.subdomain, tc.stage, await ports.resolveUnitApex(target.domain, tc.stage)),
+      dnsRecordName: async (_c, target) => tenantRecordName(tc.routing, tc.subdomain, tc.stage, await ports.resolveUnitApex(target.domain, tc.stage)),
       verifyCompletenessExtra: async (c, target) => {
         // The crypto material never travels (Vault is one shared mount) — what must be PROVEN is
         // that the target's ESO materialized it, or every member boots into SecretSyncedError.

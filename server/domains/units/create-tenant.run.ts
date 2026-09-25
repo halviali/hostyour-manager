@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import type { RunDefinition, Step, StepCtx, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
-import { STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
+import { MEMBER_ROUTING, STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
 import { appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
@@ -31,7 +31,7 @@ import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
-import { provisionUnitDns, standingHostFrom, tenantWildcardHost } from "./unit-dns.ts";
+import { provisionUnitDns, standingHostFrom, tenantRecordName } from "./unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
 import { writeRegistrationStep } from "./create-tenant-registration.ts";
@@ -182,6 +182,9 @@ export const CreateTenantParams = z.object({
   // from params alone (the armed check calls def.steps({})). The standing members and the app members
   // are one list here — an app is a member — and `apps` above says which of them came from an app.
   members: z.array(TenantMemberRecordSchema).min(1), identityProvider: memberName,
+  // How the members are addressed below the zone, as the product's manifest declared it at
+  // validation — frozen like the members, and written to the registration, the row and the DNS record.
+  routing: z.enum(MEMBER_ROUTING).default("host"),
   seedUsers: z.boolean().default(false), // flips the tenant IdP's user boot-seed; a registration field
   // The tenant's SIZE — the ceiling EVERY member namespace of it is bounded by. A NAME here, resolved
   // to figures as the registration is written, so a plan that waited for approval across a table edit
@@ -286,6 +289,7 @@ function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase: Tenan
       // where their status lives. Derived from the two fields rather than carried as a third, which
       // could drift out of step with them.
       identityProvider: p.identityProvider, members: p.members.map((m) => m.name).filter((n) => !p.apps.some((a) => a.name === n)),
+      routing: p.routing,
       seedUsers: p.seedUsers,
       owner: p.owner, provenance: "manager" as const,
       lastRunId: ctx.runId, updatedAt: new Date(),
@@ -485,7 +489,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // the replacing tenant carries the SAME subdomain on the SAME cluster (a replace across two
         // clusters is refused at the plan, tenant-replace.ts), so this upsert re-points the record.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
-        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantWildcardHost(p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
+        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantRecordName(p.routing, p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },
     },
     writeRegistrationStep(ports, p, runtime),
@@ -672,6 +676,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
         guid,
         // Frozen from the approved validation: the run executes what was approved.
         members: outcome.memberRecords, identityProvider: outcome.identityProvider,
+        routing: outcome.spec?.routing ?? "host",
         subdomain: req.subdomain,
         stage: req.stage,
         clusterId: rc.clusterId,
