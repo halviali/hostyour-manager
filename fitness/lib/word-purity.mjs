@@ -42,7 +42,7 @@ export function readWordList(root = REPOSITORY_ROOT) {
 
 /** Longest first, so `digita-deploy` is counted as itself and not as `digita`. */
 function pattern(words) {
-  const escaped = [...words].sort((a, b) => b.length - a.length).map((w) => w.replace(/[.*+?^${}()|[\]\]/g, "\$&"));
+  const escaped = [...words].sort((a, b) => b.length - a.length).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   return new RegExp(`(?<![A-Za-z0-9])(?:${escaped.join("|")})(?![A-Za-z0-9])`, "gi");
 }
 
