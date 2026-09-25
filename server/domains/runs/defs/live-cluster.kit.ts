@@ -74,7 +74,7 @@ export function attestClusterStep(target: SlaveTarget): Step {
  *  reader and the namespace come from ONE resolve: `argoNamespace` is `argocd` for a target carrying
  *  the master part and the per-slave instance's namespace on the master for a slave, and pairing
  *  them anywhere else would put that pairing one rename away from coming apart
- *  (domains/units/cluster-kube.ts). What this used to do was run `microk8s kubectl` over the
+ *  (domains/inventory/cluster-kube.ts). What this used to do was run `microk8s kubectl` over the
  *  target's SSH session every ten seconds for up to thirty minutes, raising every one of those
  *  reads to root with the machine's elevation password. */
 export function argocdFollowStep(target: SlaveTarget, ports: DeploySlavePorts): Step {

@@ -20,6 +20,7 @@
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { GitHubConsumer } from "../../adapters/github-consumer/port.ts";
 import type { CredentialStore } from "../../security/store.ts";
+import { appIdentityRowId } from "../../security/app-identity.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { parseGitHubOwnerRepo } from "./onboard-webhook.ts";
 
@@ -77,23 +78,6 @@ export async function resolveRepoIdentity(input: { repoURL: string; githubApp?: 
   } finally {
     pat.fill(0);
   }
-}
-
-/** THE APP'S ONE ROW (#226): a `github-app` credential storing nothing — the store mints an
- *  installation token from the App at every open (security/store.ts) — whose subject is the owner
- *  the App is installed with. ONE per installation, seeded at boot (ensureAppIdentityRow); no unit
- *  has a row of its own any more, and the id every clone and every hook call is handed is this row's
- *  where the App reaches the repository, the owner's PAT row's where it does not. */
-export async function ensureAppIdentityRow(store: Pick<CredentialStore, "list" | "seal">, githubApp: Pick<GitHubApp, "installationOrg" | "identityFingerprint">): Promise<string> {
-  const owner = await githubApp.installationOrg();
-  const standing = await appIdentityRowId(store);
-  if (standing) return standing;
-  return (await store.seal({ kind: "github-app", label: `GitHub App (${owner})`, plaintext: Buffer.alloc(0), fingerprint: githubApp.identityFingerprint(), subject: { kind: "owner", id: owner }, purpose: "repository-identity" })).id;
-}
-
-/** The App's one row, or null where boot has not seeded it. */
-export async function appIdentityRowId(store: Pick<CredentialStore, "list">): Promise<string | null> {
-  return (await store.list({ kind: "github-app", purpose: "repository-identity", excludeRotated: true })).find((r) => r.subject.kind === "owner")?.id ?? null;
 }
 
 /** Why a PAT is refused on a repository's hooks, measured (#252): the account it acts as and its

@@ -40,7 +40,7 @@ import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type V
 import { unitApexFromChain } from "./admission-policy.ts";
 import { type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
 import { assertChannelReaches, type ChannelStages } from "../inventory/channel-stages.ts";
-import { resolveMasterCluster } from "./tenant-values.ts";
+import { resolveMasterCluster } from "../inventory/read.ts";
 import { consumerUnitHost, standingHostFrom } from "./unit-dns.ts";
 import type { Registrations } from "./registrations.ts";
 import type { VaultSeeder } from "./vault-seeder.ts";

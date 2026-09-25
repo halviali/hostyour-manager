@@ -1,11 +1,9 @@
-import { join } from "node:path";
 import type { Config } from "../kernel/config.ts";
 import type { OrphanBuildView } from "../../shared/api-types.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { CredentialStore } from "../security/store.ts";
-import type { Db } from "../db/client.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
-import { GitRepoReader, GitPlatformRepo, GitRepoWriter } from "../adapters/git/git.ts";
+import { GitRepoReader, GitRepoWriter } from "../adapters/git/git.ts";
 import type { PlatformRepo, RepoReader } from "../adapters/git/port.ts";
 import { KubeBuildRbacWriter } from "../adapters/kube/kube-rbac.ts";
 import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.ts";
@@ -18,7 +16,6 @@ import { unitApexFromChain } from "../domains/units/admission-policy.ts";
 import { type Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
 import { readChannelStages } from "../domains/inventory/channel-stages.ts";
-import { booksBranch } from "../domains/inventory/read.ts";
 import type { ClusterKubeResolver, RepoCredentialWriter } from "../adapters/kube/port.ts";
 import { masterKubeInput, type MasterKubeClients } from "./master-kube.ts";
 import { TektonGateRunner } from "../adapters/gate-runner/gate-runner-tekton.ts";
@@ -167,12 +164,6 @@ export interface UnitsWiring {
    *  runs carry, so the route and the create-tenant `activate` step compose one host, not two.
    *  Undefined without the platform repo, which is also when the tenant family stays off. */
   resolveUnitApex?: (domain: string, stage: Stage) => Promise<string>;
-  /** The writer of the PLATFORM repo (hostyour-cloud), handed to buildRunDefinitions so deploy-slave can mark
-   *  a slave reachable in clusters/active/<fqdn>.yaml on the books branch. Gated on config.github and
-   *  a derivable books branch, and on nothing else — the gate-runner config the consumer family
-   *  additionally needs has nothing to do with writing a map, and a control host without a gate-runner
-   *  still deploys slaves. */
-  platformRepo?: PlatformRepo;
 }
 
 /** What the consumer family hands the composition: its defs, its flag and the collaborators its
@@ -198,7 +189,6 @@ interface Family {
 export function buildUnits(
   config: Config,
   store: CredentialStore,
-  db: Db,
   logger: Logger,
   /** The master-local clients and the ONE per-cluster resolver over them, built in the composition
    *  root (boot/wire.ts) rather than per family. A family constructing its own trio and its own
@@ -209,40 +199,15 @@ export function buildUnits(
    *  the same reason: the boot self-check names its installation owner, and a family building
    *  its own would put that identity behind the family's configuration guard. */
   githubApp: GitHubApp,
+  /** The ONE writer of the platform repo, built in the composition root (boot/platform-repo.ts) —
+   *  absent without GitHub coordinates or a books branch, and then neither family is built. */
+  platformRepo: PlatformRepo | undefined,
 ): UnitsWiring {
   // ONE activation client for the whole manager — a plain fetch to a consumer's / tenant's OWN public
   // ingress (no config gate; the target host is the unit's own). Constructed here and shared by BOTH
   // families' invite steps (consumer onboard-activate + tenant create-tenant-activate) so there is a
   // single instance, not one per family.
   const activator = new HttpActivator();
-  // THE branch this installation keeps its books on (shared/branches.ts), resolved ONCE, here, where
-  // the ports are built — not looked up per run. The Manager runs ON the cluster holding the master
-  // role and that cluster's FQDN IS the branch, so the value is already in its own inventory
-  // (clusters.domain, which the schema states is the install branch) with MASTER_FQDN behind it: this
-  // function runs BEFORE seedMaster writes that row, so on a first boot the configured value is the
-  // only statement there is. Every registration writer, every cluster-map read and the tenant
-  // registrations in catalog stand on it, and it is handed down bound to the repo port rather
-  // than threaded through the runs.
-  const books = booksBranch(db, config.master?.fqdn);
-  // The ONE writer of the platform repo: the consumer pointer registrations commits through it, and
-  // deploy-slave writes the slave part of a cluster map through it. Built here so both get the same
-  // instance (one worktree, one lock) and so it survives a control host with no gate-runner.
-  // Without a books branch it is not built at all: every write through it would have to name a
-  // branch, and the only name left would be the trunk — where a registration belongs to no
-  // installation and to every future one at once.
-  const platformRepo = config.github && books
-    ? new GitPlatformRepo({
-      platformRepoURL: `https://github.com/${config.github.owner}/${config.github.repo}.git`,
-      booksBranch: books,
-      // the deploy-branch program cuts this branch, stamps it and merges each release into it; a
-      // missing one is a fault to raise, never a branch to mint from the trunk, and the product
-      // reaches it there and not here (adapters/git/git.ts, carriesTrunkToBooksBranch).
-      carriesTrunkToBooksBranch: false,
-      workRoot: join(config.dataDir, "onboard-git"),
-      credentialId: "platform-write-pat",
-      openCredential: () => Promise.resolve(Buffer.from(config.github!.token, "utf8")),
-    })
-    : undefined;
   // The unit DNS provider — ONE Cloudflare client for both families' provision-dns and
   // remove-dns steps. Absent (no token) ⇒ those steps fail loud (DNS is a mandatory part of the
   // run kinds), never a silent skip.
@@ -334,7 +299,6 @@ export function buildUnits(
     // The shared activation client is always constructed above — surface it for the tenant invite route.
     activator,
     ...(resolveUnitApex ? { resolveUnitApex } : {}),
-    ...(platformRepo ? { platformRepo } : {}),
     // The DNS provider rides up for the mail DNS run kind (the master's egress address is read off
     // its own A record there) — the same instance the unit records are written with.
     ...(dns ? { dns } : {}),

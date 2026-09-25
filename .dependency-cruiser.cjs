@@ -38,7 +38,7 @@ module.exports = {
 
     { name: "routes-are-thin", severity: "error",
       comment: "Routes may depend on an adapter PORT (the abstraction, injected) but never on an adapter implementation.",
-      from: { path: "routes\\.ts$" }, to: { path: "^server/adapters", pathNot: "port\\.ts$" } },
+      from: { path: "(routes|api)\\.ts$" }, to: { path: "^server/adapters", pathNot: "port\\.ts$" } },
 
     { name: "executor-knows-no-domain", severity: "error",
       comment: "The executor is domain-agnostic. Tests may compose across layers.",

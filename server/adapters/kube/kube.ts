@@ -67,7 +67,7 @@ export type MasterKubeInput = { inCluster: true } | { kubeconfigPath: string } |
  *  skip-TLS-verify escape hatch.
  *
  *  The bearer variant is NOT read-only, and nothing on this side narrows it.
- *  Its ONE producer is the resolver (domains/units/cluster-kube.ts), which unseals
+ *  Its ONE producer is the resolver (domains/inventory/cluster-kube.ts), which unseals
  *  plane.credentialIds.clusterBearer — the token deploy-slave harvested as the mgmt-creds blob's
  *  `argocdToken`, whose contract states plainly that it is CLUSTER-ADMIN on the slave and that "a
  *  leaked blob is RCE across the clusters" (runs/defs/deploy-slave.remote.ts, MgmtCredsBlob). So

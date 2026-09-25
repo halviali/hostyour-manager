@@ -1,5 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
+import { errValidation } from "../../kernel/errors.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import type { ServerClusterView, ServerView } from "../../../shared/api-types.ts";
 import { MASTER_ROLES, isMasterRole } from "../../../shared/enums.ts";
@@ -141,4 +142,31 @@ export function masterFqdn(db: Db): string | undefined {
  */
 export function booksBranch(db: Db, configuredMasterFqdn: string | undefined): string | undefined {
   return configuredMasterFqdn ?? masterFqdn(db);
+}
+
+/** The stored name of ONE cluster row (`clusters.name`, fixed at adoption), or null when no such
+ *  row exists — a caller that requires the name says so itself rather than substituting an id. */
+export function resolveClusterNameById(db: Db, clusterId: string): string | null {
+  const row = db.select({ name: clusters.name }).from(clusters).where(eq(clusters.id, clusterId)).get();
+  return row ? row.name : null;
+}
+
+/** The inverse: the cluster row whose stored name is `cluster`, as its id and domain, or null when
+ *  no such cluster is registered. The name is unique across an installation (`clusters_name_uq`). */
+export function resolveClusterIdByName(db: Db, cluster: string): { clusterId: string; domain: string } | null {
+  const row = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).where(eq(clusters.name, cluster)).get();
+  return row ? { clusterId: row.id, domain: row.domain } : null;
+}
+
+/** The master self-cluster: the cluster row of the ONE server carrying the master part
+ *  (servers_one_master_uq; seeded by boot/seed-master.ts). A missing master row refuses loud. */
+export function resolveMasterCluster(db: Db): { clusterId: string; domain: string } {
+  const row = db
+    .select({ id: clusters.id, domain: clusters.domain })
+    .from(clusters)
+    .innerJoin(servers, eq(clusters.serverId, servers.id))
+    .where(inArray(servers.role, [...MASTER_ROLES]))
+    .get();
+  if (!row) throw errValidation("no master control cluster is registered in inventory — seed the master first (MASTER_FQDN)");
+  return { clusterId: row.id, domain: row.domain };
 }

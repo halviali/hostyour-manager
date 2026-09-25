@@ -9,10 +9,11 @@ import { createLogger } from "../kernel/logger.ts";
 import { CredentialStore } from "../security/store.ts";
 import { masterKubeClients } from "./master-kube.ts";
 import { KubeClusterReader } from "../adapters/kube/kube.ts";
-import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
+import { makeClusterKubeResolver } from "../domains/inventory/cluster-kube.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { buildRunDefinitions } from "../domains/runs/run-definitions.ts";
 import { buildUnits } from "./wire-units.ts";
+import { buildPlatformRepo } from "./platform-repo.ts";
 import { RUN_FAMILY, RUN_KIND, type RunFamily, type RunKind } from "../../shared/enums.ts";
 import type { AnyRunDefinition } from "../executor/types.ts";
 import { FakePlatformRepo } from "../adapters/git/testing/fake.ts";
@@ -72,8 +73,9 @@ describe("boot self-checks", () => {
       openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
-    const onboarding = buildUnits(onboardingConfig, store, db.db, logger, { master, resolver }, new FakeGitHubApp());
-    const runDefinitions = buildRunDefinitions({ db: db.db, resolver, ...(onboarding.platformRepo ? { platformRepo: onboarding.platformRepo } : {}) }, onboarding.defs);
+    const platformRepo = buildPlatformRepo(onboardingConfig, db.db);
+    const onboarding = buildUnits(onboardingConfig, store, logger, { master, resolver }, new FakeGitHubApp(), platformRepo);
+    const runDefinitions = buildRunDefinitions({ db: db.db, resolver, ...(platformRepo ? { platformRepo } : {}) }, onboarding.defs);
     return { db, store, bus: new RunEventBus(), runDefinitions };
   }
   afterEach(() => {

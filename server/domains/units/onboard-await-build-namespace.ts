@@ -4,7 +4,7 @@
 import type { Step } from "../../executor/types.ts";
 import { errValidation, errUpstream } from "../../kernel/errors.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
-import { MASTER_ARGO_NAMESPACE } from "./cluster-kube.ts";
+import { MASTER_ARGO_NAMESPACE } from "../inventory/cluster-kube.ts";
 import { syncedAt, describeUnsynced } from "./tenant-watch.ts";
 import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
 

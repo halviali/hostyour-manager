@@ -13,7 +13,7 @@ import { CredentialStore } from "../../security/store.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { EmergencyStore, createAdminSocketApp } from "../access/emergency.ts";
 import { registerResetRoutes } from "./api.ts";
-import { GitHubPlatformError, type GitHubPlatform, type BranchRef } from "../../adapters/github-platform/github-platform-http.ts";
+import { GitHubPlatformError, type GitHubPlatform, type BranchRef } from "../../adapters/github-platform/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ResetResult } from "../../../shared/api-types.ts";
 

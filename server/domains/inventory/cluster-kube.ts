@@ -18,7 +18,7 @@
 //    the slave cluster's short name (e.g. "s1").
 //
 // This module imports NO concrete kube adapter: the per-slave ClusterReader constructor and the
-// credential opener ride in as injected deps (wire-units.ts supplies the real ones), keeping
+// credential opener ride in as injected deps (the composition root supplies the real ones), keeping
 // the boundary clean and the resolve logic unit-testable without a cluster.
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -26,7 +26,7 @@ import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { isMasterRole } from "../../../shared/enums.ts";
-import { clusterShortName } from "../inventory/cluster-marking.ts";
+import { clusterShortName } from "./cluster-marking.ts";
 import { readClusterPlane, type ClusterPlaneV0 } from "../../../shared/plane.ts";
 import type {
   ClusterReader, MasterArgoReader, MasterProjectWriter, ClusterKubeResolver, ResolvedClusterKube,

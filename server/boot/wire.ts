@@ -13,12 +13,13 @@ import { CredentialStore } from "../security/store.ts";
 import { storeBackend } from "./store-backend.ts";
 import { masterKubeClients } from "./master-kube.ts";
 import { KubeClusterReader } from "../adapters/kube/kube.ts";
-import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
+import { makeClusterKubeResolver } from "../domains/inventory/cluster-kube.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
 import { repointUnitRecords } from "../domains/units/cluster-rename-records.ts";
 import { buildUnits } from "./wire-units.ts";
+import { buildPlatformRepo } from "./platform-repo.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
 import { HttpMetricsQuery } from "../adapters/metrics/metrics-http.ts";
@@ -46,7 +47,7 @@ import { registerOnboardPrefillRoute } from "../domains/units/api-onboard-prefil
 import { registerTenantAppsRepoRoute } from "../domains/units/api-tenant-apps-repo.ts";
 import { registerConsumerSecretsRoute } from "../domains/units/api-consumer-secrets.ts";
 import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-catalog.ts";
-import { ensureAppIdentityRow } from "../domains/units/repo-identity.ts";
+import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { registerOwnerRoutes } from "../domains/units/api-owners.ts";
 import { readOwnerIdentity } from "../domains/units/owners.ts";
 import { refreshAppTokens } from "../domains/units/app-token-refresh.ts";
@@ -154,7 +155,8 @@ export async function wire(): Promise<Wired> {
     openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
     buildClusterReader: (input) => new KubeClusterReader(input),
   });
-  const units = buildUnits(config, store, db.db, logger, { master: masterKube, resolver }, githubApp);
+  const platformRepo = buildPlatformRepo(config, db.db);
+  const units = buildUnits(config, store, logger, { master: masterKube, resolver }, githubApp, platformRepo);
   // The mail DNS of the installation, measured at public resolvers: the Mail page's deps, and the
   // mail half of the DNS inventory below — one measurement, so the two pages can never disagree
   // about one record. The platform repo gives the two sender domains, and the registrations the
@@ -162,7 +164,7 @@ export async function wire(): Promise<Wired> {
   const mailDns: MailDnsDeps = {
     db: db.db,
     publicDns: new DohPublicDns(),
-    ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}),
+    ...(platformRepo ? { platformRepo } : {}),
     ...(units.registrations ? { smtpSenders: (stage: Stage) => units.registrations!.listSmtpSenders(stage) } : {}),
   };
   // EVERY RECORD THIS INSTALLATION IS RESPONSIBLE FOR at the DNS provider, derived from its own
@@ -189,7 +191,7 @@ export async function wire(): Promise<Wired> {
     // reach the master's ArgoCD and its ExternalSecrets over the pod's own ServiceAccount, the same
     // way every unit run kind does — never over an SSH session raised with the machine's password.
     resolver,
-    ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}),
+    ...(platformRepo ? { platformRepo } : {}),
     // The SAME two settings the platform repo above is built from, as the machine's programs are
     // answered with it: `owner/name`. deploy-host's git_clone row cannot read this off the machine,
     // because the checkout it would be read from is what that row establishes.
@@ -284,7 +286,7 @@ export async function wire(): Promise<Wired> {
   // then skips instead of reporting a comparison it never made.
   const checks = [
     ...runSelfChecks({ db, config, store, bus, runDefinitions }),
-    ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), githubApp })),
+    ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(platformRepo ? { platformRepo } : {}), githubApp })),
   ];
   phase("self-checks");
   assertBlockingChecksPass(checks);
@@ -313,7 +315,6 @@ export async function wire(): Promise<Wired> {
   // ride, composed here so the release surface reads the branches the reaper reads. Both halves have
   // to be present: without either there is no walk to make, and the surface says so rather than
   // answering with an empty pin set.
-  const platformRepo = units.platformRepo;
   const readPlatformAppPins =
     github && platformRepo
       ? () =>
@@ -353,8 +354,8 @@ export async function wire(): Promise<Wired> {
       // The size table: a read and one write, both unconditional — they need no adapter, and what
       // this installation sells is a fact whether or not onboarding is currently configured.
       registerUnitSizeRoutes(a, { db: db.db, executor, ...(units.registrations ? { registrations: units.registrations } : {}), onboardingEnabled: units.enabled, tenantEnabled: units.tenantEnabled });
-      registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), githubApp });
-      registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.platformRepo ? { platformRepo: units.platformRepo } : {}), githubApp });
+      registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled: units.enabled, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(units.resolver ? { resolver: units.resolver } : {}), ...(units.registrations ? { registrations: units.registrations } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
+      registerOnboardPrefillRoute(a, { onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(units.platformGitHub ? { platformGitHub: units.platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), githubApp });
       // Tenant (multi-app) onboarding routes — the SAME thin shape, gated on the tenant family's own
       // flag (the catalog PAT). Registered right after the consumer routes; the read
       // path (tenant list/detail) stays live, the mutating triggers answer 501 until tenantEnabled.

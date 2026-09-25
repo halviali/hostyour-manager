@@ -5,7 +5,7 @@ import type { Db } from "../../db/client.ts";
 import type { Config } from "../../kernel/config.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { CredentialStore } from "../../security/store.ts";
-import type { GitHubPlatform } from "../../adapters/github-platform/github-platform-http.ts";
+import type { GitHubPlatform } from "../../adapters/github-platform/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ResetResult, ResetBranchOutcome, ResetPointerOutcome } from "../../../shared/api-types.ts";
 import { AppError, errValidation, errNotConfigured, errIllegalTransition, errUpstream } from "../../kernel/errors.ts";

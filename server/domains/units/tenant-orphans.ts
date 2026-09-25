@@ -58,7 +58,7 @@ import { ATTEST_TARGET_STEP } from "../../executor/guards.ts";
 import { getRunStepStatus } from "../../executor/read.ts";
 import { TenantPurgeRequest } from "./tenant-purge.run.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import { resolveClusterIdByName } from "./tenant-values.ts";
+import { resolveClusterIdByName } from "../inventory/read.ts";
 
 /** Diff the LIVE GitOps pointers against the inventory, per stage, and return every tenant only the
  *  pointers know about — plus every pointer the scan had to skip. Scans ALL stages: the caller is an

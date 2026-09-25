@@ -10,7 +10,7 @@ import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerBranchRoutes, classifyBranch } from "./api.ts";
-import { GitHubPlatformError, type GitHubPlatform, type BranchRef, type BranchComparison } from "../../adapters/github-platform/github-platform-http.ts";
+import { GitHubPlatformError, type GitHubPlatform, type BranchRef, type BranchComparison } from "../../adapters/github-platform/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { BranchesView, BranchDiffView } from "../../../shared/api-types.ts";
 

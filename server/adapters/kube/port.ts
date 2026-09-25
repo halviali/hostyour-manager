@@ -623,7 +623,7 @@ export interface ResolvedClusterKube {
  *  slave), resolved from inventory (the clusters/servers rows) + the plane credentials — never a
  *  hardcoded cluster-name list. The manager pod holds only its OWN cluster's access (the pod SA
  *  in-cluster); this port is the seam that turns a target `clusterId` into per-cluster access. The
- *  default impl lives in the onboarding domain (cluster-kube.ts); a scripted fake lives in testing/. */
+ *  default impl lives in the inventory domain (cluster-kube.ts); a scripted fake lives in testing/. */
 export interface ClusterKubeResolver {
   resolve(clusterId: string): Promise<ResolvedClusterKube>;
 }

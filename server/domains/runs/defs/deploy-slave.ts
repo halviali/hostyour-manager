@@ -647,7 +647,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // READ THROUGH THE MASTER'S OWN CLUSTER, over the Manager pod's ServiceAccount. The
         // namespace is the resolver's answer and not a literal: `argoNamespace` and the trio it
         // comes with are decided together, and two spellings of that pairing are one rename away
-        // from coming apart (domains/units/cluster-kube.ts says so where the constant lives).
+        // from coming apart (domains/inventory/cluster-kube.ts says so where the constant lives).
         const { domain, name } = target.resolve(ctx.db);
         const { argoReader, argoNamespace } = await requireResolver(ports).resolve(masterClusterId(ctx.db));
         const appName = `${name}-apps`;

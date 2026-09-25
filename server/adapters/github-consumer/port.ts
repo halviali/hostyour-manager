@@ -221,7 +221,7 @@ export class WorkflowNotFoundError extends Error {
 }
 
 /** Any other GitHub consumer API failure (a transport error, or a non-2xx that is not a scope
- *  refusal or the retryable dispatch 404). Mirrors github-platform-http.ts's GitHubPlatformError shape but kept a DISTINCT
+ *  refusal or the retryable dispatch 404). Mirrors github-platform/port.ts's GitHubPlatformError shape but kept a DISTINCT
  *  type (this adapter is decoupled from the platform-repo client). Carries GitHub's own message
  *  verbatim — never a generic mask. */
 export class GitHubConsumerError extends Error {

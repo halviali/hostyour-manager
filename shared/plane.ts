@@ -9,7 +9,7 @@ import { z } from "zod";
  * ClusterPlane **v0** — the Run-written identity of a slave's management plane, stored in
  * clusters.plane_json (mode "json"). TWO deploy-slave steps write it: `create-mgmt` folds in the
  * harvested kube access, `register` writes the whole plane over it. The per-cluster kube client
- * resolver (server/domains/units/cluster-kube.ts) is the only code that reads the column, and
+ * resolver (server/domains/inventory/cluster-kube.ts) is the only code that reads the column, and
  * it dials three fields: `kube`, `argo.namespace` and `credentialIds.clusterBearer`. The remaining
  * fields are the run's written account of the plane it provisioned — no screen renders them, and
  * they are read by a person going to the row. Everything here is a stable fact of the slave, and

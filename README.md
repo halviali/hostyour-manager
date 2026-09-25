@@ -17,8 +17,8 @@ undid.
 
 **Everything outside goes through an adapter** under `server/adapters/`: git, GitHub, Kubernetes,
 Helm, Vault, OIDC, SSH, DNS, the registry and more, most with a fake beside them for the tests. A
-boundary check fails the build when `routes.ts` reaches past a port to an implementation, or when a
-domain imports another.
+boundary check fails the build when a route file (`routes.ts`, `api.ts`) reaches past a port to an
+implementation, or when a domain imports another.
 
 **A credential is checked before anything is touched.** The scopes a supplied credential must carry
 are verified up front and the refusal names every missing one at once, because half an onboarding

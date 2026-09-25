@@ -7,7 +7,7 @@ import { ConsumerManifestSchema, type TenantSpec } from "../../../shared/consume
 import { AppError, errValidation } from "../../kernel/errors.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { assertDeployState } from "./lifecycle.ts";
-import { resolveMasterCluster } from "./tenant-values.ts";
+import { resolveMasterCluster } from "../inventory/read.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";

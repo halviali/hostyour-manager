@@ -2,43 +2,18 @@
 // into the facts a tenant run needs, extracted from create-tenant.run.ts the way onboard.run.ts
 // extracted onboard-seed-repo-pat.ts. The manager DB is the sole authority for cluster
 // coordinates — never a hardcoded name:
-//   - the two name resolvers:   a cluster's SHORT NAME both ways — from a clusterId, and back to a
-//                               clusterId. Both go through clusterShortName(clusters.domain)
-//                               (inventory/cluster-marking.ts), the one derivation in this repo.
-//   - resolveMasterCluster:     the master self-cluster's row — the build-only onboard's target.
+//   - resolveTenantCluster:     the cluster a tenant is created on, at the tenant's stage.
 //   - registryHostFromChain:    the registry host a cluster pulls its first-party images from, read
 //                               off the cluster's OWN values chain (global.endpoints.registry.host).
 //
 // Boundary: domain layer — db schema + shared/ only, no adapters, no IO beyond the db reads.
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { parse as parseYaml } from "yaml";
 import type { Db } from "../../db/client.ts";
-import { clusters, servers } from "../../db/schema/inventory.ts";
+import { clusters } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
-import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
-
-/** The cluster SHORT NAME of ONE cluster row — the FORWARD direction of resolveClusterIdByName
- *  below. The teardown resolver (tenant-replace.ts) needs it whenever a tenant's target must be
- *  named WITHOUT its pointer: the pointer's own `cluster` field is the primary source, but a tenant
- *  whose tenant.yaml is already gone (a tenant-offboard that removed the pointer and then failed) can
- *  only be named from its inventory row, which carries a cls_-prefixed clusterId and no name at all.
- *  null when no such cluster row exists — a caller that requires the name says so itself rather than
- *  substituting an id. */
-export function resolveClusterNameById(db: Db, clusterId: string): string | null {
-  const row = db.select({ name: clusters.name }).from(clusters).where(eq(clusters.id, clusterId)).get();
-  return row ? row.name : null;
-}
-
-/** The inverse, for the create-tenant replace lookup: find the cluster row whose name matches
- *  `cluster`, returning its id + domain. Resolves an ORPHAN tenant's target cluster from its
- *  pointer's `cluster` field alone (no tenants row to read a clusterId from). null when no such
- *  cluster is registered. The cluster's stage is not asked: a registration at any stage names any
- *  active cluster, and the short name is unique across an installation (cluster-marking.ts). */
-export function resolveClusterIdByName(db: Db, cluster: string): { clusterId: string; domain: string } | null {
-  const row = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).where(eq(clusters.name, cluster)).get();
-  return row ? { clusterId: row.id, domain: row.domain } : null;
-}
 
 /** The cluster a tenant is created on, from its row: the domain (never trusted from wizard input),
  *  the SHORT NAME the pointer's `cluster` field and the AppProject destination pin carry, and the
@@ -70,28 +45,9 @@ export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): R
 export interface ResolvedTenantCluster {
   clusterId: string;
   domain: string;
-  /** The cluster's SHORT NAME (clusterShortName of its domain, e.g. "s1"). */
+  /** The cluster's stored name (`clusters.name`, e.g. "s1"). */
   cluster: string;
   stage: Stage;
-}
-
-/** The master self-cluster's row (e.g. m1.example.com) — resolved from inventory via the
- *  ONE server row carrying the master part (servers_one_master_uq; seeded by boot/seed-master.ts).
- *  The build-only onboard acts on it — the gates run against it, and its map then names the build
- *  plane the webhook goes to — so a missing master row fails that plan loud. */
-export function resolveMasterCluster(db: Db): { clusterId: string; domain: string } {
-  const row = db
-    .select({ id: clusters.id, domain: clusters.domain })
-    .from(clusters)
-    .innerJoin(servers, eq(clusters.serverId, servers.id))
-    .where(inArray(servers.role, [...MASTER_ROLES]))
-    .get();
-  if (!row) {
-    throw errValidation(
-      "no master control cluster is registered in inventory — the build-only onboard runs against the master; seed the master first (MASTER_FQDN)",
-    );
-  }
-  return { clusterId: row.id, domain: row.domain };
 }
 
 /** The registry host a cluster pulls its first-party images from: `global.endpoints.registry.host`

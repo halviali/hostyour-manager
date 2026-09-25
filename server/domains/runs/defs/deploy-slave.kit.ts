@@ -189,7 +189,7 @@ export function loadMaster(db: Db): typeof servers.$inferSelect {
  *  master's ArgoCD rather than a target's.
  *
  *  IT IS LOOKED UP AND REFUSED BY NAME HERE, because the resolver's own refusal names only an id
- *  (domains/units/cluster-kube.ts) and an operator reading "cluster undefined" learns nothing.
+ *  (domains/inventory/cluster-kube.ts) and an operator reading "cluster undefined" learns nothing.
  *  `seed-master.ts` inserts this row at boot from MASTER_FQDN, so a Manager missing it is one that
  *  was started without that setting or whose seeding was refused by a domain clash — both of which
  *  the boot log named at the time. */

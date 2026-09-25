@@ -30,7 +30,7 @@ const masterReader = new FakeClusterReader();
 const masterArgo = new FakeMasterArgoReader();
 const masterProjects = new FakeMasterProjectWriter();
 
-describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
+describe("domains/inventory/cluster-kube — per-cluster kube resolver ", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
   afterEach(() => {
@@ -193,7 +193,7 @@ describe("domains/units/cluster-kube — per-cluster kube resolver ", () => {
   });
 });
 
-describe("domains/units/cluster-kube over the plane the deploy-slave run wrote", () => {
+describe("domains/inventory/cluster-kube over the plane the deploy-slave run wrote", () => {
   afterEach(disposeHarnesses);
 
   // The one test whose plane document is not hand-written. A fixture cannot catch a reader that asks

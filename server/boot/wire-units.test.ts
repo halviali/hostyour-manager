@@ -16,8 +16,9 @@ import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
 import { CredentialStore } from "../security/store.ts";
 import { masterKubeClients } from "./master-kube.ts";
 import { KubeClusterReader } from "../adapters/kube/kube.ts";
-import { makeClusterKubeResolver } from "../domains/units/cluster-kube.ts";
+import { makeClusterKubeResolver } from "../domains/inventory/cluster-kube.ts";
 import { buildUnits } from "./wire-units.ts";
+import { buildPlatformRepo } from "./platform-repo.ts";
 import { RUN_FAMILY } from "../../shared/enums.ts";
 import type { StepCtx } from "../executor/types.ts";
 
@@ -96,7 +97,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
       openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
       buildClusterReader: (input) => new KubeClusterReader(input),
     });
-    return [config, store, h.db, logger, { master, resolver }, new FakeGitHubApp()];
+    return [config, store, logger, { master, resolver }, new FakeGitHubApp(), buildPlatformRepo(config, h.db)];
   }
 
   it("enables BOTH families WITHOUT a kubeconfig — in-cluster (pod SA) is the default kube access", () => {
@@ -134,7 +135,6 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     const wiring = buildUnits(...setup({ MASTER_FQDN: undefined, MASTER_SSH_USER: undefined, MASTER_STAGE: undefined }));
     expect(wiring.enabled).toBe(false);
     expect(wiring.tenantEnabled).toBe(false);
-    expect(wiring.platformRepo).toBeUndefined();
     expect(wiring.defs).toEqual([]);
   });
 
@@ -142,8 +142,9 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     // The tenant registrations live in catalog and the consumer ones in hostyour-cloud, and the
     // branch carries the same name in both: the deploy repo takes it off the platform repo rather
     // than deriving it a second time, so the two cannot drift apart.
-    const wiring = buildUnits(...setup());
-    expect(wiring.platformRepo?.booksBranch).toBe("m1.example.com");
+    const args = setup();
+    const wiring = buildUnits(...args);
+    expect(args[5]?.booksBranch).toBe("m1.example.com");
     expect(wiring.tenantRegistrations?.branch).toBe("m1.example.com");
     expect(wiring.registrations?.branch).toBe("m1.example.com");
   });

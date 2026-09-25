@@ -44,7 +44,7 @@ import { buildOnlySteps, type BuildOnlyOnboardParams, type OnboardPorts } from "
 import { readUngatedOnboard } from "./first-master.ts";
 import { DEFAULT_BRANCH_HEAD } from "./onboard-check.ts";
 import { resolveNextVersion } from "./release-version.ts";
-import { resolveMasterCluster } from "./tenant-values.ts";
+import { resolveMasterCluster } from "../inventory/read.ts";
 import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./onboard-release-cycle.ts";
 import { recordBuildOnlyStep } from "./onboard-registration.ts";
 import { type RequiredImage, requiredImagesFrom } from "./ensure-images.ts";

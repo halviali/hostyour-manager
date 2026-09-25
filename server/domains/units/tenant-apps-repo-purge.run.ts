@@ -5,7 +5,7 @@ import { STAGE } from "../../../shared/enums.ts";
 import type { OrphanBuildView } from "../../../shared/api-types.ts";
 import { assertDeployState, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { resolveMasterCluster } from "./tenant-values.ts";
+import { resolveMasterCluster } from "../inventory/read.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { Registrations } from "./registrations.ts";
 

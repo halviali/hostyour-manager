@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createGitHubPlatform, GitHubPlatformError } from "./github-platform-http.ts";
+import { createGitHubPlatform } from "./github-platform-http.ts";
+import { GitHubPlatformError } from "./port.ts";
 
 // A tiny fetch stub: routes by method+path, returns { status, json }.
 function stubFetch(routes: Record<string, { status: number; body?: unknown }>): typeof fetch {

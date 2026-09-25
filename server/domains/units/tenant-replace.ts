@@ -24,7 +24,7 @@ import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { TenantTeardownTargetSchema, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { resolveClusterIdByName, resolveClusterNameById } from "./tenant-values.ts";
+import { resolveClusterIdByName, resolveClusterNameById } from "../inventory/read.ts";
 
 /** CreateTenantParams.replaces is a list of teardown targets — re-exported under the replace name the params
  *  schema already uses, so the frozen params shape is untouched while the schema itself lives next to
