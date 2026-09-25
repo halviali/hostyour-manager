@@ -21,10 +21,11 @@ import { sleep } from "./onboard-release-cycle.ts";
 //
 // THE WAIT BEFORE THE REMOVAL. The recorded routing is the Manager's own fact; what serves the tenant
 // at the new address is its product's charts, which reach the cluster on their own schedule. So the
-// run waits until the tenant's IdP answers at the address the new routing gives it (the relocation
-// probe: anything below 500 but a 404, which is what the edge answers for a host nothing routes), and
-// only then takes the old record away: removed earlier, it would leave the tenant with neither. The
-// wait and the removal are ONE step, so skipping a failed wait removes nothing.
+// run waits until the tenant's IdP answers at the address the new routing gives it with a 2xx, and
+// only then takes the old record away: removed earlier, it would leave the tenant with neither. A
+// redirect does not count: where nothing routes the IdP's path, another member serving the zone's
+// root (a website) answers it with a redirect of its own. The wait and the removal are ONE step, so
+// skipping a failed wait removes nothing.
 //
 // AN ABORT PUTS THE TENANT BACK where the plan found it: the routing it stood on (`previous`, frozen
 // into the params when the move was asked for) and no record of the requested routing. It is refused
@@ -126,7 +127,7 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
         const deadline = Date.now() + ports.routingWaitMs;
         for (;;) {
           const seen = await ports.probe.probe(url, { signal: ctx.signal });
-          if (seen.reachable) {
+          if (seen.status !== null && seen.status >= 200 && seen.status < 300) {
             ctx.log("meta", `${url} answers (${seen.detail}) — the tenant is served at the ${p.routing} routing`);
             break;
           }

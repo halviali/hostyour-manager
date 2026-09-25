@@ -53,7 +53,7 @@ describe("tenant-set-routing through the Executor", () => {
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const dns = new FakeDnsProvider();
     dns.seed(routing === "host" ? WILDCARD : ZONE, "CNAME", CLUSTER);
-    const probe = new FakePublicProbe(opts.answers ? { [PATH_IDP]: { reachable: true, detail: "HTTP 200" } } : {});
+    const probe = new FakePublicProbe(opts.answers ? { [PATH_IDP]: { reachable: true, status: 200, detail: "HTTP 200" } } : {});
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: CLUSTER, name: "s1", status: "active" }).run();
     db.db.insert(tenants).values({

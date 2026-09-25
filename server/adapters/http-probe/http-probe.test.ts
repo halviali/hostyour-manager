@@ -8,7 +8,7 @@ import { verdictOf } from "./http-probe.ts";
 describe("verdictOf", () => {
   it("reads a served page, a redirect and an auth challenge as REACHABLE — the unit still answers", () => {
     for (const status of [200, 301, 302, 401, 403]) {
-      expect(verdictOf(status)).toEqual({ reachable: true, detail: `HTTP ${status}` });
+      expect(verdictOf(status)).toEqual({ reachable: true, status, detail: `HTTP ${status}` });
     }
   });
 

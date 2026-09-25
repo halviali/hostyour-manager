@@ -8,7 +8,7 @@ import type { PublicProbe, ProbeResult } from "./port.ts";
  *  is a unit that answered, an auth challenge included. */
 export function verdictOf(status: number): ProbeResult {
   const reachable = status < 500 && status !== 404;
-  return { reachable, detail: `HTTP ${status}` };
+  return { reachable, status, detail: `HTTP ${status}` };
 }
 
 export class HttpPublicProbe implements PublicProbe {
@@ -30,7 +30,7 @@ export class HttpPublicProbe implements PublicProbe {
       return verdictOf(res.status);
     } catch (e) {
       // A transport failure IS the unreachability the quiesced state produces — never a throw.
-      return { reachable: false, detail: e instanceof Error ? e.message : String(e) };
+      return { reachable: false, status: null, detail: e instanceof Error ? e.message : String(e) };
     } finally {
       clearTimeout(t);
       if (opts.signal) opts.signal.removeEventListener("abort", onOuterAbort);

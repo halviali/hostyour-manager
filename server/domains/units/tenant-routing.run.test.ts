@@ -94,7 +94,7 @@ describe("tenant-set-routing", () => {
     await seedTenant(reg, "host");
     const dns = new FakeDnsProvider();
     dns.seed(WILDCARD, "CNAME", CLUSTER);
-    const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, detail: "HTTP 200" } });
+    const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, status: 200, detail: "HTTP 200" } });
     const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
     await run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, { cleanups: [], logs: [] });
 
@@ -119,13 +119,25 @@ describe("tenant-set-routing", () => {
     expect(dns.record(ZONE, "CNAME")).toBe(CLUSTER);
   });
 
+  it("does not take a redirect for the IdP: the old record stays while the zone's root redirects the IdP's path", async () => {
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await seedTenant(reg, "host");
+    const dns = new FakeDnsProvider();
+    dns.seed(WILDCARD, "CNAME", CLUSTER);
+    // Nothing routes /auth yet, so the website at the zone's root answers it with a redirect.
+    const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, status: 307, detail: "HTTP 307" } });
+    const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
+    await expect(run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, { cleanups: [], logs: [] })).rejects.toThrow(/did not answer/);
+    expect(dns.record(WILDCARD, "CNAME")).toBe(CLUSTER);
+  });
+
   it("re-applies the routing a tenant has: its record stays, a record of the other routing left behind goes", async () => {
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await seedTenant(reg, "path");
     const dns = new FakeDnsProvider();
     dns.seed(ZONE, "CNAME", CLUSTER);
     dns.seed(WILDCARD, "CNAME", CLUSTER);
-    const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, detail: "HTTP 200" } });
+    const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, status: 200, detail: "HTTP 200" } });
     const params = { tenantId: "tnt_1", routing: "path" as const, previous: "path" as const };
     await run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, { cleanups: [], logs: [] });
 

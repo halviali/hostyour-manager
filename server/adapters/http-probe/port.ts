@@ -11,6 +11,8 @@
  *  `detail` carries the observed status or error for the run log. */
 export interface ProbeResult {
   reachable: boolean;
+  /** The HTTP status answered, or null where no response came (refused, DNS, timeout). */
+  status: number | null;
   detail: string;
 }
 

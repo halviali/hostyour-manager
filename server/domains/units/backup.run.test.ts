@@ -70,7 +70,7 @@ describe("backup (consumer)", () => {
     const f = makeFakes();
     const ports = consumerPorts(f);
     await seedConsumerRegistration(ports.registrations);
-    f.probe.set(`https://${CONSUMER}.${SOURCE.domain}/`, { reachable: true, detail: "HTTP 200" });
+    f.probe.set(`https://${CONSUMER}.${SOURCE.domain}/`, { reachable: true, status: 200, detail: "HTTP 200" });
 
     const steps = makeBackupDef(ports).steps({ appId: "app_1" });
     await expect(driveSteps(db, steps, { appId: "app_1" }, [])).rejects.toThrow(/still answers/);

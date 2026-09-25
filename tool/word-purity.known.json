@@ -1997,7 +1997,6 @@
     "server/domains/units/tenant-routing.run.ts::onboard": 1,
     "server/domains/units/tenant-routing.run.ts::registration": 3,
     "server/domains/units/tenant-routing.run.ts::registrations": 3,
-    "server/domains/units/tenant-routing.run.ts::relocation": 1,
     "server/domains/units/tenant-routing.run.ts::tenant": 42,
     "server/domains/units/tenant-routing.run.ts::tenants": 10,
     "server/domains/units/tenant-routing.run.ts::unit": 5,
