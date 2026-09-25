@@ -1,6 +1,5 @@
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import { TARGET_KIND } from "../../../shared/enums.ts";
 
 const now = sql`(unixepoch('subsec') * 1000)`;
 
@@ -16,7 +15,7 @@ export const audit = sqliteTable("audit", {
   ts: integer("ts", { mode: "timestamp_ms" }).notNull().default(now),
   actor: text("actor").notNull(),                                  // operator id, or "system"
   action: text("action").notNull(),                               // dot-namespaced action name
-  targetKind: text("target_kind", { enum: TARGET_KIND }),
+  targetKind: text("target_kind"),
   targetId: text("target_id"),
   runId: text("run_id"),
   detailJson: text("detail_json", { mode: "json" }),

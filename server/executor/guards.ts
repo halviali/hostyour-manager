@@ -1,5 +1,4 @@
 import type { AnyRunDefinition } from "./types.ts";
-import type { RunKind } from "../../shared/enums.ts";
 
 /** The step name pinned as step 0 of every MUTATING run: its fail-closed precondition. Named once,
  *  here, because two places must key on the SAME string — the boot assertion below, which MAKES the
@@ -17,7 +16,7 @@ export function isMutatingPrecondition(def: AnyRunDefinition | undefined, stepNa
 }
 
 /** Backs the guards.armed self-check: every registered mutating def starts with attest-target. */
-export function assertGuardsArmed(runDefinitions: Map<RunKind, AnyRunDefinition>): void {
+export function assertGuardsArmed(runDefinitions: Map<string, AnyRunDefinition>): void {
   for (const def of runDefinitions.values()) {
     if (!def.mutating) continue;
     if (def.steps({})[0]?.name !== ATTEST_TARGET_STEP) {

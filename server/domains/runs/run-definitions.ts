@@ -1,4 +1,3 @@
-import type { RunKind } from "../../../shared/enums.ts";
 import type { Db } from "../../db/client.ts";
 import type { AnyRunDefinition, RunDefinition } from "../../executor/types.ts";
 import { noopDef } from "./defs/noop.run.ts";
@@ -18,12 +17,14 @@ import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, 
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
 
-export type RunDefinitions = Map<RunKind, AnyRunDefinition>;
+export type RunDefinitions = Map<string, AnyRunDefinition>;
 
 /** The one sanctioned type-erasure point: a typed RunDefinition<P> is stored as the
  *  executor-facing AnyRunDefinition. The executor parses params via paramsSchema before
- *  calling plan()/steps(), so the erasure is sound at the boundary. */
+ *  calling plan()/steps(), so the erasure is sound at the boundary. A kind registered twice is
+ *  refused: the second definition would silently replace the first. */
 export function register<P>(runDefinitions: RunDefinitions, def: RunDefinition<P>): void {
+  if (runDefinitions.has(def.kind)) throw new Error(`run kind ${def.kind} is registered twice`);
   runDefinitions.set(def.kind, def as unknown as AnyRunDefinition);
 }
 
@@ -97,6 +98,6 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // the onboarding family (onboard/offboard/suspend/resume) closes over the Manager's git/kube/
   // vault/gate-runner clients, which only exist when those adapters are configured — so they are
   // injected here rather than statically imported (the executor still needs zero edits).
-  for (const def of extra) runDefinitions.set(def.kind, def);
+  for (const def of extra) register(runDefinitions, def);
   return runDefinitions;
 }

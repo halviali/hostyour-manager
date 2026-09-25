@@ -93,7 +93,7 @@ export interface DnsWriteRow {
   type: DnsRecordType;
   content: string;
   act: DnsWriteAct;
-  owner: { kind: DnsWriteOwnerKind; name: string; stage?: Stage };
+  owner: { kind: string; name: string; stage?: Stage };
   runId: string;
   writtenAt: string;
   found: string | null;

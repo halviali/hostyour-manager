@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import type { Db } from "../db/client.ts";
-import type { RunKind, RunStatus, TargetKind, RunOutputStream, LockResource } from "../../shared/enums.ts";
+import type { RunStatus, RunOutputStream, LockResource } from "../../shared/enums.ts";
 import type { SshSession } from "../adapters/ssh/port.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { Logger } from "../kernel/logger.ts";
@@ -93,8 +93,8 @@ export interface LockClaim {
 
 /** What plan() produces; frozen into runs.plan_json at approval. */
 export interface Plan {
-  kind: RunKind;
-  targetKind: TargetKind;
+  kind: string;
+  targetKind: string;
   targetId: string;
   summary: string;
   steps: ReadonlyArray<Pick<Step, "name" | "title">>;
@@ -150,7 +150,7 @@ export type PlanStreamResult<P = Record<string, unknown>> =
   | { outcome: "rejected"; summary: string; planJson: unknown };
 
 export interface RunDefinition<P = Record<string, unknown>> {
-  kind: RunKind;
+  kind: string;
   paramsSchema: z.ZodType<P>;
   /** mutating ⇒ steps()[0].name === "attest-target" (asserted where the run definitions are assembled at boot). */
   mutating: boolean;

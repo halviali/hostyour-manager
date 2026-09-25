@@ -1,6 +1,6 @@
 import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import { DNS_WRITE_ACT, DNS_WRITE_OWNER_KIND, STAGE } from "../../../shared/enums.ts";
+import { DNS_WRITE_ACT, STAGE } from "../../../shared/enums.ts";
 import { DNS_RECORD_TYPE } from "../../../shared/dns.ts";
 
 const now = sql`(unixepoch('subsec') * 1000)`;
@@ -21,7 +21,7 @@ export const dnsWrites = sqliteTable("dns_writes", {
   type: text("type", { enum: DNS_RECORD_TYPE }).notNull(),
   content: text("content").notNull(),
   act: text("act", { enum: DNS_WRITE_ACT }).notNull(),
-  ownerKind: text("owner_kind", { enum: DNS_WRITE_OWNER_KIND }).notNull(),
+  ownerKind: text("owner_kind").notNull(),
   ownerName: text("owner_name").notNull(),
   ownerStage: text("owner_stage", { enum: STAGE }),                // a unit stands at a stage; a sender domain at none
   runId: text("run_id").notNull(),

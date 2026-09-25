@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { dnsWrites } from "./schema/dns-writes.ts";
-import type { DnsWriteAct, DnsWriteOwnerKind, Stage } from "../../shared/enums.ts";
+import type { DnsWriteAct, Stage } from "../../shared/enums.ts";
 import type { DnsRecordType } from "../../shared/dns.ts";
 
 // The one writer and the one reader of the book of DNS writes (schema/dns-writes.ts). It stands
@@ -17,7 +17,7 @@ export interface DnsWrite {
   type: DnsRecordType;
   content: string;
   act: DnsWriteAct;
-  owner: { kind: DnsWriteOwnerKind; name: string; stage?: Stage };
+  owner: { kind: string; name: string; stage?: Stage };
   runId: string;
 }
 

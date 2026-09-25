@@ -20,7 +20,7 @@ export function relevantRun(serverId: string, runs: RunView[]): RunView | undefi
 /** What a run of this kind is CALLED in the one line the card gives it. Partial on purpose: a kind
  *  with no entry reads as "<kind> run", which is right for every run kind whose own name already is a
  *  noun phrase. */
-const RUN_NOUN: Partial<Record<RunKind, string>> = {
+const RUN_NOUN: Readonly<Record<string, string>> = {
   "cluster-deploy-slave": "deployment",
   "cluster-remove-slave": "slave removal",
   "cluster-rename": "rename",
@@ -33,7 +33,7 @@ const RUN_NOUN: Partial<Record<RunKind, string>> = {
   "cluster-operator-key-place": "operator key placement",
   "cluster-operator-key-remove": "operator key removal",
   "cluster-authorized-keys-read": "authorized-keys reading",
-};
+} satisfies Partial<Record<RunKind, string>>;
 
 export function runLine(run: RunView): string {
   const noun = RUN_NOUN[run.kind] ?? `${run.kind} run`;

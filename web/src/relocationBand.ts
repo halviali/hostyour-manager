@@ -9,7 +9,7 @@ import type { RunView } from "../../shared/api-types.ts";
 
 const OPEN_RUN: ReadonlyArray<RunView["status"]> = ["planning", "planned", "approved", "running"];
 
-const RELOCATION_KINDS: ReadonlySet<RunKind> = new Set<RunKind>(["consumer-backup", "consumer-restore", "consumer-migrate", "tenant-backup", "tenant-restore", "tenant-migrate"]);
+const RELOCATION_KINDS: ReadonlySet<string> = new Set<RunKind>(["consumer-backup", "consumer-restore", "consumer-migrate", "tenant-backup", "tenant-restore", "tenant-migrate"]);
 
 /** The relocation run this unit's card must surface (listRuns is newest-first): an OPEN one — a
  *  planned move waiting for approval must never be invisible — else the most recent FAILED one

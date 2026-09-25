@@ -1,6 +1,5 @@
 import type { DbHandle } from "../db/client.ts";
 import { runs, steps } from "../db/schema/runs.ts";
-import type { RunKind } from "../../shared/enums.ts";
 
 // The tests' access to the run and step rows: seeding them for a test that drives a RunContext
 // directly instead of going through the Executor, and reading back one column of one step a real
@@ -22,7 +21,7 @@ import type { RunKind } from "../../shared/enums.ts";
  *  `op_system` is the seeded actor for a run no human started (db/migrations/0000_baseline.sql). */
 export function seedRunRows(
   db: DbHandle,
-  o: { runId: string; kind?: RunKind; targetId?: string; steps: readonly { id: string; name: string }[] },
+  o: { runId: string; kind?: string; targetId?: string; steps: readonly { id: string; name: string }[] },
 ): void {
   db.db.insert(runs).values({
     id: o.runId,

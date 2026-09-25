@@ -19,7 +19,7 @@ import type { AuthorizedKeyKind } from "../../../shared/enums.ts";
 // Nothing here is a secret. The row is a public key line and a label, the label is what a host's
 // authorized_keys comment carries, and the private half stays with the person whose key it is.
 //
-// The audit rows below file under targetKind "credential" — the TARGET_KIND member for a thing that
+// The audit rows below file under targetKind "credential" — the target kind for a thing that
 // grants access to a machine — beside the credential-store's own entries. The two never blur: an
 // operator key's id is prefixed `opk_` and a store row's `cred_`.
 

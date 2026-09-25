@@ -4,7 +4,6 @@ import { writeAudit } from "../db/audit-writer.ts";
 import { runId as genRunId, stepId as genStepId } from "../kernel/ids.ts";
 import { errValidation, errInternal } from "../kernel/errors.ts";
 import { redact } from "../security/redact.ts";
-import type { RunKind } from "../../shared/enums.ts";
 import { RunSecretsMap } from "./secrets.ts";
 import { RunContext } from "./context.ts";
 import { hashPlan } from "./plan-hash.ts";
@@ -21,7 +20,7 @@ export function beginStreamingPlan(
   deps: ExecutorDeps,
   active: Map<string, AbortController>,
   inflight: Map<string, Promise<void>>,
-  kind: RunKind,
+  kind: string,
   rawParams: unknown,
 ): { runId: string } {
   const def = deps.runDefinitions.get(kind);

@@ -1,7 +1,6 @@
 import type { Db } from "./client.ts";
 import { audit } from "./schema/audit.ts";
 import { newId } from "../kernel/ids.ts";
-import type { TargetKind } from "../../shared/enums.ts";
 
 /**
  * The audit id is what orders the trail: `ts` has millisecond resolution, so an operator asking
@@ -14,7 +13,7 @@ import type { TargetKind } from "../../shared/enums.ts";
 export interface AuditEntry {
   actor: string; // operator id, or "system" (resume-on-boot)
   action: string; // dot-namespaced action name
-  targetKind?: TargetKind;
+  targetKind?: string;
   targetId?: string;
   runId?: string;
   detail?: Record<string, unknown>;

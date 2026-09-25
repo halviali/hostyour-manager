@@ -8,7 +8,6 @@ import type { RunEventBus } from "../../executor/bus.ts";
 import { listRuns, getRun, readEvents } from "../../executor/read.ts";
 import { isTerminalRun } from "../../executor/transitions.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
-import type { RunKind } from "../../../shared/enums.ts";
 import type { RunEventView } from "../../../shared/api-types.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
@@ -96,7 +95,7 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
   app.post("/api/runs", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { kind?: string; params?: Record<string, unknown> };
     if (typeof body.kind !== "string") throw errValidation("kind is required");
-    const result = await executor.plan(body.kind as RunKind, body.params ?? {});
+    const result = await executor.plan(body.kind, body.params ?? {});
     return c.json(result, 201);
   });
 

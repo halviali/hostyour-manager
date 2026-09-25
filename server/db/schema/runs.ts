@@ -1,6 +1,6 @@
 import { sqliteTable, text, integer, uniqueIndex, index, primaryKey, check } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import { RUN_KIND, RUN_STATUS, STEP_STATUS, EVENT_STREAM, TARGET_KIND, LOCK_RESOURCE } from "../../../shared/enums.ts";
+import { RUN_STATUS, STEP_STATUS, EVENT_STREAM, LOCK_RESOURCE } from "../../../shared/enums.ts";
 import { operators } from "./operators.ts";
 
 const now = sql`(unixepoch('subsec') * 1000)`;
@@ -9,8 +9,8 @@ const now = sql`(unixepoch('subsec') * 1000)`;
 // reads go through executor/read.ts. Enforced by .dependency-cruiser.cjs.
 export const runs = sqliteTable("runs", {
   id: text("id").primaryKey(),                                     // "run_" + ulid
-  kind: text("kind", { enum: RUN_KIND }).notNull(),
-  targetKind: text("target_kind", { enum: TARGET_KIND }).notNull(),
+  kind: text("kind").notNull(),                                  // the core's run kinds and every plugin's
+  targetKind: text("target_kind").notNull(),                     // the core's target kinds and every plugin's
   targetId: text("target_id").notNull(),                          // FK-by-convention (kind varies)
   paramsJson: text("params_json", { mode: "json" }).notNull(),    // sanitized — never secret material
   planJson: text("plan_json", { mode: "json" }),                  // NULLABLE: a planning/failed run may have none

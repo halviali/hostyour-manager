@@ -2,7 +2,7 @@ import { eq, gt, and, desc, isNull } from "drizzle-orm";
 import type { PreflightCheck } from "../../shared/preflight.ts";
 import type { Db } from "../db/client.ts";
 import { runs, steps, events } from "../db/schema/runs.ts";
-import type { RunKind, StepStatus } from "../../shared/enums.ts";
+import type { StepStatus } from "../../shared/enums.ts";
 import type { RunView, RunEventView } from "../../shared/api-types.ts";
 
 // The sanctioned read path for runs/steps/events. Routes read runs
@@ -70,7 +70,7 @@ export function getRun(db: Db, id: string): RunView | undefined {
  *  A run that never settled `planned` still carries only its RAW request params (streaming-plan.ts
  *  overwrites them when the plan settles), so the caller must treat a missing field as "not planned
  *  that far", never as an error. Soft-deleted runs still resolve, exactly like getRun. */
-export function getRunParams(db: Db, id: string): { kind: RunKind; params: Record<string, unknown> } | undefined {
+export function getRunParams(db: Db, id: string): { kind: string; params: Record<string, unknown> } | undefined {
   const r = db.select({ kind: runs.kind, paramsJson: runs.paramsJson }).from(runs).where(eq(runs.id, id)).get();
   return r ? { kind: r.kind, params: (r.paramsJson as Record<string, unknown> | null) ?? {} } : undefined;
 }

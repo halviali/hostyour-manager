@@ -8,7 +8,7 @@ import { redact } from "../security/redact.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { Logger } from "../kernel/logger.ts";
-import type { RunKind, RunStatus, StepStatus, TargetKind } from "../../shared/enums.ts";
+import type { RunStatus, StepStatus } from "../../shared/enums.ts";
 import { assertRecoverable, stepToResume } from "./recover.ts";
 import { assertApprovable } from "./approve.ts";
 import { runProbes } from "./probe.ts";
@@ -29,15 +29,15 @@ export interface ExecutorDeps {
   creds: CredentialStore;
   bus: RunEventBus;
   logger: Logger;
-  runDefinitions: Map<RunKind, AnyRunDefinition>;
+  runDefinitions: Map<string, AnyRunDefinition>;
   sshFactory: SshFactory;
   actor: () => string; // current operator id (from request ctx) or "op_system"
 }
 
 interface LoadedRun {
   id: string;
-  kind: RunKind;
-  targetKind: TargetKind;
+  kind: string;
+  targetKind: string;
   targetId: string;
   params: Record<string, unknown>;
   plan: PlanSnapshot;
@@ -57,7 +57,7 @@ export class Executor {
 
   constructor(private readonly deps: ExecutorDeps) {}
 
-  async plan(kind: RunKind, rawParams: unknown): Promise<{ runId: string; plan: PlanSnapshot }> {
+  async plan(kind: string, rawParams: unknown): Promise<{ runId: string; plan: PlanSnapshot }> {
     const def = this.deps.runDefinitions.get(kind);
     if (!def) throw errValidation(`unknown run kind: ${kind}`);
     const params = def.paramsSchema.parse(rawParams);
@@ -90,7 +90,7 @@ export class Executor {
    *  `planned` (validation passed — a plan awaits approval) or `failed` (rejected, with the full
    *  report frozen into plan_json so the operator keeps the full report on a settled run). Returns immediately; SSE streams the gate
    *  lines. Only defs that declare planStream() are eligible. */
-  async planStreamed(kind: RunKind, rawParams: unknown): Promise<{ runId: string }> {
+  async planStreamed(kind: string, rawParams: unknown): Promise<{ runId: string }> {
     return beginStreamingPlan(this.deps, this.active, this.inflight, kind, rawParams);
   }
 

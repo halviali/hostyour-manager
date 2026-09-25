@@ -521,9 +521,6 @@ export const EPHEMERAL_STREAM = "ephemeral" as const;
 /** What a run may emit: the three persisted streams, or the live-only one. */
 export type RunOutputStream = EventStream | typeof EPHEMERAL_STREAM;
 
-export const TARGET_KIND = ["server", "cluster", "app", "tenant", "credential", "owner", "all", "self"] as const;
-export type TargetKind = (typeof TARGET_KIND)[number];
-
 // The mutexes a run can hold. `server` is derived from the plan's own targets (server/executor/locks.ts
 // deriveServerLocks keeps the ownsHost ones), while `git-branch`, `master-kube` and `master-vault` are
 // named by a run definition's `locks` — and `master-vault` is the platform's ONE Vault, which lives on

@@ -2,8 +2,8 @@
 // ApiError.message renders verbatim.
 import type {
   ServerRole, ServerStatus, ServerTailnetState, ServerPasswordLoginState, AuthorizedKeyKind,
-  ServerAuthorizedKeysState, RunKind, RunStatus, StepStatus, RunOutputStream,
-  TargetKind, LockResource, ClusterStatus,
+  ServerAuthorizedKeysState, RunStatus, StepStatus, RunOutputStream,
+  LockResource, ClusterStatus,
   Stage, TenantStatus, AppStatus, ArgoSync, ArgoHealth, DriftVerdict,
 } from "./enums.ts";
 import type { RunApproveView } from "./approve.ts";
@@ -256,8 +256,8 @@ export interface StepView {
 
 export interface RunView extends RunApproveView {
   id: string;
-  kind: RunKind;
-  targetKind: TargetKind;
+  kind: string;
+  targetKind: string;
   targetId: string;
   status: RunStatus;
   summary: string;

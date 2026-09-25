@@ -355,8 +355,8 @@ function programsOf(def: AnyRunDefinition): string[] {
  *  simply not in it, and the check goes on reporting green over the kinds it does know. Measured on
  *  a real installation: five run kinds drove programs while a check holding only
  *  `cluster-deploy-slave` said in its own words that it was the only one. */
-function programDrivingKinds(runDefinitions: RunDefinitions): { kind: RunKind; programs: string[] }[] {
-  const driving: { kind: RunKind; programs: string[] }[] = [];
+function programDrivingKinds(runDefinitions: RunDefinitions): { kind: string; programs: string[] }[] {
+  const driving: { kind: string; programs: string[] }[] = [];
   for (const [kind, def] of runDefinitions) {
     const programs = programsOf(def);
     if (programs.length > 0) driving.push({ kind, programs });

@@ -2250,7 +2250,7 @@
     "shared/enums.ts::onboarding": 3,
     "shared/enums.ts::registration": 9,
     "shared/enums.ts::relocation": 1,
-    "shared/enums.ts::tenant": 113,
+    "shared/enums.ts::tenant": 112,
     "shared/enums.ts::tenants": 14,
     "shared/enums.ts::unit": 21,
     "shared/enums.ts::units": 8,
