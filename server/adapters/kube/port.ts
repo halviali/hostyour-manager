@@ -624,6 +624,14 @@ export interface ResolvedClusterKube {
  *  hardcoded cluster-name list. The manager pod holds only its OWN cluster's access (the pod SA
  *  in-cluster); this port is the seam that turns a target `clusterId` into per-cluster access. The
  *  default impl lives in the inventory domain (cluster-kube.ts); a scripted fake lives in testing/. */
+/** The three master-local clients every master-local reader and resolver shares, built once for the
+ *  whole process (boot/master-kube.ts). */
+export interface MasterKubeClients {
+  clusterReader: ClusterReader;
+  argoReader: MasterArgoReader;
+  projectWriter: MasterProjectWriter;
+}
+
 export interface ClusterKubeResolver {
   resolve(clusterId: string): Promise<ResolvedClusterKube>;
 }

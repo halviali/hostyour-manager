@@ -389,7 +389,7 @@
     "server/boot/wire-units.ts::units": 24,
     "server/boot/wire.ts::consumer": 11,
     "server/boot/wire.ts::consumers": 1,
-    "server/boot/wire.ts::hostyour-cloud": 2,
+    "server/boot/wire.ts::hostyour-cloud": 1,
     "server/boot/wire.ts::onboard": 3,
     "server/boot/wire.ts::onboarding": 8,
     "server/boot/wire.ts::registration": 5,

@@ -77,6 +77,9 @@ const EnvSchema = z.object({
   // declared in every environment (Deployment from imageTag, tests, dev) — no silent
   // default: a missing value must fail loudly at boot, never run on a quiet guess.
   MANAGER_VERSION: z.string().min(1),
+  // The plugins this process activates, by name, separated by commas (server/boot/plugin-set.ts).
+  // Unset, the core runs alone. A name this build does not carry is refused at activation.
+  PLUGINS: z.string().regex(/^[a-z][a-z0-9-]*(,[a-z][a-z0-9-]*)*$/, "PLUGINS must be lower-case plugin names separated by commas").optional(),
   // Vault as the secrets DB. When VAULT_ADDR is set the credential store
   // keeps its secret VALUES in Vault KV (metadata stays in SQLite); unset ⇒ local keyfile/
   // plaintext (dev/tests). Auth is Vault kubernetes-auth via the pod's ServiceAccount token.
@@ -342,6 +345,8 @@ export interface Config {
    *  Required — explicitly declared per environment, never defaulted. Surfaced at /healthz
    *  and in the UI footer so the operator can see which version is live. */
   version: string;
+  /** The plugins PLUGINS names, in its order; empty where the core runs alone. */
+  plugins: string[];
   /** Present ⇒ store secret values in Vault KV (kubernetes-auth). Absent ⇒ local store. */
   vault?: {
     addr: string;
@@ -498,6 +503,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     ...(e.KUBECONFIG_PATH ? { kubeconfigPath: e.KUBECONFIG_PATH } : {}),
     logLevel: e.LOG_LEVEL,
     version: e.MANAGER_VERSION,
+    plugins: e.PLUGINS?.split(",") ?? [],
     // The refine above guarantees VAULT_K8S_AUTH_MOUNT whenever VAULT_ADDR is set; the pair guard
     // narrows both.
     ...(e.VAULT_ADDR && e.VAULT_K8S_AUTH_MOUNT

@@ -48,6 +48,22 @@ module.exports = {
       from: { path: "^server/kernel" },
       to: { path: "^server/(domains|executor|adapters|db|http)" } },
 
+    // A plugin (server/plugin.ts) stands under plugins/<name>/ while it lives in this tree.
+    { name: "plugin-reaches-core-through-its-surface", severity: "error",
+      comment: "A plugin reaches the core through its surface (server/plugin.ts, the kernel, the executor's types, the adapters, inventory, shared/) and never through the composition root, the http layer beyond its env type, another domain, or the SPA's pages.",
+      from: { path: "^plugins/" },
+      to: { path: "^server/(boot/|http/(?!app-env\\.ts$)|domains/(?!inventory/))|^web/src/(pages/|App\\.tsx$|main\\.tsx$)" } },
+
+    { name: "plugins-no-crosstalk", severity: "error",
+      comment: "A plugin reaches another plugin only through that plugin's server/plugin.ts and server/config.ts — what it requires, never its internals.",
+      from: { path: "^plugins/([^/]+)/" },
+      to: { path: "^plugins/(?!$1/)[^/]+/server/", pathNot: "^plugins/[^/]+/server/(plugin|config)\\.ts$" } },
+
+    { name: "plugin-imports-are-subpath", severity: "error",
+      comment: "A plugin names the core and another plugin by subpath import (#core/...), never by a relative path, so it reads the same here and in the repository that holds the plugins.",
+      from: { path: "^plugins/([^/]+)/" },
+      to: { path: "^(server|shared|web/src|plugins/(?!$1/))", dependencyTypesNot: ["aliased-subpath-import"] } },
+
     { name: "no-unreachable-modules", severity: "error",
       comment:
         "Every shipped module hangs off one of the ENTRY_POINTS. Tests are deliberately NOT roots, so a " +

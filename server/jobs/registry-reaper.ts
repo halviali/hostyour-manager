@@ -12,13 +12,15 @@ import { join } from "node:path";
 import { loadConfig } from "../kernel/config.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { openDb } from "../db/client.ts";
+import { buildCore } from "../boot/core.ts";
+import { activatePlugins, inDependencyOrder } from "../boot/plugin-set.ts";
+import { compiledPlugins } from "../plugins.ts";
+import { RUN_KIND } from "../../shared/enums.ts";
+import type { PinHit } from "../../shared/pin.ts";
 import { resolveRepoCredentialId } from "../domains/units/repo-identity.ts";
 import { readOwnerIdentity } from "../domains/units/owners.ts";
 import { booksBranch } from "../domains/inventory/read.ts";
-import { CredentialStore } from "../security/store.ts";
-import { storeBackend } from "../boot/store-backend.ts";
 import { createGitHubPlatform, type GitHubPlatformConfig } from "../adapters/github-platform/github-platform-http.ts";
-import { HttpGitHubApp } from "../adapters/github-app/github-app-http.ts";
 import { GitPlatformRepo, GitRepoReader } from "../adapters/git/git.ts";
 import { HttpRegistryMaintenance } from "../adapters/registry/registry-http.ts";
 import { reap } from "../domains/registry-cleanup/reap.ts";
@@ -78,9 +80,12 @@ async function main(): Promise<void> {
   const dryRun = process.env.DRY_RUN !== "false";
 
   // The unit charts are read under each unit's OWN sealed repo credential, so the reaper needs the
-  // same credential store the server runs on — same backend selection, same keystore.
-  const db = openDb(config.dbFile);
-  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config) });
+  // same credential store the server runs on — built the same way (boot/core.ts), over a database
+  // migrated for every compiled plugin, with the plugins PLUGINS names activated over it.
+  const db = openDb(config.dbFile, inDependencyOrder(compiledPlugins));
+  const core = buildCore(config, logger, db.db);
+  const { store, githubApp } = core;
+  const active = activatePlugins(compiledPlugins, config.plugins, core, process.env, new Set<string>(RUN_KIND));
 
   // WHERE the registrations of class (a) stand: this installation's books branch. The reaper runs
   // with an emptyDir DATA_DIR, so its database is empty on every run and MASTER_FQDN is the only
@@ -100,17 +105,18 @@ async function main(): Promise<void> {
   }
   // The catalog's identity, the same as wire-tenants.ts's: the App's installation token — minted
   // ONCE here, because this job runs for minutes and the token for an hour.
-  const deployToken = await new HttpGitHubApp(config.githubApp).installationToken();
+  const deployToken = await githubApp.installationToken();
   const deploy = carrierRepo({ owner: deployOwner, repo: deployRepo, token: deployToken }, config.dataDir, "reaper-deploy", books);
   const unit = new GitRepoReader({ openCredential: (id) => store.open(id, { purpose: "registry-reaper:read-unit-chart" }) });
   // A unit's repository is reached with its owner's identity, resolved from the URL now (#226).
-  const githubApp = new HttpGitHubApp(config.githubApp);
   const unitCredential = (repoURL: string, signal?: AbortSignal): Promise<string> =>
     resolveRepoCredentialId({ repoURL, githubApp, owners: (org) => readOwnerIdentity(db.db, org), store, ...(signal ? { signal } : {}) });
   const registry = new HttpRegistryMaintenance({ registryHost, dockerConfigPath });
 
   logger.info({ registryHost, dockerConfigPath, dryRun }, "registry-reaper: starting");
-  const result = await reap({ cloud, deploy, unit, unitCredential, registry, logger, dryRun });
+  // What the active plugins' deployments pin joins the floor (server/plugin.ts pinHits).
+  const pluginPins = async (signal?: AbortSignal): Promise<PinHit[]> => (await Promise.all(active.map((p) => p.wiring.pinHits?.(signal) ?? Promise.resolve([])))).flat();
+  const result = await reap({ cloud, deploy, unit, unitCredential, registry, logger, dryRun, pluginPins });
   logger.info(
     {
       dryRun: result.dryRun,

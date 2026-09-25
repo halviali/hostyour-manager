@@ -147,6 +147,18 @@ describe("reap — the floor IS the pin search, over all three carrier classes",
     expect(result.repos.find((r) => r.repo === "example-auth-backend")!.delete).not.toContain(AUTH_PIN);
   });
 
+  it("holds a tag only a plugin pins like a carrier's: the class the counter-probe took out comes back through pluginPins", async () => {
+    const { deps, registry } = threeClassFixture({ withDeployCarrier: false });
+    const pluginPins = (): Promise<{ carrier: string; pin: { name: string; image: string; tag: string } }[]> =>
+      Promise.resolve([{ carrier: "plugin probe", pin: { name: "example-engine", image: "example-engine", tag: ENGINE_PIN } }]);
+
+    const result = await reap({ ...deps, logger: makeLogger(), dryRun: false, pluginPins });
+
+    expect(result.repos.find((r) => r.repo === "example-engine")!.keep).toContain(ENGINE_PIN);
+    expect(registry.deleted.some((d) => d.digest === "sha256:example-engine-pin0")).toBe(false);
+    expect(result.referencedCount).toBe(4);
+  });
+
   it("never touches a multi-segment repository — those are pull-through caches, not our flat build names", async () => {
     const { deps, registry } = threeClassFixture();
 

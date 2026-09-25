@@ -373,6 +373,12 @@ export interface ReleasesView {
   reason?: "onboarding-not-configured";
 }
 
+/** GET /api/plugins — the names of the plugins this Manager activated (the key PLUGINS), in the order
+ *  it activated them. */
+export interface PluginsView {
+  active: string[];
+}
+
 /** /readyz response — the degrading self-checks surface. A row's `detail` is present only on a
  *  passing check and is what that check measured (boot/selfchecks.ts readinessOf). */
 export interface ReadyzView {

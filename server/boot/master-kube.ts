@@ -1,5 +1,5 @@
 import type { Config } from "../kernel/config.ts";
-import type { ClusterReader, MasterArgoReader, MasterProjectWriter } from "../adapters/kube/port.ts";
+import type { MasterKubeClients } from "../adapters/kube/port.ts";
 import { KubeMasterArgoReader, KubeClusterReader, KubeMasterProjectWriter } from "../adapters/kube/kube.ts";
 
 /** The master (self-cluster) kube access every master-local client is built from: the pod
@@ -16,12 +16,6 @@ export function masterKubeInput(config: Config): { kubeconfigPath: string } | { 
  *  own `makeClusterKubeResolver`, so three sets of clients spoke to one API server with identical
  *  credentials — and a cluster run kind that needed a resolver had no way to reach one at all,
  *  because both stood behind a family's own configuration guard. */
-export interface MasterKubeClients {
-  clusterReader: ClusterReader;
-  argoReader: MasterArgoReader;
-  projectWriter: MasterProjectWriter;
-}
-
 export function masterKubeClients(config: Config): MasterKubeClients {
   const input = masterKubeInput(config);
   return {

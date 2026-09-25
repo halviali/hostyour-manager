@@ -28,7 +28,7 @@
 // Reads run in phases so ALL reads (including every digest resolve) complete before the FIRST delete:
 // a failure anywhere in the read phases aborts with nothing removed.
 import type { RegistryMaintenance, ManifestDigest } from "../../adapters/registry/port.ts";
-import { pinKey } from "../../../shared/pin.ts";
+import { pinKey, type PinHit } from "../../../shared/pin.ts";
 import { planRetention } from "../../../shared/registry-retention.ts";
 import { searchCarriers, type SearchDeps } from "./search.ts";
 
@@ -49,6 +49,9 @@ export interface ReapDeps extends SearchDeps {
   keepStable?: number;
   keepNonStable?: number;
   signal?: AbortSignal;
+  /** The pins the active plugins' deployments hold (server/plugin.ts Wiring.pinHits). They join the
+   *  search's own, so a tag only a plugin pins is held like any carrier's. */
+  pluginPins?: (signal?: AbortSignal) => Promise<PinHit[]>;
 }
 
 export interface RepoPlan {
@@ -84,7 +87,7 @@ export async function reap(deps: ReapDeps): Promise<ReapResult> {
   // ── PHASE 1 — the referenced safety floor: the pin search, unchanged. Any read error aborts here,
   // before a single delete. `referenced` is keyed "<image>:<tag>" and builds[].image IS the repository
   // name, so the keys match the catalog exactly.
-  const hits = await searchCarriers(deps, deps.signal);
+  const hits = [...(await searchCarriers(deps, deps.signal)), ...((await deps.pluginPins?.(deps.signal)) ?? [])];
   const referenced = new Set(hits.map((h) => pinKey(h.pin)));
   if (referenced.size === 0) {
     throw new Error(

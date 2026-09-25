@@ -6,6 +6,11 @@
   "engines": {
     "node": ">=24"
   },
+  "imports": {
+    "#core/server/*": "./server/*",
+    "#core/shared/*": "./shared/*",
+    "#core/web/*": "./web/src/*"
+  },
   "scripts": {
     "dev": "tsx watch server/index.ts",
     "dev:web": "vite",

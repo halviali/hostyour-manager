@@ -9,17 +9,16 @@ import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
 import { seedUnitSizes } from "../domains/units/unit-size.ts";
 import { createApp } from "../http/app.ts";
-import { CredentialStore } from "../security/store.ts";
-import { storeBackend } from "./store-backend.ts";
-import { masterKubeClients } from "./master-kube.ts";
-import { KubeClusterReader } from "../adapters/kube/kube.ts";
-import { makeClusterKubeResolver } from "../domains/inventory/cluster-kube.ts";
+import type { CredentialStore } from "../security/store.ts";
+import { buildCore } from "./core.ts";
+import { activatePlugins, inDependencyOrder } from "./plugin-set.ts";
+import { compiledPlugins } from "../plugins.ts";
+import { registerPluginRoutes } from "../http/plugins-route.ts";
 import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
 import { repointUnitRecords } from "../domains/units/cluster-rename-records.ts";
 import { buildUnits } from "./wire-units.ts";
-import { buildPlatformRepo } from "./platform-repo.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
 import { HttpMetricsQuery } from "../adapters/metrics/metrics-http.ts";
@@ -37,7 +36,6 @@ import { registerDnsRoutes } from "../domains/dns/api.ts";
 import { readDnsInventory, type DnsInventoryDeps } from "../domains/dns/dns-inventory.ts";
 import { DohPublicDns } from "../adapters/dns/public-dns.ts";
 import { createGitHubPlatform } from "../adapters/github-platform/github-platform-http.ts";
-import { HttpGitHubApp } from "../adapters/github-app/github-app-http.ts";
 import { registerBranchRoutes } from "../domains/branches/api.ts";
 import { registerReleaseRoutes } from "../domains/releases/api.ts";
 import { searchPlatformApps } from "../domains/registry-cleanup/search.ts";
@@ -58,7 +56,7 @@ import { registerSpa, spaDistDir } from "../http/spa.ts";
 import type { AppEnv } from "../http/app-env.ts";
 import { readPullConfiguration, REGISTRY_PULL_DOCKERCONFIG_PATH } from "../adapters/registry/registry-http.ts";
 import type { ReadyzView } from "../../shared/api-types.ts";
-import type { Stage } from "../../shared/enums.ts";
+import { RUN_KIND, type Stage } from "../../shared/enums.ts";
 
 export interface Wired {
   config: Config;
@@ -125,37 +123,32 @@ export async function wire(): Promise<Wired> {
   // One line per boot phase with its duration (boot-phases.ts): the phase that holds the port
   // shut on a slow boot has a name in the log.
   const phase = bootPhases(logger);
-  const db = openDb(config.dbFile);
+  // Every compiled plugin's tables are migrated, active or not: one switched off keeps its tables,
+  // and switching it on again needs no migration.
+  const db = openDb(config.dbFile, inDependencyOrder(compiledPlugins));
   phase("database");
-  // THE PLATFORM'S GITHUB APP IDENTITY — one client, one token cache, built here because three
-  // things hold it: the credential store mints a `github-app` credential through it at every open,
-  // the tenant family reads and writes the catalog and creates a tenant's own repository with it,
-  // and the readiness checks below name the owner it is installed with and whether it reaches the
-  // catalog. Every installation has it (config.ts githubApp, hostyour-cloud#237).
-  const githubApp = new HttpGitHubApp(config.githubApp);
-  // Secrets backend: Vault when configured (prod), else a local keyfile-encrypted
-  // store (dev). Either way the store API is identical to every caller, and one of the two is
-  // always supplied (boot/store-backend.ts).
-  const store = new CredentialStore({ db: db.db, logger, ...storeBackend(config), githubApp });
+  // The credential store, the GitHub App identity, the master's kube access and the platform repo,
+  // built the way every process of the product builds them (boot/core.ts). The App's client is held
+  // by more than the store: the tenant family reads and writes the catalog and creates a tenant's own
+  // repository with it, and the readiness checks below name the owner it is installed with.
+  const core = buildCore(config, logger, db.db);
+  const { store, githubApp, platformRepo } = core;
   // THE APP'S ONE ROW (#226): every clone and hook call of a repository the App reaches opens it.
   await ensureAppIdentityRow(store, githubApp);
   phase("credential store");
+  // The plugins PLUGINS names, each activated over the core after the plugins it requires. A name
+  // this build does not carry, a plugin setting that does not parse and a run kind brought twice
+  // stop the boot here, all named at once (boot/plugin-set.ts).
+  const active = activatePlugins(compiledPlugins, config.plugins, core, process.env, new Set<string>(RUN_KIND));
+  phase("plugins");
   const bus = new RunEventBus();
   // Consumer onboarding: construct the real adapters and register the Run family — but only when the
   // Tekton gate-runner config (ONBOARD_GATE_MANAGER_ADDR) + platform repo are both configured
   // (else defs=[] and the mutating consumer routes answer 501). See wire-units.ts.
-  // THE MASTER-LOCAL KUBE CLIENTS AND THE ONE RESOLVER OVER THEM, built here and handed to everything
-  // that needs them. A family building its own trio and its own resolver from the same input puts
-  // both behind that family's configuration guard, and a cluster run kind can then reach neither —
-  // while a cluster deployment must not depend on consumer onboarding being configured.
-  const masterKube = masterKubeClients(config);
-  const resolver = makeClusterKubeResolver({
-    db: db.db,
-    master: masterKube,
-    openCredential: (id) => store.open(id, { purpose: "cluster-kube:resolve" }),
-    buildClusterReader: (input) => new KubeClusterReader(input),
-  });
-  const platformRepo = buildPlatformRepo(config, db.db);
+  // The master-local kube clients and the one resolver over them come from the core, never from a
+  // family: a cluster deployment must not depend on consumer onboarding being configured.
+  const masterKube = core.kube.master;
+  const resolver = core.kube.resolver;
   const units = buildUnits(config, store, logger, { master: masterKube, resolver }, githubApp, platformRepo);
   // The mail DNS of the installation, measured at public resolvers: the Mail page's deps, and the
   // mail half of the DNS inventory below — one measurement, so the two pages can never disagree
@@ -229,7 +222,7 @@ export async function wire(): Promise<Wired> {
     // given no metrics query address" — a manager built with a client pointing nowhere would report
     // the same skip as an unreachable address, and those are two different faults.
     ...(config.metricsQueryUrl ? { metricsQuery: new HttpMetricsQuery(config.metricsQueryUrl) } : {}),
-  }, units.defs);
+  }, [...units.defs, ...active.flatMap((p) => p.wiring.definitions)]);
   const executor = new Executor({
     db: db.db,
     creds: store,
@@ -279,6 +272,9 @@ export async function wire(): Promise<Wired> {
   const seededSizes = seedUnitSizes(db.db);
   phase("unit sizes");
   if (seededSizes.length > 0) logger.info({ sizes: seededSizes }, "unit size table seeded");
+  // Each active plugin's own boot work, once, after the core's seeds (server/plugin.ts onBoot).
+  for (const p of active) await p.wiring.onBoot?.({ executor });
+  phase("plugin boot");
   // The platform repo rides into the async checks because one of them reads it: the release grammar
   // the Manager enforces against the build plane's copy of it (selfchecks.ts,
   // checkReleaseGrammarMirror). It is the same port every registration write goes through, so the
@@ -287,6 +283,7 @@ export async function wire(): Promise<Wired> {
   const checks = [
     ...runSelfChecks({ db, config, store, bus, runDefinitions }),
     ...(await runAsyncSelfChecks({ db, config, runDefinitions, ...(platformRepo ? { platformRepo } : {}), githubApp })),
+    ...(await Promise.all(active.flatMap((p) => p.wiring.selfChecks?.() ?? []).map((check) => check()))),
   ];
   phase("self-checks");
   assertBlockingChecksPass(checks);
@@ -374,6 +371,8 @@ export async function wire(): Promise<Wired> {
         github,
         reseedMaster: async () => { stopMasterReconcile(); await seedMaster(db.db, store, config, logger); },
       });
+      // What each active plugin serves, under /api/<its name>, and the names of the active ones.
+      registerPluginRoutes(a, active, { executor });
       registerSpa(a, spaDistDir()); // LAST — the SPA fallback is the catch-all
     },
   });
