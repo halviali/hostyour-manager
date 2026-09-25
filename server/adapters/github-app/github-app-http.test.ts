@@ -57,18 +57,19 @@ describe("github-app adapter — the App's JWT and the installation token", () =
     expect(stub.seen[0]!.headers["x-github-api-version"]).toBe("2022-11-28");
   });
 
-  it("caches the token until five minutes before expires_at and mints afresh after that", async () => {
+  it("caches the token only while it outlives the longest holder, and mints afresh after that", async () => {
     vi.useFakeTimers({ now: T0, toFake: ["Date"] });
     const stub = stubFetch({ "POST /app/installations/42/access_tokens": { status: 201, body: { token: "ghs_one", expires_at: expiresAt(T0 + 3_600_000) } } });
     const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
     expect(await client.installationToken()).toBe("ghs_one");
-    // Fifty-four minutes in: six minutes of life left, outside the renewal margin — no second mint.
-    vi.setSystemTime(T0 + 54 * 60_000);
+    // Nine minutes in: fifty-one minutes of life left, more than the minimum — no second mint.
+    vi.setSystemTime(T0 + 9 * 60_000);
     expect(await client.installationToken()).toBe("ghs_one");
     expect(stub.seen).toHaveLength(1);
-    // Fifty-six minutes in: four minutes left, inside the margin — minted afresh, and the new value wins.
-    stub.routes["POST /app/installations/42/access_tokens"] = { status: 201, body: { token: "ghs_two", expires_at: expiresAt(T0 + 2 * 3_600_000) } };
-    vi.setSystemTime(T0 + 56 * 60_000);
+    // Eleven minutes in: forty-nine minutes left. A build secret written now is read for up to fifty,
+    // so the cached token would die under a clone — minted afresh, and the new value wins.
+    stub.routes["POST /app/installations/42/access_tokens"] = { status: 201, body: { token: "ghs_two", expires_at: expiresAt(T0 + 11 * 60_000 + 3_600_000) } };
+    vi.setSystemTime(T0 + 11 * 60_000);
     expect(await client.installationToken()).toBe("ghs_two");
     expect(stub.seen).toHaveLength(2);
   });

@@ -24,8 +24,8 @@ export interface CreateRepositoryInput {
 }
 
 export interface GitHubApp {
-  /** The installation access token (POST /app/installations/{id}/access_tokens), cached until five
-   *  minutes before GitHub's own expires_at and minted afresh after that. The value is a credential:
+  /** The installation access token (POST /app/installations/{id}/access_tokens), cached only while it
+   *  has at least TOKEN_MIN_VALIDITY_MS of life left and minted afresh after that. The value is a credential:
    *  it is handed to the consumer port's per-call `token` and never logged. The credential store
    *  opens a `github-app` credential through this, so a token is never stored past its hour. */
   installationToken(signal?: AbortSignal): Promise<string>;

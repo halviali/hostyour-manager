@@ -16,9 +16,11 @@ const JWT_BACKDATE_S = 60;
 /** Nine minutes, under GitHub's ten-minute ceiling on an App JWT; it is minted per request, so the
  *  length only has to outlive one round trip. */
 const JWT_LIFETIME_S = 9 * 60;
-/** The installation token is minted afresh this long before GitHub's expires_at: a token handed to
- *  a run step just before its expiry would die inside that step's own requests. */
-const TOKEN_RENEW_MARGIN_MS = 5 * 60_000;
+/** A token handed out stays valid at least this long; a cached one with less life left is minted
+ *  afresh. The longest holder is the build secret the App-token refresh writes: it is read until the
+ *  next refresh (boot/refresh-app-tokens-schedule.ts), plus the time a pipeline takes to reach its
+ *  clone. GitHub gives a token one hour, so the cache serves the same token for about ten minutes. */
+export const TOKEN_MIN_VALIDITY_MS = 50 * 60_000;
 
 const base64urlJson = (value: unknown): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
 
@@ -85,7 +87,7 @@ export class HttpGitHubApp implements GitHubApp {
   }
 
   async installationToken(signal?: AbortSignal): Promise<string> {
-    if (this.token && Date.now() < this.token.expiresAt - TOKEN_RENEW_MARGIN_MS) return this.token.value;
+    if (this.token && Date.now() < this.token.expiresAt - TOKEN_MIN_VALIDITY_MS) return this.token.value;
     const path = `${this.installationPath}/access_tokens`;
     const res = await this.send(this.appJwt(), path, { method: "POST", ...(signal ? { signal } : {}) });
     if (!res.ok) throw new GitHubAppError(`GitHub POST ${path} → ${res.status}: ${await HttpGitHubApp.ghMessage(res)}`, res.status);

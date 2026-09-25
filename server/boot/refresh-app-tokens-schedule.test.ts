@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "../kernel/logger.ts";
 import { APP_TOKEN_REFRESH_INTERVAL_MS, scheduleAppTokenRefresh, stopAppTokenRefreshSchedule } from "./refresh-app-tokens-schedule.ts";
+import { TOKEN_MIN_VALIDITY_MS } from "../adapters/github-app/github-app-http.ts";
 
 const silent = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger;
 
@@ -12,6 +13,12 @@ afterEach(() => {
 });
 
 describe("the App-token refresh's schedule", () => {
+  it("never ticks slower than the App client's tokens last in a build secret", () => {
+    // A token written at one tick is read by clones until the next tick, and a pipeline takes up to
+    // five minutes to reach its clone after its trigger.
+    expect(APP_TOKEN_REFRESH_INTERVAL_MS + 5 * 60_000).toBeLessThanOrEqual(TOKEN_MIN_VALIDITY_MS);
+  });
+
   it("fires every 45 minutes — under the hour a token lives", async () => {
     expect(APP_TOKEN_REFRESH_INTERVAL_MS).toBe(45 * 60_000);
     expect(APP_TOKEN_REFRESH_INTERVAL_MS).toBeLessThan(60 * 60_000);
