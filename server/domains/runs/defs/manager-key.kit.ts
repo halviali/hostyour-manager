@@ -3,7 +3,7 @@ import type { Step, StepCtx } from "../../../executor/types.ts";
 import { servers } from "../../../db/schema/inventory.ts";
 import { AuthFailedError, HostKeyMismatchError, type SshSession } from "../../../adapters/ssh/port.ts";
 import { generateServerKeypair } from "../../../adapters/ssh/keygen.ts";
-import { AppError, errValidation } from "../../../kernel/errors.ts";
+import { errValidation, errInternal } from "../../../kernel/errors.ts";
 import { execCapture, localTx, remoteCmd, remoteExec, remoteScriptCapture, requirePassword } from "../../../executor/stepkit.ts";
 import { managerKeyMarker } from "../../../../shared/operator-keys.ts";
 import { recordAuthorizedKeysReading } from "../operator-keys-probe.ts";
@@ -234,7 +234,7 @@ export function installKeyStep(input: FirstContactInput, options: { arm: boolean
       const server = loadServer(ctx.db, input.serverId);
       const held = await ctx.creds.list({ subject: { kind: "server", id: input.serverId }, purpose: "ssh-key", excludeRotated: true });
       const pub = held[held.length - 1]?.publicKey;
-      if (!pub) throw new AppError("INTERNAL", `no unrotated ssh_key credential for ${server.name} to install — generate-key runs before this step`);
+      if (!pub) throw errInternal(`no unrotated ssh_key credential for ${server.name} to install — generate-key runs before this step`);
       const session = await openDoor(ctx, input.secretName);
       const file = await remoteExec(ctx, session, "test -f ~/.ssh/authorized_keys");
       if (file.code === 0) {

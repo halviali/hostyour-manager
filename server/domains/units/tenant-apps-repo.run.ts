@@ -4,7 +4,7 @@ import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { appName, guid as guidSchema, subdomain as subdomainSchema } from "../../../shared/tenant.ts";
 import { ConsumerManifestSchema, type TenantSpec } from "../../../shared/consumer.ts";
-import { AppError, errValidation } from "../../kernel/errors.ts";
+import { errValidation, errInternal } from "../../kernel/errors.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { assertDeployState } from "./lifecycle.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
@@ -119,7 +119,7 @@ export function makeTenantAppsRepoDef(ports: TenantOnboardPorts): RunDefinition<
     paramsSchema: TenantAppsRepoParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted at boot
     plan: () => {
-      throw new AppError("INTERNAL", "tenant-apps-repo is planned via planStream (the streaming entrypoint), not plan()");
+      throw errInternal("tenant-apps-repo is planned via planStream (the streaming entrypoint), not plan()");
     },
     // Streaming planner: the refusals, each a sentence the operator acts on, then the template read
     // once for what it offers, then the plan.

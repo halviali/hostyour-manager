@@ -35,7 +35,7 @@ import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.
 import { resolveUnitQuota } from "./unit-size.ts";
 import { writeRegistrationStep, writeBuildRegistrationStep, recordBuildOnlyStep } from "./onboard-registration.ts";
 import type { BuildRbacWriter, RepoCredentialWriter, MasterArgoReader, ClusterReader } from "../../adapters/kube/port.ts";
-import { AppError, errNotFound } from "../../kernel/errors.ts";
+import { errNotFound, errInternal } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
 import { unitApexFromChain } from "./admission-policy.ts";
 import { type BuildPlaneFqdnResolver } from "../inventory/cluster-marking.ts";
@@ -529,7 +529,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
     plan: () => {
       // onboard is planned by the executor's streaming onboard entrypoint (planStream below), which
       // runs the gate-runner and freezes the report into params — never the synchronous plan() path.
-      throw new AppError("INTERNAL", "onboard is planned via planStream (the streaming entrypoint), not plan()");
+      throw errInternal("onboard is planned via planStream (the streaming entrypoint), not plan()");
     },
     // The streaming planner: clone -> gate-runner -> compose (validate.ts), streamed as it runs.
     // A pass resolves the augmented params + the plan; a rejection freezes the full report so the

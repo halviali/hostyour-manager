@@ -31,7 +31,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 // SkippedTenantPointerView.
 import type { SkippedConsumerPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
-import { AppError, errValidation } from "../../kernel/errors.ts";
+import { errValidation } from "../../kernel/errors.ts";
 import { resolveClusterMarkingIn } from "../inventory/cluster-marking.ts";
 import { makeRegistrationGuard, migrateRegistrationFiles, parseRegistration, schemaWhy, serializePointer, trailer, type RegistrationMigration } from "./registration-laws.ts";
 
@@ -403,7 +403,7 @@ export class Registrations {
    *  unit moves within its stage, never across one. */
   async setCluster(stage: Stage, name: string, cluster: string, runId: string): Promise<{ commit: string }> {
     const current = await this.readRegistration(stage, name);
-    if (!current) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
+    if (!current) throw errValidation(`consumer "${name}" is not registered at ${stage}`);
     const leaving = current.entry.cluster;
     const next = { ...current.entry, cluster, ...(leaving !== undefined && leaving !== cluster ? { leaving } : {}) };
     return this.repo.withBranch(this.branch, async (books) => {
@@ -422,7 +422,7 @@ export class Registrations {
    *  left as it stands (a resume, or a move that never set it). */
   async clearLeaving(stage: Stage, name: string, runId: string): Promise<{ commit: string } | null> {
     const current = await this.readRegistration(stage, name);
-    if (!current) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
+    if (!current) throw errValidation(`consumer "${name}" is not registered at ${stage}`);
     if (current.entry.leaving === undefined) return null;
     return this.flip(stage, name, { leaving: undefined }, `migrate(${name}): left ${current.entry.leaving} ${trailer(runId)}`);
   }
@@ -435,7 +435,7 @@ export class Registrations {
     return this.repo.withBranch(this.branch, async (books) => {
       const path = stagePath(stage, name);
       if ((await books.readFile(path)) === null) {
-        throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
+        throw errValidation(`consumer "${name}" is not registered at ${stage}`);
       }
       const remove = [guard(path)];
       // Any OTHER stage still standing keeps the unit — and with it its build.yaml. Read inside the
@@ -533,7 +533,7 @@ export class Registrations {
   private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; leaving?: string | undefined; quota?: UnitQuota }, message: string): Promise<{ commit: string }> {
     return this.repo.withBranch(this.branch, async (books) => {
       const raw = await books.readFile(stagePath(stage, name));
-      if (raw === null) throw new AppError("VALIDATION", `consumer "${name}" is not registered at ${stage}`);
+      if (raw === null) throw errValidation(`consumer "${name}" is not registered at ${stage}`);
       const entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
       const next = { ...entry, ...patch };
       const write = [{ path: guard(stagePath(stage, name)), content: serializePointer(ConsumerRegistrationSchema, next) }];

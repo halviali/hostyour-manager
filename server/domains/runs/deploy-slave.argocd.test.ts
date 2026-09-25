@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { clusters } from "../../db/schema/inventory.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errUpstream } from "../../kernel/errors.ts";
 import { argocdFollowStep } from "./defs/live-cluster.kit.ts";
 import { statedTarget } from "./defs/deploy-slave.kit.ts";
 import { FIXTURE_STAGE, MASTER_FQDN } from "./cluster-maps.fixture.ts";
@@ -121,7 +121,7 @@ describe("the three ArgoCD reads of a cluster deployment", () => {
     // the Manager's own reader is on that API server: the pod loses it mid-follow by design. A step
     // that died on the first UPSTREAM would fail a redeploy for the restart the redeploy asked for.
     const h = await masterWorld();
-    h.argo.setListFailure(new AppError("UPSTREAM", "list Argo Applications in argocd: connect ECONNREFUSED"));
+    h.argo.setListFailure(errUpstream("list Argo Applications in argocd: connect ECONNREFUSED"));
     const step = argocdFollowStep(statedTarget(MASTER_ID, MASTER_FQDN, FIXTURE_STAGE), h.runPorts);
     const said: string[] = [];
 

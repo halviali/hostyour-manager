@@ -16,7 +16,7 @@ import type {
 import { RESTART_ANNOTATION } from "./port.ts";
 import { runKubeJob } from "./kube-job.ts";
 import * as ns from "./kube-namespace.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { AppError, errUpstream } from "../../kernel/errors.ts";
 import { DEPLOY_STATE_CONFIGMAP } from "../../../shared/deploy-state.ts";
 import {
   mapArgoStatus,
@@ -140,7 +140,7 @@ export const isNotFound = (e: unknown): boolean => statusOf(e) === 404;
  *  (never a mask) and the operation + namespace/name for context. */
 export function upstream(what: string, e: unknown): AppError {
   const msg = e instanceof Error ? e.message : String(e);
-  return new AppError("UPSTREAM", `kube: ${what} failed: ${msg}`, { cause: e });
+  return errUpstream(`kube: ${what} failed: ${msg}`, { cause: e });
 }
 
 /** Abortable sleep — resolves early (never rejects) on abort; the watch loop re-checks the

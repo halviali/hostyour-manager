@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
-import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
+import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { TenantPurgeInput } from "../../../shared/api-types.ts";
 import { guid as guidSchema } from "../../../shared/tenant.ts";
@@ -495,7 +495,7 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: () => {
       // The target must be resolved + frozen before steps() can build the shared teardown (header).
-      throw new AppError("INTERNAL", "tenant-purge is planned via planStream (the streaming entrypoint), not plan()");
+      throw errInternal("tenant-purge is planned via planStream (the streaming entrypoint), not plan()");
     },
     planStream: async (rawParams, ctx) => {
       const req = TenantPurgeRequest.parse(rawParams);

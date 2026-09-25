@@ -13,7 +13,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errUpstream } from "../../kernel/errors.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -460,7 +460,7 @@ describe("offboard run definition", () => {
   it("remove-release-kit is FAIL-SOFT: a push refusal logs a warning and never blocks offboard", async () => {
     seedApp();
     const consumerRepo = new FakeRepoWriter();
-    consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: remote: Permission denied (403)"));
+    consumerRepo.failCommit(errUpstream("git push failed: remote: Permission denied (403)"));
     const step = makeOffboardDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps({ appId: "app_1" }).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-release-kit", logs))).resolves.toBeUndefined();
@@ -472,7 +472,7 @@ describe("offboard run definition", () => {
     const reg = new Registrations(new FakePlatformRepo());
     await seedRegistration(reg);
     const consumerRepo = new FakeRepoWriter();
-    consumerRepo.failOpen(new AppError("UPSTREAM", "clone failed: 403")); // the release-kit removal cannot even open the repo
+    consumerRepo.failOpen(errUpstream("clone failed: 403")); // the release-kit removal cannot even open the repo
     const creds = credsWith({ revoke: () => Promise.resolve() } as unknown as Partial<CredentialStore>);
     const logs: string[] = [];
     for (const step of makeOffboardDef(ports(reg, { consumerRepo })).steps({ appId: "app_1" })) await step.run(ctx(step.name, logs, creds));

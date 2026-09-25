@@ -6,7 +6,7 @@
 // Free functions rather than a class: unlike the AppProject writer these are METHODS of a reader
 // that also does other things, so the reader keeps its interface and delegates one line each.
 import { CoreV1Api, setHeaderOptions, PatchStrategy } from "@kubernetes/client-node";
-import { AppError } from "../../kernel/errors.ts";
+import { errNotFound } from "../../kernel/errors.ts";
 import { isNotFound, upstream } from "./kube.ts";
 
 /** Offboard teardown — delete a target-cluster namespace (== the consumer name, G1). Idempotent:
@@ -74,7 +74,7 @@ export async function annotateNamespace(core: CoreV1Api, name: string, annotatio
       setHeaderOptions("Content-Type", PatchStrategy.MergePatch),
     );
   } catch (e) {
-    if (isNotFound(e)) throw new AppError("NOT_FOUND", `namespace ${name} not found — nothing to annotate`);
+    if (isNotFound(e)) throw errNotFound(`namespace ${name} not found — nothing to annotate`);
     throw upstream(`annotate namespace ${name}`, e);
   }
 }

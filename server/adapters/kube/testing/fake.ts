@@ -2,7 +2,7 @@
 // Application status the master watch observes, and the smoke/deploy-state a cluster read returns.
 import type { MasterArgoReader, ArgoAppStatus, ArgoAppStatusMap, ArgoApplicationRow, ExternalSecretRow, ClusterReader, SmokeResult, DeployState, MasterProjectWriter, AppProjectManifest, AdmissionPolicyManifest, AdmissionPolicyBindingManifest, ClusterKubeResolver, ResolvedClusterKube, BuildRbacWriter, BuildRbacGrant, BuildRbacObject, RoleManifest, RoleBindingManifest, RepoCredentialWriter, RepoCredentialManifest, JobSpec, JobResult } from "../port.ts";
 import { assertWritableProjectName, isManagerOwned, MISSING_APP_STATUS } from "../kube-map.ts";
-import { AppError, errValidation } from "../../../kernel/errors.ts";
+import { errValidation, errNotFound } from "../../../kernel/errors.ts";
 
 export class FakeMasterArgoReader implements MasterArgoReader {
   /** Every `namespace/name` a single-app watch was asked for — lets a test assert a run watched
@@ -297,7 +297,7 @@ export class FakeClusterReader implements ClusterReader {
    *  the run refuses to treat marking nothing as success. */
   async annotateNamespace(name: string, annotations: Record<string, string | null>): Promise<void> {
     if (this.deletedNamespaces.includes(name) || (this.scripted.absentNamespaces?.includes(name) ?? false)) {
-      throw new AppError("NOT_FOUND", `namespace ${name} not found — nothing to annotate`);
+      throw errNotFound(`namespace ${name} not found — nothing to annotate`);
     }
     const current = this.namespaceAnnotations.get(name) ?? {};
     for (const [key, value] of Object.entries(annotations)) {

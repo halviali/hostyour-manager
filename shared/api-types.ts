@@ -8,26 +8,10 @@ import type {
 } from "./enums.ts";
 import type { RunApproveView } from "./approve.ts";
 
-export type ApiErrorCode =
-  | "VALIDATION"
-  | "MISSING_RUN_SECRET"
-  | "UNAUTHENTICATED"
-  | "NOT_A_MEMBER"
-  | "CSRF_REFUSED"
-  | "NOT_FOUND"
-  | "ILLEGAL_TRANSITION"
-  | "RESOURCE_BUSY"
-  | "IDP_UNREACHABLE"
-  | "NOT_CONFIGURED"
-  | "UPSTREAM"
-  | "UNDECLARED_TARGET"
-  | "RUNNER_BUSY"
-  | "SANDBOX_DEGRADED"
-  | "GATE_INCOMPLETE"
-  | "INTERNAL";
-
 export interface ApiError {
-  code: ApiErrorCode;
+  /** The code the server's constructor named (server/kernel/errors.ts, or a plugin's own). A string,
+   *  because a plugin brings codes the core does not list. */
+  code: string;
   message: string;
   /** Structured payload for codes that carry one (RESOURCE_BUSY, …). */
   detail?: Record<string, unknown>;

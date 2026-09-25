@@ -6,7 +6,7 @@ import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId, mintTenantGuid } from "../../kernel/ids.ts";
 import { STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
 import { appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
-import { AppError, errValidation } from "../../kernel/errors.ts";
+import { errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
@@ -565,7 +565,7 @@ async function mintFreeGuid(ports: TenantOnboardPorts, stage: Stage): Promise<st
     // guid is never handed out twice.
     if ((await ports.registrations.scanTenant(stage, candidate)).status === "absent") return candidate;
   }
-  throw new AppError("INTERNAL", `could not mint a free tenant guid after ${GUID_MINT_ATTEMPTS} attempts`);
+  throw errInternal(`could not mint a free tenant guid after ${GUID_MINT_ATTEMPTS} attempts`);
 }
 
 export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<CreateTenantParams> {
@@ -575,7 +575,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted at registrations boot
     plan: () => {
       // create-tenant is planned by the streaming planner (fan-out validation), never plan().
-      throw new AppError("INTERNAL", "create-tenant is planned via planStream (the streaming entrypoint), not plan()");
+      throw errInternal("create-tenant is planned via planStream (the streaming entrypoint), not plan()");
     },
     // Streaming planner: resolve cluster -> mint+collision-check guid -> clone catalog -> render
     // + T1..T4 the fan-out (validate-tenant.ts), streamed gate-by-gate. A pass freezes the augmented

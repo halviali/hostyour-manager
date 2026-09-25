@@ -5,13 +5,13 @@
 // `<unit>-build` namespace, and creates nothing.
 import { KubeConfig, CustomObjectsApi } from "@kubernetes/client-node";
 import type { BuildPlane, ReleaseRunQuery, ReleaseRunOutcome } from "./port.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { AppError, errUpstream } from "../../kernel/errors.ts";
 
 const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as const;
 const DEFAULT_POLL_MS = 10_000; // a release run takes minutes — a 10s tick is plenty and easy on the API server
 
 function upstream(msg: string): AppError {
-  return new AppError("UPSTREAM", `build-plane (tekton): ${msg}`);
+  return errUpstream(`build-plane (tekton): ${msg}`);
 }
 
 /** Abortable sleep — resolves early (never rejects) on abort; the await loop re-checks the signal

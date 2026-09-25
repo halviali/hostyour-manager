@@ -17,7 +17,7 @@
 import type { z } from "zod";
 import { parse as parseYaml } from "yaml";
 import type { BranchScope } from "../../adapters/git/port.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errInternal } from "../../kernel/errors.ts";
 
 /** Mint a path guard for one registration namespace: a write path MUST match `pattern` and contain no
  *  `..` traversal, else it is a programming error (INTERNAL), never a commit. Each registrations binds its
@@ -26,7 +26,7 @@ import { AppError } from "../../kernel/errors.ts";
 export function makeRegistrationGuard(pattern: RegExp, label: string): (path: string) => string {
   return (path: string): string => {
     if (!pattern.test(path) || path.includes("..")) {
-      throw new AppError("INTERNAL", `path guard: "${path}" is outside ${label}`);
+      throw errInternal(`path guard: "${path}" is outside ${label}`);
     }
     return path;
   };
@@ -53,7 +53,7 @@ export function serializePointer<T extends object>(schema: z.ZodType<T>, entry: 
   const reparsed = schema.parse(parseRegistration(yaml)) as unknown as Record<string, unknown>;
   for (const [k, v] of Object.entries(validated)) {
     if (v !== undefined && !deepEqual(reparsed[k], v)) {
-      throw new AppError("INTERNAL", `registration serialize round-trip diverged at "${k}"`);
+      throw errInternal(`registration serialize round-trip diverged at "${k}"`);
     }
   }
   return yaml;
@@ -91,10 +91,10 @@ export function parseRegistration(text: string): Record<string, unknown> {
   try {
     doc = parseYaml(text);
   } catch (e) {
-    throw new AppError("INTERNAL", `registration is not valid YAML: ${e instanceof Error ? e.message : String(e)}`);
+    throw errInternal(`registration is not valid YAML: ${e instanceof Error ? e.message : String(e)}`);
   }
   if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-    throw new AppError("INTERNAL", `registration is not a YAML mapping: ${JSON.stringify(doc) ?? "empty"}`);
+    throw errInternal(`registration is not a YAML mapping: ${JSON.stringify(doc) ?? "empty"}`);
   }
   return doc as Record<string, unknown>;
 }

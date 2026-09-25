@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { KubeConfig, CoreV1Api, CustomObjectsApi, ApiException } from "@kubernetes/client-node";
 import { GateReportSchema, IncompleteGateRunSchema, reportHashPayload, sandboxFailures, sandboxGreen, SANDBOX_SIDE_GATE_IDS, type GateReport } from "../../../shared/gates.ts";
 import type { GateRunner, GateJobRequest, GateJobProgress } from "./port.ts";
-import { AppError, errGateIncomplete, errSandboxDegraded } from "../../kernel/errors.ts";
+import { AppError, errGateIncomplete, errSandboxDegraded, errUpstream } from "../../kernel/errors.ts";
 
 const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as const;
 const TEKTON_TASKRUNS = { group: "tekton.dev", version: "v1", plural: "taskruns" } as const;
@@ -44,7 +44,7 @@ function isNotFound(e: unknown): boolean {
   return statusCode(e) === 404;
 }
 function upstream(msg: string): AppError {
-  return new AppError("UPSTREAM", `gate-runner (tekton): ${msg}`);
+  return errUpstream(`gate-runner (tekton): ${msg}`);
 }
 
 /** What the run's report ConfigMap was found to carry. The `publish-report` finally task writes

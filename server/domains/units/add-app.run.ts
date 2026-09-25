@@ -6,7 +6,7 @@ import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { guid as guidSchema, appName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
-import { AppError, errNotFound, errValidation } from "../../kernel/errors.ts";
+import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
@@ -343,7 +343,7 @@ export function makeAddAppDef(ports: TenantOnboardPorts): RunDefinition<AddAppPa
     paramsSchema: AddAppParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target
     plan: () => {
-      throw new AppError("INTERNAL", "add-app is planned via planStream (the streaming entrypoint), not plan()");
+      throw errInternal("add-app is planned via planStream (the streaming entrypoint), not plan()");
     },
     // The streaming planner: load the live tenant (row + registration) -> refuse a duplicate app ->
     // read the tenant's own catalog off its bundle's repository -> clone catalog at the books branch

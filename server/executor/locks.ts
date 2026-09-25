@@ -44,14 +44,14 @@ export function acquireLocks(db: Db, runId: string, rawClaims: LockClaim[]): voi
   db.transaction((tx) => {
     const existing = tx.select().from(runLocks).all();
     const heldGlobal = existing.find((r) => isGlobalClaim({ resource: r.resource, key: r.key }));
-    if (heldGlobal) throw errResourceBusy({ resource: heldGlobal.resource, key: heldGlobal.key, holderRunId: heldGlobal.runId });
+    if (heldGlobal) throw errResourceBusy("Resource busy", { resource: heldGlobal.resource, key: heldGlobal.key, holderRunId: heldGlobal.runId });
     if (claims.some(isGlobalClaim) && existing.length > 0) {
       const h = existing[0];
-      if (h) throw errResourceBusy({ resource: h.resource, key: h.key, holderRunId: h.runId });
+      if (h) throw errResourceBusy("Resource busy", { resource: h.resource, key: h.key, holderRunId: h.runId });
     }
     for (const c of claims) {
       const held = existing.find((r) => r.resource === c.resource && r.key === c.key);
-      if (held) throw errResourceBusy({ resource: c.resource, key: c.key, holderRunId: held.runId });
+      if (held) throw errResourceBusy("Resource busy", { resource: c.resource, key: c.key, holderRunId: held.runId });
     }
     for (const c of claims) tx.insert(runLocks).values({ resource: c.resource, key: c.key, runId }).run();
   });

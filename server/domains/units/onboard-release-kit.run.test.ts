@@ -5,7 +5,7 @@ import { injectReleaseKitStep, removeReleaseKit } from "./onboard-release-kit.ts
 import { DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { RELEASE_KIT_FILES, RELEASE_KIT_PATHS, RELEASE_KIT_REMOVE_PATHS } from "./release-kit/release-kit.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errUpstream } from "../../kernel/errors.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -158,7 +158,7 @@ describe("onboard inject-release-kit step (replace, never layer)", () => {
 
   it("fails CLOSED when the push is unauthorized (a PAT without contents:write)", async () => {
     const consumerRepo = new FakeRepoWriter();
-    consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: remote: Permission to x/acme.git denied to token (403)"));
+    consumerRepo.failCommit(errUpstream("git push failed: remote: Permission to x/acme.git denied to token (403)"));
     // The step throws, so the run aborts before the release cycle is ever triggered.
     await expect(step({ consumerRepo }).run(ctx([]))).rejects.toThrow(/Permission to x\/acme\.git denied/);
   });
@@ -183,7 +183,7 @@ describe("removeReleaseKit (shared offboard/purge teardown)", () => {
 
     // Fail-soft: a push refusal logs + returns, never throws.
     const failing = new FakeRepoWriter();
-    failing.failCommit(new AppError("UPSTREAM", "git push failed: 403"));
+    failing.failCommit(errUpstream("git push failed: 403"));
     const warnLogs: string[] = [];
     await expect(removeReleaseKit(ctx(warnLogs), { consumerRepo: failing, consumerName: "acme", repoURL: REPO_URL, repoCredentialId: "cred_pat" })).resolves.toBeUndefined();
     expect(warnLogs.some((l) => l.includes("release-kit NOT removed") && l.includes("by hand"))).toBe(true);

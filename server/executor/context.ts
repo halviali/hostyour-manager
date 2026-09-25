@@ -7,7 +7,7 @@ import type { CredentialStore } from "../security/store.ts";
 import { HostKeyMismatchError, type SshFactory, type SshSession, type SshTarget } from "../adapters/ssh/port.ts";
 import { redact } from "../security/redact.ts";
 import { evtId } from "../kernel/ids.ts";
-import { AppError, errUndeclaredTarget, errMissingRunSecret, errValidation } from "../kernel/errors.ts";
+import { AppError, errUndeclaredTarget, errMissingRunSecret, errValidation, errInternal } from "../kernel/errors.ts";
 import type { Logger } from "../kernel/logger.ts";
 import { isMasterRole, EPHEMERAL_STREAM, type RunOutputStream } from "../../shared/enums.ts";
 import type { StepCtx, Cleanup, RunSecrets, RunTargetRef } from "./types.ts";
@@ -230,7 +230,7 @@ export class RunContext {
 
   private checkpoint(stepName: string, data: unknown): void {
     const json = JSON.stringify(data);
-    if (redact(json) !== json) throw new AppError("INTERNAL", "checkpoint contains a registered secret");
+    if (redact(json) !== json) throw errInternal("checkpoint contains a registered secret");
     this.writeCheckpoint(stepName, { ...this.stepCheckpoint(stepName), data });
   }
 
@@ -247,7 +247,7 @@ export class RunContext {
 
   // ctx.attest() implementation is still missing. Interface is final; noop never calls it.
   private attest(_serverId?: string): Promise<void> {
-    return Promise.reject(new AppError("INTERNAL", "ctx.attest() is not implemented"));
+    return Promise.reject(errInternal("ctx.attest() is not implemented"));
   }
 
   // Multi-target SSH (one session per target host and address). Resolves the effective serverId (no arg = the run's
@@ -284,7 +284,7 @@ export class RunContext {
     // key must never be picked up).
     const creds = await this.d.creds.list({ subject: { kind: "server", id }, purpose: "ssh-key", excludeRotated: true });
     const cred = creds[creds.length - 1];
-    if (!cred) throw new AppError("INTERNAL", `no ssh_key credential for server ${id}`);
+    if (!cred) throw errInternal(`no ssh_key credential for server ${id}`);
     const pinned = (server.preflightJson as { hostKey?: string } | null)?.hostKey;
     // Defense in depth: the master is SSHed-to by deploy-slave (this control host). Without a
     // pinned host key the connection would trust-on-first-use with an accept-any verifier —

@@ -1,6 +1,6 @@
 import type { OwnersListView, OwnerCredentialInput } from "../../shared/api-types-owners.ts";
 import type { UnitCheck } from "../../shared/preflight.ts";
-import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, BranchesView, BranchDiffView, ResetRequest, ResetResult, ApiErrorCode, // The tenant-purge targeting surface + the two reads that name one. Declared
+import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, BranchesView, BranchDiffView, ResetRequest, ResetResult, // The tenant-purge targeting surface + the two reads that name one. Declared
   // ONCE in shared/api-types.ts and returned by the server domain module itself (tenant-orphans.ts), so
   // the shapes this client resolves to are the shapes that module answers in — there is no browser-side
   // twin of them left to fall behind a server change, which is exactly how a `not-deployed` state the
@@ -36,8 +36,8 @@ import type { UnitSize } from "../../shared/unit-size.ts";
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
 export class ApiRequestError extends Error {
-  readonly code: ApiErrorCode | undefined;
-  constructor(message: string, code?: ApiErrorCode) {
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
     super(message);
     this.name = "ApiRequestError";
     this.code = code;
@@ -58,7 +58,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Not signed in");
   }
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { message?: string; code?: ApiErrorCode } | null;
+    const body = (await res.json().catch(() => null)) as { message?: string; code?: string } | null;
     throw new ApiRequestError(body?.message ?? `Request failed (${res.status})`, body?.code);
   }
   return (await res.json()) as T;

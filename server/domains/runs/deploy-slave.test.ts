@@ -5,7 +5,7 @@ import { assertGuardsArmed } from "../../executor/guards.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
 import { getRun } from "../../executor/read.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { AppError, errUpstream } from "../../kernel/errors.ts";
 import { hardenPreflightForSlave, parsePreflightOutput } from "./preflight.ts";
 import { hasHardFailure } from "../../../shared/preflight.ts";
 import { ClusterPlaneV0 } from "../../../shared/plane.ts";
@@ -390,7 +390,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     // kubelite and the Manager's own pod is on that API server. A gate that died on the first
     // UPSTREAM would fail a deployment for the restart the deployment itself asked for.
     const h = await verifyWorld();
-    h.cluster.setExternalSecretsFailure(new AppError("UPSTREAM", "list ExternalSecrets in s1: connect ECONNREFUSED"));
+    h.cluster.setExternalSecretsFailure(errUpstream("list ExternalSecrets in s1: connect ECONNREFUSED"));
     const step = stepOf(h, "verify-slave");
     vi.useFakeTimers();
     try {

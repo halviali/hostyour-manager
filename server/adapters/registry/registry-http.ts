@@ -8,7 +8,7 @@
 // domain step drives it through the RegistryProbe port.
 import { readFile } from "node:fs/promises";
 import type { RegistryProbe, ImageRef, RegistryMaintenance, ManifestDigest } from "./port.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { AppError, errUpstream } from "../../kernel/errors.ts";
 
 /** The manifest media types the probe accepts — OCI image/index + docker v2 manifest/list, the
  *  exact Accept set the image-guard probe sends (a registry may 404 an unlisted media type). */
@@ -17,7 +17,7 @@ const MANIFEST_ACCEPT =
   "application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json";
 
 function upstream(msg: string): AppError {
-  return new AppError("UPSTREAM", `registry probe: ${msg}`);
+  return errUpstream(`registry probe: ${msg}`);
 }
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));

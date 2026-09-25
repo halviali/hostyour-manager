@@ -3,7 +3,7 @@ import type { Db } from "../db/client.ts";
 import { runs, steps, events, runLocks } from "../db/schema/runs.ts";
 import { writeAudit } from "../db/audit-writer.ts";
 import { runId as genRunId, stepId as genStepId, evtId as genEvtId } from "../kernel/ids.ts";
-import { AppError, errValidation, errNotFound, errIllegalTransition } from "../kernel/errors.ts";
+import { errValidation, errNotFound, errIllegalTransition, errInternal } from "../kernel/errors.ts";
 import { redact } from "../security/redact.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
@@ -64,7 +64,7 @@ export class Executor {
     const planned = await def.plan(params, { db: this.deps.db });
     const impls = def.steps(params);
     if (impls.map((s) => s.name).join(",") !== planned.steps.map((s) => s.name).join(",")) {
-      throw new AppError("INTERNAL", `planner/steps name mismatch for ${kind}`);
+      throw errInternal(`planner/steps name mismatch for ${kind}`);
     }
     // The probes run here, on the synchronous path, with nowhere to stream to: their lines go to
     // the logger, their findings into the plan, and a hard failure refuses it like a guard would.
@@ -573,7 +573,7 @@ export class Executor {
 
   private stepRowFull(runId: string, name: string): { id: string; name: string; status: StepStatus; ordinal: number } {
     const row = this.deps.db.select().from(steps).where(and(eq(steps.runId, runId), eq(steps.name, name))).get();
-    if (!row) throw new AppError("INTERNAL", `step ${name} not found on run ${runId}`);
+    if (!row) throw errInternal(`step ${name} not found on run ${runId}`);
     return { id: row.id, name: row.name, status: row.status, ordinal: row.ordinal };
   }
 

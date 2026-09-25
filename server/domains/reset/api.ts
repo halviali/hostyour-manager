@@ -8,7 +8,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { GitHubPlatform } from "../../adapters/github-platform/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ResetResult, ResetBranchOutcome, ResetPointerOutcome } from "../../../shared/api-types.ts";
-import { AppError, errValidation, errNotConfigured, errIllegalTransition, errUpstream } from "../../kernel/errors.ts";
+import { AppError, errValidation, errNotConfigured, errIllegalTransition, errUpstream, errNotAMember, errResourceBusy, errInternal } from "../../kernel/errors.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
 import { wipeManagerDb, rehearseManagerDbWipe, countLiveRuns, backupManagerDb } from "../../db/reset.ts";
 import { booksBranch } from "../inventory/read.ts";
@@ -100,7 +100,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     // the refusal is on `via` — the authority — and not on which door the caller arrived through,
     // which is why the audit row records the door and this line does not read it.
     if (operator.via === "emergency") {
-      refuse(new AppError("NOT_A_MEMBER", "break-glass sessions cannot reset — sign in via OIDC"));
+      refuse(errNotAMember("break-glass sessions cannot reset — sign in via OIDC"));
     }
     const parsed = ResetInput.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) refuse(errValidation(parsed.error.issues.map((i) => `${i.path.join(".") || "(body)"}: ${i.message}`).join("; ")));
@@ -138,7 +138,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       }
     }
 
-    if (resetInFlight) refuse(new AppError("RESOURCE_BUSY", "another reset is already running"));
+    if (resetInFlight) refuse(errResourceBusy("another reset is already running"));
     resetInFlight = true;
     try {
       const outcomes: ResetBranchOutcome[] = [];
@@ -179,7 +179,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
           rehearseManagerDbWipe(deps.sqlite);
           wipeRehearsed = true;
         } catch (err) {
-          refuse(new AppError("INTERNAL", `the database wipe would fail (${msg(err)}) — refused before anything was deleted; no branch and no cluster map was touched`));
+          refuse(errInternal(`the database wipe would fail (${msg(err)}) — refused before anything was deleted; no branch and no cluster map was touched`));
         }
       }
 

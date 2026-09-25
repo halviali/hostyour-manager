@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pino } from "pino";
 import { z } from "zod";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { AppError, errGateIncomplete } from "../kernel/errors.ts";
+import { errGateIncomplete, errInternal } from "../kernel/errors.ts";
 import { CredentialStore } from "../security/store.ts";
 import { RunEventBus } from "./bus.ts";
 import { Executor } from "./executor.ts";
@@ -63,7 +63,7 @@ function blockingPlannerDef(gate: Gate, outcome: () => PlanStreamResult<Record<s
     paramsSchema: z.record(z.string(), z.unknown()),
     mutating: false,
     plan: async () => {
-      throw new AppError("INTERNAL", "this def is planned via planStream, not plan()");
+      throw errInternal("this def is planned via planStream, not plan()");
     },
     planStream: async () => {
       gate.open();
@@ -181,10 +181,10 @@ function unreachedPlannerDef(): AnyRunDefinition {
     paramsSchema: z.record(z.string(), z.unknown()),
     mutating: false,
     plan: async () => {
-      throw new AppError("INTERNAL", "this def is planned via planStream, not plan()");
+      throw errInternal("this def is planned via planStream, not plan()");
     },
     planStream: async () => {
-      throw new AppError("INTERNAL", "the planner ran although the prologue had already failed");
+      throw errInternal("the planner ran although the prologue had already failed");
     },
     steps: () => [{ name: "do-it", title: "Do it", run: async () => undefined }],
   };
@@ -256,7 +256,7 @@ function throwingPlannerDef(message: string): AnyRunDefinition {
     paramsSchema: z.record(z.string(), z.unknown()),
     mutating: false,
     plan: async () => {
-      throw new AppError("INTERNAL", "this def is planned via planStream, not plan()");
+      throw errInternal("this def is planned via planStream, not plan()");
     },
     planStream: async () => {
       throw errGateIncomplete(message);

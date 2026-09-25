@@ -8,7 +8,7 @@ import { writeAudit } from "../db/audit-writer.ts";
 import { credId } from "../kernel/ids.ts";
 import { now } from "../kernel/clock.ts";
 import { currentActor } from "../kernel/actor.ts";
-import { AppError, errNotFound, errNotConfigured } from "../kernel/errors.ts";
+import { errNotFound, errNotConfigured, errInternal } from "../kernel/errors.ts";
 import type { CredentialKind, CredentialPurpose, CredentialSubjectKind } from "../../shared/enums.ts";
 import type { VaultKv } from "../adapters/vault/port.ts";
 import type { GitHubApp } from "../adapters/github-app/port.ts";
@@ -164,7 +164,7 @@ export class CredentialStore {
   constructor(deps: { db: Db; logger: Logger; dataKey?: Buffer; vault?: VaultKv; githubApp?: Pick<GitHubApp, "installationToken"> }) {
     this.db = deps.db;
     this.logger = deps.logger;
-    if (deps.dataKey && deps.dataKey.length !== 32) throw new AppError("INTERNAL", "credential-store data key must be 32 bytes");
+    if (deps.dataKey && deps.dataKey.length !== 32) throw errInternal("credential-store data key must be 32 bytes");
     this.dataKey = deps.dataKey;
     this.vault = deps.vault;
     this.githubApp = deps.githubApp;
@@ -189,7 +189,7 @@ export class CredentialStore {
   }
 
   private encrypt(plain: Buffer): string {
-    if (!this.dataKey) throw new AppError("INTERNAL", "encrypt called without a data key");
+    if (!this.dataKey) throw errInternal("encrypt called without a data key");
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", this.dataKey, iv);
     const ct = Buffer.concat([cipher.update(plain), cipher.final()]);
@@ -197,7 +197,7 @@ export class CredentialStore {
   }
 
   private decrypt(blob: string): Buffer {
-    if (!this.dataKey) throw new AppError("INTERNAL", "credential is keyfile-encrypted but no data key is loaded");
+    if (!this.dataKey) throw errInternal("credential is keyfile-encrypted but no data key is loaded");
     const raw = Buffer.from(blob.slice(V1_PREFIX.length), "base64");
     const iv = raw.subarray(0, 12);
     const tag = raw.subarray(12, 28);
@@ -267,22 +267,22 @@ export class CredentialStore {
   async open(id: string, use: UseContext): Promise<Buffer> {
     const row = this.db.select().from(credentials).where(eq(credentials.id, id)).get();
     if (!row) throw errNotFound(`credential ${id} not found`);
-    if (row.revokedAt !== null) throw new AppError("NOT_FOUND", `credential ${id} is revoked`);
+    if (row.revokedAt !== null) throw errNotFound(`credential ${id} is revoked`);
     let plain: Buffer;
     if (row.kind === "github-app") {
       if (!this.githubApp) throw errNotConfigured(`credential ${id} is the platform's GitHub App, and this Manager holds no GitHub App identity: set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY and restart it`);
       plain = Buffer.from(await this.githubApp.installationToken(), "utf8");
     } else if (row.encryptedBlob.startsWith(VAULT_REF_PREFIX)) {
-      if (!this.vault) throw new AppError("INTERNAL", `credential ${id} lives in Vault but no Vault backend is configured`);
+      if (!this.vault) throw errInternal(`credential ${id} lives in Vault but no Vault backend is configured`);
       const value = await this.vault.get(row.encryptedBlob.slice(VAULT_REF_PREFIX.length));
-      if (value === undefined) throw new AppError("NOT_FOUND", `credential ${id} value missing from Vault`);
+      if (value === undefined) throw errNotFound(`credential ${id} value missing from Vault`);
       plain = Buffer.from(value, "base64");
     } else if (row.encryptedBlob.startsWith(V1_PREFIX)) {
       plain = this.decrypt(row.encryptedBlob);
     } else if (row.encryptedBlob.startsWith(PLAINTEXT_PREFIX)) {
       plain = Buffer.from(row.encryptedBlob.slice(PLAINTEXT_PREFIX.length), "base64");
     } else {
-      throw new AppError("INTERNAL", `credential ${id} has an unrecognized blob format`);
+      throw errInternal(`credential ${id} has an unrecognized blob format`);
     }
     this.db.update(credentials).set({ lastUsedAt: new Date(now()) }).where(eq(credentials.id, id)).run();
     writeAudit(this.db, {

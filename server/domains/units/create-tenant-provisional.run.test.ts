@@ -16,7 +16,7 @@ import { FakeActivator } from "../../adapters/activation/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { resolveRunTenantState } from "./tenant-orphans.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errInternal } from "../../kernel/errors.ts";
 import type { Step, StepCtx, Cleanup } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -438,7 +438,7 @@ describe("the guid mint probes with the TOLERANT scan", () => {
     // "absent" — the one answer that means the guid is FREE — still comes from the real scan.
     seedClusters();
     const registrations = new TenantRegistrations(new FakePlatformRepo());
-    registrations.readTenant = () => Promise.reject(new AppError("INTERNAL", `tenant file tenants/prod/${GUID}/reset.yaml failed its schema: nonce Invalid input`));
+    registrations.readTenant = () => Promise.reject(errInternal(`tenant file tenants/prod/${GUID}/reset.yaml failed its schema: nonce Invalid input`));
     const result = await makeCreateTenantDef(withAppsTemplate(ports({ registrations }))).planStream!(
       { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, trio: { jobs: false } },
       { db: db.db, log: () => undefined, signal: new AbortController().signal },

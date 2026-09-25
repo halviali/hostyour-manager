@@ -32,7 +32,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 // declared here and mirrored there — see that file's tenants section for what a mirror costs.
 import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { serializePointer, makeRegistrationGuard, trailer, schemaWhy, migrateRegistrationFiles, type RegistrationMigration } from "./registration-laws.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
@@ -117,10 +117,10 @@ export class TenantRegistrations {
     try {
       parsed = parseYaml(raw);
     } catch (e) {
-      throw new AppError("INTERNAL", `tenant registration ${path} is not valid YAML: ${yamlWhy(e)}`);
+      throw errInternal(`tenant registration ${path} is not valid YAML: ${yamlWhy(e)}`);
     }
     const r = TenantRegistrationSchema.safeParse(parsed);
-    if (!r.success) throw new AppError("INTERNAL", `tenant registration ${path} failed its schema: ${schemaWhy(r.error)}`);
+    if (!r.success) throw errInternal(`tenant registration ${path} failed its schema: ${schemaWhy(r.error)}`);
     return { entry: r.data };
   }
 
@@ -237,17 +237,17 @@ export class TenantRegistrations {
    *  raised here so the operator sees it before a commit is attempted). add-app / remove-app. */
   async updateTenantApps(stage: Stage, guid: string, input: { op: "append" | "drop"; app: string; member?: TenantMemberRecord; seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean>; runId: string }): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
-    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const { op, app, member, seedReference = false, seedDemo = false, selections = {}, runId } = input;
     const has = current.entry.apps.some((a) => a.name === app);
-    if (op === "append" && has) throw new AppError("VALIDATION", `app "${app}" already exists in tenant "${guid}"`);
+    if (op === "append" && has) throw errValidation(`app "${app}" already exists in tenant "${guid}"`);
     // Held against THIS tenant's own members, not against a constant: both are named
     // <guid>-<name>-<stage>, so the app would claim the member's namespace, AppProject and Application.
     if (op === "append" && current.entry.members.some((m) => m.name === app)) {
-      throw new AppError("VALIDATION", `app name "${app}" is also a member of tenant "${guid}" — both are named <guid>-${app}-${stage}, so the app would claim the member's namespace and Application`);
+      throw errValidation(`app name "${app}" is also a member of tenant "${guid}" — both are named <guid>-${app}-${stage}, so the app would claim the member's namespace and Application`);
     }
-    if (op === "drop" && !has) throw new AppError("VALIDATION", `app "${app}" is not in tenant "${guid}"`);
-    if (op === "append" && !member) throw new AppError("VALIDATION", `add-app for "${app}" carries no member record — the ApplicationSet fans out over members[], so the app would be recorded as owned and never deployed`);
+    if (op === "drop" && !has) throw errValidation(`app "${app}" is not in tenant "${guid}"`);
+    if (op === "append" && !member) throw errValidation(`add-app for "${app}" carries no member record — the ApplicationSet fans out over members[], so the app would be recorded as owned and never deployed`);
     // A later-added app carries its selections too into the registration's apps[] entry, and its
     // MEMBER into members[] — the two lists move together, which the schema then holds them to.
     const apps = op === "append" ? [...current.entry.apps, { name: app, seedReference, seedDemo, selections }] : current.entry.apps.filter((a) => a.name !== app);
@@ -264,7 +264,7 @@ export class TenantRegistrations {
    *  included. tenant-suspend / tenant-resume. */
   async setTenantSuspended(stage: Stage, guid: string, suspended: boolean, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
-    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const runKind = suspended ? "tenant-suspend" : "tenant-resume";
     return this.write(stage, guid, { ...current.entry, suspended }, `${runKind}(${guid}) ${trailer(runId)}`);
   }
@@ -276,7 +276,7 @@ export class TenantRegistrations {
    *  databases reachable for the dump. */
   async setTenantQuiesced(stage: Stage, guid: string, quiesced: boolean, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
-    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const runKind = quiesced ? "quiesce" : "unquiesce";
     return this.write(stage, guid, { ...current.entry, quiesced }, `${runKind}(${guid}) ${trailer(runId)}`);
   }
@@ -289,7 +289,7 @@ export class TenantRegistrations {
    *  re-apply whose numbers did not move leaves no history. tenant-set-size. */
   async setQuota(stage: Stage, guid: string, quota: UnitQuota, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
-    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, quota }, `size(${guid}) ${trailer(runId)}`);
   }
 
@@ -299,7 +299,7 @@ export class TenantRegistrations {
    *  commits nothing. tenant-apps-repo. */
   async setTenantAppsRepo(stage: Stage, guid: string, apps: { appsRepo: string; appsImage: string; appsImageTag: string }, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
-    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, ...apps }, `tenant-apps-repo(${guid}): ${apps.appsImage} ${trailer(runId)}`);
   }
 
@@ -307,7 +307,7 @@ export class TenantRegistrations {
    *  again, the three bundle fields gone together the way the schema demands them together. */
   async clearTenantAppsRepo(stage: Stage, guid: string, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
-    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const { appsRepo: _gone, ...rest } = current.entry;
     return this.write(stage, guid, { ...rest, appsImage: "", appsImageTag: "" }, `tenant-apps-repo(${guid}): removed ${trailer(runId)}`);
   }
@@ -317,7 +317,7 @@ export class TenantRegistrations {
    *  starts. The file keeps its path, so a tenant moves within its stage, never across one. */
   async setTenantCluster(stage: Stage, guid: string, cluster: string, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
-    if (!current) throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, cluster }, `tenant-migrate(${guid}): ${current.entry.cluster} -> ${cluster} ${trailer(runId)}`);
   }
 
@@ -332,7 +332,7 @@ export class TenantRegistrations {
    *  of the tenant. */
   async removeTenant(stage: Stage, guid: string, runId: string): Promise<{ commit: string }> {
     if ((await this.scanTenant(stage, guid)).status === "absent") {
-      throw new AppError("VALIDATION", `tenant "${guid}" is not onboarded`);
+      throw errValidation(`tenant "${guid}" is not onboarded`);
     }
     return this.repo.withBranch(this.branch, (books) =>
       books.commit({

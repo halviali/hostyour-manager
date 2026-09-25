@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { runs, steps } from "../db/schema/runs.ts";
 import { writeAudit } from "../db/audit-writer.ts";
 import { runId as genRunId, stepId as genStepId } from "../kernel/ids.ts";
-import { AppError, errValidation } from "../kernel/errors.ts";
+import { errValidation, errInternal } from "../kernel/errors.ts";
 import { redact } from "../security/redact.ts";
 import type { RunKind } from "../../shared/enums.ts";
 import { RunSecretsMap } from "./secrets.ts";
@@ -136,7 +136,7 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
     const params = def.paramsSchema.parse(result.params);
     const impls = def.steps(params);
     if (impls.map((s) => s.name).join(",") !== result.plan.steps.map((s) => s.name).join(",")) {
-      throw new AppError("INTERNAL", `planner/steps name mismatch for ${def.kind}`);
+      throw errInternal(`planner/steps name mismatch for ${def.kind}`);
     }
     // THE PROBES, after the validation and before the plan is frozen: every step measures what it
     // will meet, each finding is a gate line of this stream, and a hard failure throws here — the

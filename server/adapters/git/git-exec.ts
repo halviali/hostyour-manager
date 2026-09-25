@@ -10,7 +10,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { AppError, errValidation } from "../../kernel/errors.ts";
+import { errValidation, errUpstream } from "../../kernel/errors.ts";
 
 const execFileP = promisify(execFile);
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024;
@@ -58,14 +58,14 @@ function fail(args: readonly string[], e: unknown, budgetMs: number): never {
   // A killed child said nothing on stderr, so without this the message would be the empty one a
   // remote that never answered produces — the hardest failure to read of the two.
   if (err.killed === true) {
-    throw new AppError("UPSTREAM", `git ${args[0] ?? ""} exceeded the ${budgetMs}ms budget`, {
+    throw errUpstream(`git ${args[0] ?? ""} exceeded the ${budgetMs}ms budget`, {
       detail: { code: "TIMEOUT" },
       cause: e,
     });
   }
   const stderr = typeof err.stderr === "string" ? err.stderr : Buffer.isBuffer(err.stderr) ? err.stderr.toString("utf8") : "";
   const reason = stderr.trim() || err.message || "unknown error";
-  throw new AppError("UPSTREAM", `git ${args[0] ?? ""} failed: ${reason}`, { detail: { code: String(err.code ?? "") }, cause: e });
+  throw errUpstream(`git ${args[0] ?? ""} failed: ${reason}`, { detail: { code: String(err.code ?? "") }, cause: e });
 }
 
 export async function runGit(args: string[], opts: RunGitOptions): Promise<string> {

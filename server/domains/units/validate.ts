@@ -24,7 +24,7 @@ import { clusterMapPath, type ClusterValueFile } from "../../../shared/cluster-v
 import type { Stage } from "../../../shared/enums.ts";
 import { consumerHostLabel, type SmtpEntry } from "../../../shared/consumer.ts";
 import { gateMailSender } from "./gates/mail-sender.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errInternal, errUpstream } from "../../kernel/errors.ts";
 import { parse as parseYaml } from "yaml";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateFqdnGrant, gateManifestInput, gateUnitHost, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, type ForeignBuild, type ForeignFqdn } from "./gates/compose.ts";
 import { consumerUnitHost, type StandingHostReader } from "./unit-dns.ts";
@@ -184,11 +184,11 @@ async function pollToDone(deps: ValidateDeps, jobId: string): Promise<GateReport
       }
     }
     if (progress.phase === "done") {
-      if (!progress.report) throw new AppError("INTERNAL", "gate-runner reported done without a report");
+      if (!progress.report) throw errInternal("gate-runner reported done without a report");
       return progress.report;
     }
     if (Date.now() >= deadline) {
-      throw new AppError("UPSTREAM", `the gate-run did not settle within ${budgetMs}ms — the Tekton controller may be down or the PipelineRun stuck unscheduled; the validation stops here instead of polling forever`);
+      throw errUpstream(`the gate-run did not settle within ${budgetMs}ms — the Tekton controller may be down or the PipelineRun stuck unscheduled; the validation stops here instead of polling forever`);
     }
     await sleep(deps.pollIntervalMs ?? 1500, deps.signal);
   }

@@ -71,7 +71,7 @@ import { z } from "zod";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
-import { AppError, errValidation } from "../../kernel/errors.ts";
+import { errValidation, errInternal } from "../../kernel/errors.ts";
 import { SERVER_ROLE, STAGE, type ServerRole, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_TAG_RE } from "../../../shared/release.ts";
 import { CLUSTER_MAP_DIR, clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -516,7 +516,7 @@ function serializeMarking(m: ClusterMarking): string {
   const reparsed = foldMarking(clusterMapPath(m.fqdn), parseYaml(yaml), yaml);
   const differing = markingDifferences(reparsed, m);
   if (differing.length > 0) {
-    throw new AppError("INTERNAL", `cluster map serialize round-trip diverged for ${m.fqdn} on ${differing.join("; ")}`);
+    throw errInternal(`cluster map serialize round-trip diverged for ${m.fqdn} on ${differing.join("; ")}`);
   }
   return yaml;
 }

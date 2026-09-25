@@ -12,7 +12,7 @@
 // breaks the promise the chain exists to keep.
 //
 // Boundary: domain layer — shared/ and the git PlatformRepo port only, like channel-stages beside it.
-import { AppError } from "../../kernel/errors.ts";
+import { errUpstream } from "../../kernel/errors.ts";
 import { clusterValueChainPaths, type ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
@@ -30,7 +30,7 @@ export async function readClusterValueChain(repo: PlatformRepo, domain: string, 
     for (const path of clusterValueChainPaths(domain, stage)) {
       const content = await cluster.readFile(path);
       if (content === null) {
-        throw new AppError("UPSTREAM", `${repo.booksBranch} carries no ${path} — the cluster values chain for ${domain} is incomplete`);
+        throw errUpstream(`${repo.booksBranch} carries no ${path} — the cluster values chain for ${domain} is incomplete`);
       }
       files.push({ path, content });
     }

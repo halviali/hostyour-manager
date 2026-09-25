@@ -14,7 +14,7 @@ import { FakeGitHubConsumer } from "../../adapters/github-consumer/testing/fake.
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
-import { AppError } from "../../kernel/errors.ts";
+import { errUpstream } from "../../kernel/errors.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -331,7 +331,7 @@ describe("purge run definition", () => {
   it("remove-release-kit is FAIL-SOFT: a push refusal never blocks the purge", async () => {
     seedApp();
     const consumerRepo = new FakeRepoWriter();
-    consumerRepo.failCommit(new AppError("UPSTREAM", "git push failed: 403"));
+    consumerRepo.failCommit(errUpstream("git push failed: 403"));
     const step = makePurgeDef(ports(new Registrations(new FakePlatformRepo()), { consumerRepo })).steps(PARAMS).find((s) => s.name === "remove-release-kit")!;
     const logs: string[] = [];
     await expect(step.run(ctx("remove-release-kit", logs))).resolves.toBeUndefined();
