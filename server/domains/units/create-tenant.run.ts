@@ -482,12 +482,11 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
       title: "Provision the tenant's public DNS record",
       probe: (ctx) => probeTenantDns(ports, p, ctx),
       run: async (ctx) => {
-        // ONE wildcard record per tenant STAGE: every member sits exactly one level below the tenant's
-        // zone `<subdomain>.<stage apex>` (`<member>.`; nothing lives on the bare zone), so
-        // `*.<subdomain>.<stage apex>` covers a stage's members — members added later included — and
-        // a move changes one record. The idempotent-by-subdomain replace needs no removal of its own:
-        // the replacing tenant carries the SAME subdomain on the SAME cluster (a replace across two
-        // clusters is refused at the plan, tenant-replace.ts), so this upsert re-points the record.
+        // ONE record per tenant STAGE, named by the tenant's routing (unit-dns.ts tenantRecordName): the
+        // wildcard of its zone for `host`, the zone itself for `path`. A replace with the SAME routing
+        // re-points that record with this upsert (the replacing tenant carries the same subdomain on the
+        // same cluster; a replace across clusters is refused at the plan, tenant-replace.ts). A replace
+        // that changes the routing leaves the old routing's record standing.
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
         await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantRecordName(p.routing, p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
       },

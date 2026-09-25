@@ -2,9 +2,11 @@
 // /api/tenants/:id/routing plans tenant-set-routing (tenant-routing.run.ts) with the routing the body
 // names, validated through the run's OWN params schema. Approve via the Runs API.
 import type { Hono } from "hono";
+import { eq } from "drizzle-orm";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { Db } from "../../db/client.ts";
 import { errValidation, errNotConfigured } from "../../kernel/errors.ts";
+import { tenants } from "../../db/schema/inventory.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
 import { TenantSetRoutingParams } from "./tenant-routing.run.ts";
 import type { Executor } from "../../executor/executor.ts";
@@ -24,7 +26,9 @@ export function registerTenantRoutingRoutes(app: Hono<AppEnv>, deps: TenantRouti
     const id = c.req.param("id");
     assertTenantProvisioned(loadTenantStatus(db, id), "moving its routing");
     const body = (await c.req.json().catch(() => ({}))) as { routing?: unknown };
-    const parsed = TenantSetRoutingParams.safeParse({ tenantId: id, routing: body.routing });
+    // The routing the tenant stands on now: what an abort of the move records again.
+    const previous = db.select({ routing: tenants.routing }).from(tenants).where(eq(tenants.id, id)).get()?.routing;
+    const parsed = TenantSetRoutingParams.safeParse({ tenantId: id, routing: body.routing, previous });
     if (!parsed.success) throw errValidation(`invalid tenant routing request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     return c.json(await executor.plan("tenant-set-routing", parsed.data), 201);
   });

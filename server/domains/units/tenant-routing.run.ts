@@ -19,11 +19,17 @@ import { sleep } from "./onboard-release-cycle.ts";
 // the record the old routing named gone — in that order, so no moment exists in which the tenant's
 // address has no record.
 //
-// THE WAIT IN THE MIDDLE. The recorded routing is the Manager's own fact; what serves the tenant at
-// the new address is its product's charts, which reach the cluster on their own schedule. So the run
-// waits until the tenant's IdP answers at the address the new routing gives it (the relocation probe:
-// anything below 500 but a 404, which is what the edge answers for a host nothing routes), and only
-// then takes the old record away: removed earlier, it would leave the tenant with neither.
+// THE WAIT BEFORE THE REMOVAL. The recorded routing is the Manager's own fact; what serves the tenant
+// at the new address is its product's charts, which reach the cluster on their own schedule. So the
+// run waits until the tenant's IdP answers at the address the new routing gives it (the relocation
+// probe: anything below 500 but a 404, which is what the edge answers for a host nothing routes), and
+// only then takes the old record away: removed earlier, it would leave the tenant with neither. The
+// wait and the removal are ONE step, so skipping a failed wait removes nothing.
+//
+// AN ABORT PUTS THE TENANT BACK where the plan found it: the routing it stood on (`previous`, frozen
+// into the params when the move was asked for) and no record of the requested routing. It is refused
+// once the record of the previous routing is gone: the tenant then stands on the new record alone, and
+// taking that away would leave it with none.
 //
 // ASKING FOR THE ROUTING A TENANT HAS is the re-apply, not a no-op: the record is provisioned again
 // (a no-op where it stands), the write commits nothing, the wait confirms the address answers, and a
@@ -32,6 +38,9 @@ import { sleep } from "./onboard-release-cycle.ts";
 export const TenantSetRoutingParams = z.object({
   tenantId: z.string().startsWith("tnt_"),
   routing: z.enum(MEMBER_ROUTING),
+  /** The routing the tenant stood on when the move was asked for. The plan refuses a tenant that has
+   *  moved since, and an abort records it again. */
+  previous: z.enum(MEMBER_ROUTING),
 });
 export type TenantSetRoutingParams = z.infer<typeof TenantSetRoutingParams>;
 
@@ -48,14 +57,14 @@ function otherRoutings(routing: MemberRouting): MemberRouting[] {
   return MEMBER_ROUTING.filter((r) => r !== routing);
 }
 
-/** On abort: put the previous routing back on the registration and the row. */
+/** On abort: put the previous routing back on the registration and the row. Both writes are no-ops
+ *  where they already hold it, so a crash between the two is repaired as well. */
 function restoreRoutingCleanup(ports: TenantSetRoutingPorts, tenantId: string, previous: MemberRouting): Cleanup {
   return {
     name: "restore-routing",
     title: `Record the previous routing (${previous}) again`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, tenantId);
-      if (tc.routing === previous) return;
       const { commit } = await ports.registrations.setRouting(tc.stage, tc.guid, previous, ctx.runId);
       ctx.db.update(tenants).set({ routing: previous, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
       ctx.log("meta", `tenant ${tc.guid} routing back to ${previous} (${commit})`);
@@ -100,20 +109,16 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
       title: "Record the new routing on the tenant's registration and row",
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
-        // The routing the tenant stood on BEFORE this run — kept across a resume, when the row already
-        // says the new one.
-        const previous = ctx.readCheckpoint<{ previous: MemberRouting }>()?.previous ?? tc.routing;
-        ctx.checkpoint({ previous });
-        ctx.registerCleanup(restoreRoutingCleanup(ports, p.tenantId, previous));
+        ctx.registerCleanup(restoreRoutingCleanup(ports, p.tenantId, p.previous));
         const { commit } = await ports.registrations.setRouting(tc.stage, tc.guid, p.routing, ctx.runId);
         ctx.db.update(tenants).set({ routing: p.routing, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
-        ctx.checkpoint({ previous, commit });
-        ctx.log("meta", `tenant ${tc.guid} routing ${previous} → ${p.routing} (${commit}) — its charts serve the new addresses once the ArgoCD on ${tc.domain} syncs a product that routes by ${p.routing}`);
+        ctx.checkpoint({ commit });
+        ctx.log("meta", `tenant ${tc.guid} routing ${p.previous} → ${p.routing} (${commit}) — its charts serve the new addresses once the ArgoCD on ${tc.domain} syncs a product that routes by ${p.routing}`);
       },
     },
     {
-      name: "await-member-address",
-      title: "Wait until the tenant's identity provider answers at its new address",
+      name: "retire-previous-record",
+      title: "Wait until the tenant's identity provider answers at its new address, then remove the other routing's record",
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
@@ -123,27 +128,19 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
           const seen = await ports.probe.probe(url, { signal: ctx.signal });
           if (seen.reachable) {
             ctx.log("meta", `${url} answers (${seen.detail}) — the tenant is served at the ${p.routing} routing`);
-            return;
+            break;
           }
           if (ctx.signal.aborted) throw errValidation(`the wait for ${url} was cancelled`);
           if (Date.now() >= deadline) {
             throw errValidation(
               `${url} did not answer within ${Math.round(ports.routingWaitMs / 60_000)} minutes (last: ${seen.detail}) — ` +
-              `the product's charts do not serve the ${p.routing} routing on ${tc.domain} yet. The old record still stands, so nothing is lost: ` +
-              `retry the run once the charts are synced, or abort it to record the previous routing again.`,
+              `the product's charts do not serve the ${p.routing} routing on ${tc.domain} yet. The record of the previous routing still stands: ` +
+              `retry this step once the charts are synced, or abort the run to record the previous routing again.`,
             );
           }
           ctx.log("meta", `${url} does not answer yet (${seen.detail}); asking again in ${Math.round(ports.routingPollMs / 1000)}s`);
           await sleep(ports.routingPollMs, ctx.signal);
         }
-      },
-    },
-    {
-      name: "remove-previous-record",
-      title: "Remove the DNS record the other routing names",
-      run: async (ctx) => {
-        const tc = loadTenantCluster(ctx.db, p.tenantId);
-        const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
         // Every other routing's record, whatever the tenant stood on before: a record of a routing the
         // tenant does not use is a leftover, and removing an absent record is a no-op.
         for (const other of otherRoutings(p.routing)) {
@@ -163,6 +160,8 @@ export function makeTenantSetRoutingDef(ports: TenantSetRoutingPorts): RunDefini
       const tc = loadTenantCluster(db, params.tenantId);
       const row = db.select({ suspended: tenants.suspended, status: tenants.status }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before moving its routing`);
+      if (row?.status === "offboarded" || row?.status === "purged") throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing serves it, so there is no routing to move`);
+      if (tc.routing !== params.previous) throw errValidation(`tenant ${tc.subdomain} stands on the ${tc.routing} routing, not on ${params.previous} as this request says — it moved since; ask again`);
       // A suspended tenant renders no ingress, so the wait could never be answered.
       if (row?.suspended) throw errValidation(`tenant ${tc.subdomain} is suspended — its ingress is down, so its new address could never answer; resume it before moving its routing`);
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
@@ -186,5 +185,18 @@ export function makeTenantSetRoutingDef(ports: TenantSetRoutingPorts): RunDefini
       };
     },
     steps: (params) => tenantSetRoutingSteps(ports, params),
+    cleanups: (params) => [removeUnneededRecordCleanup(ports, params), restoreRoutingCleanup(ports, params.tenantId, params.previous)],
+    // Refused once the previous routing's record is gone: the tenant then stands on the requested
+    // record alone, and the abort would remove it. A re-apply has nothing to guard.
+    assertAbortable: async (params, { db }) => {
+      if (params.previous === params.routing) return;
+      const tc = loadTenantCluster(db, params.tenantId);
+      const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
+      const record = tenantRecordName(params.previous, tc.subdomain, tc.stage, apex);
+      if (!ports.dns) throw errValidation(`no DNS provider is configured, so it cannot be read whether ${record} still stands — the abort is refused rather than risk removing the tenant's last record`);
+      if ((await ports.dns.readRecordContent({ name: record, type: "CNAME" })) === null) {
+        throw errValidation(`${record}, the record of the ${params.previous} routing, is gone — the tenant stands on the ${params.routing} record alone, and an abort would remove it. Retry the run instead.`);
+      }
+    },
   };
 }

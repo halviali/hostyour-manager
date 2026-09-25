@@ -6,7 +6,7 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import { provisionUnitDns, removeUnitDns } from "./unit-dns.ts";
+import { isTenantRecord, provisionUnitDns, removeUnitDns } from "./unit-dns.ts";
 
 // The unit's ONE record and the book of DNS writes beside it: provisionUnitDns writes a CNAME onto the
 // target cluster's name and enters what it changed — inserted where nothing stood, updated where
@@ -111,6 +111,17 @@ describe("provisionUnitDns and the book", () => {
     dns.failWith = new Error("Cloudflare DNS refused");
     await expect(provisionUnitDns(ctx([]), consumer(dns))).rejects.toThrow(/Cloudflare DNS refused/);
     expect(listDnsWrites(db.db)).toEqual([]);
+  });
+});
+
+describe("isTenantRecord — what a tenant's purge may remove", () => {
+  it("a wildcard is always the tenant's; a plain name only where the book names the tenant as its owner", () => {
+    expect(isTenantRecord(db.db, "*.acme.example.com", "zsjs023ctne0")).toBe(true);
+    expect(isTenantRecord(db.db, "acme.example.com", "zsjs023ctne0")).toBe(false);
+    recordDnsWrite(db.db, { name: "acme.example.com", type: "CNAME", content: CLUSTER, act: "inserted", owner: { kind: "consumer", name: "acme", stage: "prod" }, runId: "run_c" });
+    expect(isTenantRecord(db.db, "acme.example.com", "zsjs023ctne0")).toBe(false);
+    recordDnsWrite(db.db, { name: "acme.example.com", type: "CNAME", content: CLUSTER, act: "updated", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_t" });
+    expect(isTenantRecord(db.db, "acme.example.com", "zsjs023ctne0")).toBe(true);
   });
 });
 

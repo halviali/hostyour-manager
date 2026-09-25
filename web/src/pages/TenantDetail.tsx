@@ -469,7 +469,7 @@ export function TenantDetail() {
             <p>
               This <strong>plans</strong> a move and opens it — you approve on the next screen. The WHOLE bracket moves under the
               unchanged guid <span className="mono">{relocT.t.guid}</span>: access closes while every store is dumped to the Storage
-              Box, the fan-out deploys closed on the target, the data is replayed and verified, <strong>the one wildcard record is
+              Box, the fan-out deploys closed on the target, the data is replayed and verified, <strong>the tenant's one DNS record is
               updated</strong> (addresses, sessions and the identity provider survive), access reopens, and the source is cleared{" "}
               <strong>last</strong>.
             </p>
@@ -478,7 +478,7 @@ export function TenantDetail() {
               This <strong>plans</strong> a restore and opens it — you approve on the next screen. The run rebuilds tenant{" "}
               <span className="mono">{relocT.t.guid}</span> from its Storage Box folder: every member is provisioned from the dumped
               registration, the fan-out deploys closed, every <span className="mono">{relocT.t.guid}_*</span> database and the bucket
-              are replayed and verified (the crypto material stays in Vault, byte-identical), the wildcard record is set, and access
+              are replayed and verified (the crypto material stays in Vault, byte-identical), the tenant's DNS record is set, and access
               opens last.
             </p>
           )}

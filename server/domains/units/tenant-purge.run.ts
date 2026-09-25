@@ -14,7 +14,7 @@ import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { removeUnitDns, tenantRecordName } from "./unit-dns.ts";
+import { isTenantRecord, removeUnitDns, tenantRecordName } from "./unit-dns.ts";
 import { tenantKeyName } from "./tenant-storage.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
@@ -384,11 +384,16 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         }
         const c = loadPurgeCluster(ctx.db, p);
         const unitApex = await ports.resolveUnitApex(c.domain, c.stage);
-        // The record under EVERY routing: a purge removes what may stand, and an orphan's routing is
-        // known to no row. Removing an absent record is a no-op (removeUnitDns), so the name the
-        // tenant never used costs one read and leaves nothing behind.
+        // The record under EVERY routing, because an orphan's routing is known to no row, but only a
+        // record that is the tenant's own (isTenantRecord): the zone name may be another unit's host.
+        // Removing an absent record is a no-op (removeUnitDns).
         for (const routing of MEMBER_ROUTING) {
-          await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName: tenantRecordName(routing, p.target.subdomain, c.stage, unitApex) });
+          const recordName = tenantRecordName(routing, p.target.subdomain, c.stage, unitApex);
+          if (!isTenantRecord(ctx.db, recordName, p.guid)) {
+            ctx.log("meta", `${recordName} is not recorded as tenant ${p.guid}'s own — left standing`);
+            continue;
+          }
+          await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName });
         }
       },
     },

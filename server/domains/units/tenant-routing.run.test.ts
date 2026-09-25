@@ -49,11 +49,6 @@ async function run(steps: Step[], params: Record<string, unknown>, h: Harness): 
   for (const step of steps) await step.run(ctx(step.name, params, h));
 }
 
-/** An abort-with-cleanup: the registered cleanups, newest first. */
-async function abort(params: Record<string, unknown>, h: Harness): Promise<void> {
-  for (const c of [...h.cleanups].reverse()) await c.run(ctx(c.name, params, h));
-}
-
 const ATTESTING = { deployState: { domain: CLUSTER, stage: "prod" as const, writtenAt: "x", generation: 1 } };
 
 function ports(reg: TenantRegistrations, dns: FakeDnsProvider, probe: FakePublicProbe): TenantSetRoutingPorts {
@@ -100,7 +95,7 @@ describe("tenant-set-routing", () => {
     const dns = new FakeDnsProvider();
     dns.seed(WILDCARD, "CNAME", CLUSTER);
     const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, detail: "HTTP 200" } });
-    const params = { tenantId: "tnt_1", routing: "path" as const };
+    const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
     await run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, { cleanups: [], logs: [] });
 
     expect(dns.record(ZONE, "CNAME")).toBe(CLUSTER);
@@ -110,24 +105,18 @@ describe("tenant-set-routing", () => {
     expect(probe.probed).toEqual([PATH_IDP]);
   });
 
-  it("keeps the old record while the new address does not answer, and an abort takes the tenant back to where it stood", async () => {
+  it("keeps the old record while the new address does not answer", async () => {
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await seedTenant(reg, "host");
     const dns = new FakeDnsProvider();
     dns.seed(WILDCARD, "CNAME", CLUSTER);
     const probe = new FakePublicProbe(); // the edge answers 404: nothing routes the zone yet
-    const params = { tenantId: "tnt_1", routing: "path" as const };
-    const h: Harness = { cleanups: [], logs: [] };
-    await expect(run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, h)).rejects.toThrow(/did not answer/);
-    // The wait failed: the old record still stands beside the new one, so the tenant is reachable.
+    const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
+    await expect(run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, { cleanups: [], logs: [] })).rejects.toThrow(/did not answer/);
+    // The wait failed: the old record still stands beside the new one, so the tenant is reachable. The
+    // abort is proven through the Executor (tenant-routing.executor.test.ts).
     expect(dns.record(WILDCARD, "CNAME")).toBe(CLUSTER);
     expect(dns.record(ZONE, "CNAME")).toBe(CLUSTER);
-
-    await abort(params, h);
-    expect((await reg.readTenant("prod", GUID))?.entry.routing).toBe("host");
-    expect(rowRouting()).toBe("host");
-    expect(dns.record(ZONE, "CNAME")).toBeUndefined();
-    expect(dns.record(WILDCARD, "CNAME")).toBe(CLUSTER);
   });
 
   it("re-applies the routing a tenant has: its record stays, a record of the other routing left behind goes", async () => {
@@ -137,7 +126,7 @@ describe("tenant-set-routing", () => {
     dns.seed(ZONE, "CNAME", CLUSTER);
     dns.seed(WILDCARD, "CNAME", CLUSTER);
     const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, detail: "HTTP 200" } });
-    const params = { tenantId: "tnt_1", routing: "path" as const };
+    const params = { tenantId: "tnt_1", routing: "path" as const, previous: "path" as const };
     await run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, { cleanups: [], logs: [] });
 
     expect(dns.record(ZONE, "CNAME")).toBe(CLUSTER);
@@ -149,14 +138,14 @@ describe("tenant-set-routing", () => {
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await seedTenant(reg, "host", { suspended: true });
     const def = makeTenantSetRoutingDef(ports(reg, new FakeDnsProvider(), new FakePublicProbe()));
-    await expect(def.plan({ tenantId: "tnt_1", routing: "path" }, { db: db.db })).rejects.toThrow(/suspended/);
+    await expect(def.plan({ tenantId: "tnt_1", routing: "path", previous: "host" }, { db: db.db })).rejects.toThrow(/suspended/);
   });
 
   it("plans attest-target first and says which record goes and which comes", async () => {
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await seedTenant(reg, "host");
-    const plan = await makeTenantSetRoutingDef(ports(reg, new FakeDnsProvider(), new FakePublicProbe())).plan({ tenantId: "tnt_1", routing: "path" }, { db: db.db });
-    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "provision-record", "write-routing", "await-member-address", "remove-previous-record"]);
+    const plan = await makeTenantSetRoutingDef(ports(reg, new FakeDnsProvider(), new FakePublicProbe())).plan({ tenantId: "tnt_1", routing: "path", previous: "host" }, { db: db.db });
+    expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "provision-record", "write-routing", "retire-previous-record"]);
     expect(plan.summary).toContain(`provision the DNS record ${ZONE}`);
     expect(plan.summary).toContain(`remove ${WILDCARD}`);
   });

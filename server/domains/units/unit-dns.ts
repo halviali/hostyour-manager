@@ -4,9 +4,10 @@
 //
 //   consumer — CNAME `<label>.<stage apex>`. The chart renders exactly ONE host, and by DNS rule a
 //              wildcard does NOT cover a bare label, so the record is the host itself.
-//   tenant   — wildcard CNAME `*.<subdomain>.<stage apex>`, one PER STAGE. Every member sits exactly one
-//              level below (`<member>.<subdomain>.<stage apex>`, nothing lives on the bare zone), so
-//              one wildcard covers a stage's members — members added later included — and a move
+//   tenant   — one CNAME PER STAGE, named by the tenant's recorded routing (tenantRecordName). `host`:
+//              the wildcard `*.<subdomain>.<stage apex>`, every member one level below it. `path`:
+//              the zone `<subdomain>.<stage apex>` itself, every member under a path of it. Either way
+//              one record covers a stage's members, members added later included, and a move
 //              changes ONE record per stage.
 //
 // THE STAGE IS THE ZONE (`<stage>.<unitApex>`, and the apex itself for prod), and the apex is the
@@ -47,7 +48,7 @@ import type { StepCtx } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { eq } from "drizzle-orm";
 import { clusters } from "../../db/schema/inventory.ts";
-import { forgetDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
+import { findDnsWrite, forgetDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { DnsWriteOwnerKind, Stage } from "../../../shared/enums.ts";
@@ -193,6 +194,15 @@ export async function provisionUnitDns(
       owner: { kind: opts.kind, name: opts.unit, stage: opts.stage }, runId: ctx.runId,
     });
   }
+}
+
+/** Whether a record a tenant's purge may name is the tenant's own. A wildcard is: only a tenant ever
+ *  writes one. A plain name is a host another unit may hold, so it is the tenant's only where the book
+ *  of DNS writes names the tenant as its owner. */
+export function isTenantRecord(db: Db, recordName: string, guid: string): boolean {
+  if (recordName.startsWith("*.")) return true;
+  const booked = findDnsWrite(db, { name: recordName, type: "CNAME" });
+  return booked?.owner.kind === "tenant" && booked.owner.name === guid;
 }
 
 /** Remove the unit's ONE record (offboard + both purge run kinds). Fail-closed on the API, absent=ok:
