@@ -5,7 +5,7 @@ import { getClusters, getReleases } from "../api.ts";
 import { appsEmpty, appsUnavailable } from "../appReleases.ts";
 import { IconChevronRight } from "../components/icons.tsx";
 
-export function Clusters() {
+export function Dashboard() {
   const [clusters, setClusters] = useState<ClustersView | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The release surface loads BESIDE the clusters snapshot rather than inside it, so a repository
@@ -61,7 +61,7 @@ export function Clusters() {
     <section className="page">
       <header className="page__head">
         <div>
-          <h2 className="page__title">Clusters</h2>
+          <h2 className="page__title">Dashboard</h2>
           <p className="page__desc">Everything this manager manages, at a glance.</p>
         </div>
         <div className={`verdict verdict--${clusters.verdict}`}>

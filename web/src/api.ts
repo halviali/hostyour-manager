@@ -1,6 +1,6 @@
 import type { OwnersListView, OwnerCredentialInput } from "../../shared/api-types-owners.ts";
 import type { UnitCheck } from "../../shared/preflight.ts";
-import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, BranchesView, BranchDiffView, ResetRequest, ResetResult, // The tenant-purge targeting surface + the two reads that name one. Declared
+import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, PluginsView, BranchesView, BranchDiffView, ResetRequest, ResetResult, // The tenant-purge targeting surface + the two reads that name one. Declared
   // ONCE in shared/api-types.ts and returned by the server domain module itself (tenant-orphans.ts), so
   // the shapes this client resolves to are the shapes that module answers in — there is no browser-side
   // twin of them left to fall behind a server change, which is exactly how a `not-deployed` state the
@@ -74,6 +74,8 @@ const put = <T>(path: string, body: Record<string, unknown>): Promise<T> =>
 
 /** Public health probe — carries the running version (image tag) for the UI footer. */
 export const getHealth = (): Promise<HealthView> => req<HealthView>("/healthz");
+/** The plugins the server activated, by name (behind the chokepoint, unlike /healthz). */
+export const getPlugins = (): Promise<PluginsView> => req<PluginsView>("/api/plugins");
 
 export const getClusters = (): Promise<ClustersView> => req<ClustersView>("/api/clusters");
 /** Which version each of an installation's platform apps runs. Fed by the SAME pin search that

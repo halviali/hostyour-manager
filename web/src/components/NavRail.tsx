@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { NAV, isActivePath } from "../nav.ts";
-import { LogoMark, NavIcon, IconSignOut } from "./icons.tsx";
+import { isActivePath, type MenuItem } from "../nav.ts";
+import { LogoMark, MenuIcon, IconSignOut } from "./icons.tsx";
 import { getHealth } from "../api.ts";
 
-/** Desktop primary navigation — a side rail (768px and up). Same NAV source as the TabBar.
- *  On desktop the rail owns the brand and sign-out (the mobile topbar is hidden there). */
-export function NavRail() {
+/** Desktop primary navigation — a side rail (768px and up). The same menu as the TabBar (nav.ts
+ *  navFor). On desktop the rail owns the brand and sign-out (the mobile topbar is hidden there). */
+export function NavRail({ items }: { items: readonly MenuItem[] }) {
   const { pathname } = useLocation();
   // The running manager version (image tag), from the public /healthz probe. Shown so the
   // operator can see which version is live. Stays hidden only until the first probe resolves
@@ -26,14 +26,14 @@ export function NavRail() {
         <span>Manager</span>
       </div>
       <div className="navrail__items">
-        {NAV.map((item) => (
+        {items.map((item) => (
           <Link
             key={item.path}
             to={item.path}
             className={isActivePath(pathname, item.path) ? "navrail__item navrail__item--active" : "navrail__item"}
           >
             <span className="navrail__icon" aria-hidden="true">
-              <NavIcon name={item.icon} />
+              <MenuIcon item={item} />
             </span>
             <span>{item.label}</span>
           </Link>

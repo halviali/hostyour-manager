@@ -1,4 +1,5 @@
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
+import type { MenuItem } from "../nav.ts";
 
 /** Self-contained inline SVG icons (strict CSP: no icon fonts, no CDN). Stroke icons inherit
  *  currentColor so they follow the text tone of whatever primitive they sit in. */
@@ -18,6 +19,11 @@ export type NavIconName = "clusters" | "servers" | "branches" | "reset" | "consu
  *  sizes = a table of rows and columns — the three sizes and their figures,
  *  tenants = stacked layers — one pointer fanning out to a multi-app package, settings = a cog,
  *  dns = a globe with its meridians, the public name space every record of this installation stands in). */
+/** A menu entry's icon: the core's drawn by name, a plugin's as the plugin brought it. */
+export function MenuIcon({ item, size = 18 }: { item: MenuItem; size?: number }): ReactNode {
+  return "plugin" in item ? item.icon : <NavIcon name={item.icon} size={size} />;
+}
+
 export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number }): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" {...stroke} aria-hidden="true">

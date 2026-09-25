@@ -45,7 +45,7 @@ const LIFECYCLE: Record<ServerStatus, { stages: readonly StageState[]; state: st
   ready: { stages: ["done", "active", "todo"], state: "A deployment stopped before it finished — the machine stands where that run left it, and deploying again takes it on from there.", next: "deploy" },
   provisioning: { stages: ["done", "active", "todo"], state: "Deployment in progress — this server is becoming a slave.", next: null },
   healthy: { stages: ["done", "done", "done"], state: "Live slave — deployed and healthy.", next: "clusters" },
-  degraded: { stages: ["done", "done", "active"], state: "Live slave — currently degraded (see Clusters).", next: "clusters" },
+  degraded: { stages: ["done", "done", "active"], state: "Live slave — currently degraded (see Dashboard).", next: "clusters" },
   draining: { stages: ["done", "done", "active"], state: "Live slave — draining (being taken out of service).", next: null },
   undeployed: { stages: ["done", "active", "todo"], state: "Undeployed — deploy it again.", next: "deploy" },
 };
@@ -365,7 +365,7 @@ export function Servers() {
                             )}
                             {showClusters && (
                               <Link className="btn" to="/">
-                                View the live slave (Clusters)
+                                View the live slave (Dashboard)
                               </Link>
                             )}
                             {showRedeploy && (

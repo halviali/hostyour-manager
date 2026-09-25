@@ -1,7 +1,7 @@
-/* Screen compositions — Clusters, Runs/RunDetail (steps + live log), Servers, the onboarding wizards.
+/* Screen compositions — Dashboard, Runs/RunDetail (steps + live log), Servers, the onboarding wizards.
    These compose the primitives in ui.css; only page-level arrangement lives here. */
 
-/* ---- Clusters: verdict + stat tiles ---- */
+/* ---- Dashboard: verdict + stat tiles ---- */
 
 .verdict {
   --c: var(--neutral);
